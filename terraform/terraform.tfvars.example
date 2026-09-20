@@ -64,9 +64,11 @@
 # Anche il package GHCR lo e', e Container Apps non puo' scaricarlo in anonimo.
 # Hai due strade:
 #
-#   A) Package privato + credenziali (gratis, consigliata per repo privati).
-#      Crea un token su https://github.com/settings/tokens con il solo scope
-#      read:packages, poi:
+#   A) Package privato + credenziali (gratis).
+#      GHCR NON supporta i token fine-grained: serve un token CLASSIC.
+#      Apri https://github.com/settings/tokens/new?scopes=read:packages
+#      (pagina "Tokens (classic)": un elenco piatto di caselle, senza la
+#      sezione "Repository access") e spunta solo read:packages.
 # registry_server   = "ghcr.io"
 # registry_username = "ciroperf"
 # registry_password = "ghp_..."     # finisce in un secret della Container App
@@ -75,7 +77,8 @@
 #      Gratis e senza token, ma l'immagine contiene il codice sorgente Python:
 #      su un repository privato equivale a pubblicarlo. Sconsigliata.
 #
-#   C) Azure Container Registry, circa 4,60 EUR/mese.
-#      Privato, nessun token da gestire, e con "az acr build" l'immagine si
-#      costruisce in cloud senza Docker in locale.
+#   C) Azure Container Registry, circa 4,60 EUR/mese. LA PIU' SEMPLICE.
+#      Privato, nessun token da gestire, e scripts/deploy.ps1 se ne accorge da
+#      solo: usa "az acr build", che compila il sorgente dentro Azure. Niente
+#      Docker in locale, niente GitHub Actions, niente PAT.
 # create_container_registry = true

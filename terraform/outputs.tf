@@ -45,6 +45,14 @@ output "managed_identity_client_id" {
   value       = azurerm_user_assigned_identity.app.client_id
 }
 
+output "container_registry_name" {
+  description = <<-EOT
+    Nome dell'ACR, vuoto se non creato. Serve ad `az acr build`, che costruisce
+    l'immagine dentro Azure senza bisogno di Docker in locale.
+  EOT
+  value       = var.create_container_registry ? azurerm_container_registry.this[0].name : ""
+}
+
 output "container_registry_login_server" {
   description = "Registro da cui viene tirata l'immagine."
   value       = local.registry_server

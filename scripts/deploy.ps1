@@ -60,13 +60,12 @@ if (-not $account) { Fail "Non sei autenticato. Esegui: az login" }
 Ok "Sottoscrizione: $($account.name)"
 $env:ARM_SUBSCRIPTION_ID = $account.id
 
-# Senza Docker l'immagine la costruisce GitHub Actions: qui ci limitiamo a
-# portare in Azure quella gia' pubblicata su GHCR, con la sola az CLI.
 $hasDocker = [bool](Get-Command docker -ErrorAction SilentlyContinue)
-$useGitHubBuild = (-not $SkipApi) -and (-not $hasDocker)
-if ($useGitHubBuild) {
-    Ok "Docker assente: usero' l'immagine costruita da GitHub Actions"
-}
+# Tre modi di ottenere l'immagine, in ordine di preferenza quando manca Docker:
+#   acr    -> la costruisce Azure da sorgente, nessun token, package privato
+#   docker -> build locale
+#   github -> la costruisce Actions, poi si aggiorna la Container App
+$imageSource = "docker"
 
 if (-not $GitHubUser) {
     $remote = git -C $root remote get-url origin 2>$null
@@ -113,12 +112,47 @@ try {
     $entraTenantId = terraform output -raw entra_tenant_id
     $entraApiScope = terraform output -raw entra_api_scope
     $authMode      = terraform output -raw auth_mode
+    $acrName       = terraform output -raw container_registry_name
 } catch {
     Fail "Non riesco a leggere gli output di Terraform. Hai gia' fatto un apply?"
 } finally { Pop-Location }
 
 # ---------------------------------------------------------------------------
-if ($useGitHubBuild) {
+if (-not $SkipApi) {
+    if ($acrName) {
+        $imageSource = "acr"
+    } elseif (-not $hasDocker) {
+        $imageSource = "github"
+    }
+    Write-Host ""
+    switch ($imageSource) {
+        "acr"    { Ok "Immagine: la costruisce Azure Container Registry (nessun Docker richiesto)" }
+        "docker" { Ok "Immagine: build locale con Docker" }
+        "github" { Ok "Immagine: la costruisce GitHub Actions" }
+    }
+}
+
+if (-not $SkipApi -and $imageSource -eq "acr") {
+    Step "Immagine dell'API (costruita in Azure)"
+
+    $sha = (git -C $root rev-parse --short HEAD).Trim()
+    $repoImage = "interview-prep-copilot-api"
+    Write-Host "  Registro : $acrName"
+    Write-Host "  Immagine : ${repoImage}:$sha"
+    Write-Host "  Il sorgente viene caricato e compilato in Azure: puo' richiedere qualche minuto."
+
+    # az acr build carica il contesto e lo compila in cloud: niente Docker,
+    # niente token di registro, e l'immagine resta privata nell'ACR.
+    az acr build --registry $acrName --image "${repoImage}:$sha" --image "${repoImage}:latest" (Join-Path $root "backend") --output none
+    if ($LASTEXITCODE -ne 0) { Fail "az acr build fallito" }
+    Ok "Immagine costruita e pubblicata"
+
+    & (Join-Path $PSScriptRoot "update-api.ps1") -Image "$(terraform -chdir=$tf output -raw container_registry_login_server)/${repoImage}:$sha"
+    if ($LASTEXITCODE -ne 0) { Fail "Aggiornamento dell'API non riuscito" }
+    $SkipApi = $true
+}
+
+if (-not $SkipApi -and $imageSource -eq "github") {
     Step "Immagine dell'API (costruita da GitHub Actions)"
 
     if (-not $GitHubUser) { Fail "Non riesco a dedurre l'utente GitHub. Usa -GitHubUser <nome>." }

@@ -36,8 +36,15 @@ Lo script ha bisogno di:
 
 ## Senza Docker in locale
 
-Non serve installarlo. L'immagine la costruisce GitHub Actions e tu la porti in
-Azure con la sola Azure CLI:
+Non serve installarlo. Ci sono due modi, e lo script sceglie da solo:
+
+| | Costo | Token GitHub | Chi costruisce |
+|---|---|---|---|
+| **ACR** (`create_container_registry = true`) | ~4,60 EUR/mese | no | Azure, da sorgente |
+| **GitHub Actions** (default) | 0 | serve se il repo e' privato | Actions, poi tu aggiorni |
+
+Con l'ACR basta `.\scripts\deploy.ps1`: riconosce il registro e usa
+`az acr build`. Con GitHub Actions:
 
 ```powershell
 # 1. Infrastruttura
@@ -61,23 +68,54 @@ Il workflow "Deploy API" non ha bisogno di alcun segreto Azure: gli basta il
 vuoi che sia il workflow stesso ad aggiornare la Container App, saltando il
 passo 3.
 
-> **Il repository e' privato?** Allora lo e' anche il package su GHCR, e
-> Container Apps non puo' scaricarlo in anonimo. Crea un token con il solo
-> scope `read:packages` su <https://github.com/settings/tokens> e mettilo in
-> `terraform.tfvars`:
-> ```hcl
-> registry_server   = "ghcr.io"
-> registry_username = "<tuo-utente>"
-> registry_password = "ghp_..."
-> ```
-> Terraform lo salva come secret della Container App. L'alternativa, rendere
-> pubblico il package, espone il codice sorgente: su un repo privato non ha
-> senso.
->
-> Terza via, se preferisci non gestire token: `create_container_registry = true`
-> crea un ACR (circa 4,60 EUR/mese) e `az acr build --registry <acr> --image
-> interview-prep-copilot-api:latest ./backend` costruisce l'immagine **in
-> Azure**, senza Docker e senza GitHub Actions.
+### Il repository e' privato: come fa Container Apps a scaricare l'immagine
+
+Se il repository su GitHub e' privato lo e' anche il package su GHCR, e
+Container Apps non puo' scaricarlo in anonimo. Ci sono due strade.
+
+#### Strada A — token classic, gratis
+
+GHCR **non supporta i token fine-grained**: serve un token *classic*. Se ti
+trovi sulla pagina con "Repository access" e "Permissions", sei su quella
+sbagliata e `read:packages` non comparira' mai.
+
+1. Vai su <https://github.com/settings/tokens/new?scopes=read:packages> —
+   e' la pagina **Tokens (classic)**, riconoscibile dall'elenco piatto di
+   caselle con i nomi degli scope.
+2. Spunta soltanto **`read:packages`**. Nient'altro: e' l'unico permesso che
+   serve a scaricare un'immagine.
+3. Genera il token e copialo (lo vedi una volta sola).
+4. Mettilo in `terraform.tfvars`:
+
+```hcl
+registry_server   = "ghcr.io"
+registry_username = "<tuo-utente-github>"
+registry_password = "ghp_..."
+```
+
+Terraform lo salva come secret della Container App, non come variabile in
+chiaro. Il file `terraform.tfvars` e' in `.gitignore`.
+
+> Rendere pubblico il package **non e' un'alternativa**: l'immagine contiene il
+> sorgente Python, quindi equivarrebbe a pubblicare il repository.
+
+#### Strada B — Azure Container Registry, nessun token
+
+```hcl
+create_container_registry = true
+```
+
+Costa circa 4,60 EUR/mese, ma toglie di mezzo sia Docker sia i token: lo script
+di deploy se ne accorge da solo e usa `az acr build`, che **carica il sorgente
+e lo compila dentro Azure**. La Container App tira l'immagine con la managed
+identity, quindi non c'e' nessuna credenziale da gestire.
+
+```powershell
+.\scripts\deploy.ps1      # riconosce l'ACR e costruisce in cloud
+```
+
+E' la strada piu' semplice se il token ti da' fastidio o se non vuoi dipendere
+da GitHub Actions.
 
 Il resto di questa pagina spiega gli stessi passi uno per uno, utile quando
 qualcosa non va o vuoi capire cosa sta succedendo.
