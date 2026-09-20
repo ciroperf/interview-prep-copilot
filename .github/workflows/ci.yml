@@ -87,7 +87,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Bash
-        run: bash -n scripts/deploy.sh terraform/scripts/bootstrap-state.sh terraform/scripts/list-models.sh
+        run: bash -n scripts/deploy.sh scripts/update-api.sh terraform/scripts/bootstrap-state.sh terraform/scripts/list-models.sh
 
       - name: PowerShell
         shell: pwsh

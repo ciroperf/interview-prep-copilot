@@ -1,5 +1,15 @@
 name: Deploy frontend
 
+# Pubblica il frontend sulla Static Web App a ogni push su main.
+#
+# È opzionale: serve solo se vuoi che il push pubblichi da solo. Senza i
+# segreti il workflow non fallisce, si ferma e spiega cosa manca — il frontend
+# lo pubblichi comunque da locale con scripts/deploy.ps1, che prende URL e
+# configurazione dagli output di Terraform invece che dai segreti.
+#
+# La compilazione vera e propria è in ci.yml, che gira su ogni push a
+# prescindere: qui si compila solo quando c'è davvero qualcosa da pubblicare.
+
 on:
   push:
     branches: [main]
@@ -19,16 +29,66 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
+    env:
+      # Letti qui per poterli controllare senza stamparli: un segreto vuoto
+      # nella condizione di un `if:` non si distingue da uno assente.
+      SWA_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+      API_BASE_URL: ${{ secrets.API_BASE_URL }}
+      ENTRA_CLIENT_ID: ${{ secrets.ENTRA_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verifica se la pubblicazione automatica è configurata
+        id: check
+        run: |
+          if [ -n "$SWA_TOKEN" ] && [ -n "$API_BASE_URL" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            if [ -z "$ENTRA_CLIENT_ID" ]; then
+              {
+                echo "> **Attenzione**: \`ENTRA_CLIENT_ID\` non è impostato."
+                echo "> Il bundle pubblicato userà il codice di accesso. Se l'istanza"
+                echo "> ha il login Microsoft, nessuno riuscirà ad entrare."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 0
+          fi
+
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Pubblicazione automatica non configurata"
+            echo
+            echo "Niente è stato pubblicato, e non è un errore: mancano i segreti."
+            echo "Il frontend si pubblica da locale con:"
+            echo
+            echo '```powershell'
+            echo ".\\scripts\\deploy.ps1 -SkipInfra -SkipApi"
+            echo '```'
+            echo
+            echo "Per abilitare il push-to-deploy, aggiungi questi segreti"
+            echo "(Settings > Secrets and variables > Actions). I valori li stampa"
+            echo '`terraform output`, dentro la cartella `terraform`:'
+            echo
+            echo "| Segreto | Da dove |"
+            echo "|---|---|"
+            echo "| \`AZURE_STATIC_WEB_APPS_API_TOKEN\` | \`terraform output -raw static_web_app_deployment_token\` |"
+            echo "| \`API_BASE_URL\` | \`terraform output -raw api_url\` |"
+            echo "| \`ENTRA_CLIENT_ID\` | \`terraform output -raw entra_client_id\` (solo con il login Microsoft) |"
+            echo "| \`ENTRA_TENANT_ID\` | \`terraform output -raw entra_tenant_id\` |"
+            echo "| \`ENTRA_API_SCOPE\` | \`terraform output -raw entra_api_scope\` |"
+            echo
+            echo "Se non ti interessa, puoi cancellare questo workflow:"
+            echo "\`.github/workflows/deploy-frontend.yml\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/setup-node@v4
+        if: steps.check.outputs.enabled == 'true'
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Build
+        if: steps.check.outputs.enabled == 'true'
         working-directory: frontend
         # L'URL dell'API viene compilato dentro il bundle: è una variabile di
         # build, non di runtime, quindi un cambio di URL richiede un nuovo build.
@@ -44,6 +104,7 @@ jobs:
           npm run build
 
       - name: Pubblica su Azure Static Web Apps
+        if: steps.check.outputs.enabled == 'true'
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}

@@ -1,7 +1,9 @@
 # Deploy su Azure
 
 Il deploy si fa in tre fasi: infrastruttura con Terraform, immagine dell'API,
-bundle del frontend. Dalla seconda volta in poi ci pensano le GitHub Actions.
+bundle del frontend. Le GitHub Actions possono occuparsene al posto tuo, ma
+sono opzionali: senza i segreti si fermano e lo dicono nel riepilogo, senza
+fallire.
 
 ## Percorso rapido: uno script solo
 
@@ -242,8 +244,20 @@ codice di accesso.
 
 ## Deploy automatico con GitHub Actions
 
-I tre workflow in `.github/workflows/` coprono CI e deploy. Per attivarli
-servono alcuni secret nell'ambiente `production` del repository.
+I tre workflow in `.github/workflows/` coprono CI e deploy.
+
+`ci.yml` gira sempre e non richiede segreti: test, lint, typecheck, build del
+frontend, `terraform validate`, sintassi degli script, build dell'immagine.
+
+I due workflow di deploy sono **opzionali** e servono solo se vuoi che il push
+pubblichi da solo. Senza i segreti non fanno danni e non diventano rossi: si
+fermano e scrivono nel riepilogo della run cosa manca. `Deploy API` costruisce
+comunque l'immagine su GHCR (gli basta il `GITHUB_TOKEN` automatico) e sei tu a
+portarla in Azure con `update-api.ps1`; `Deploy frontend` non pubblica nulla e
+tu usi `deploy.ps1 -SkipInfra -SkipApi`. Se non ti interessano, puoi
+cancellarli.
+
+Per attivarli servono alcuni secret nell'ambiente `production` del repository.
 
 ### Login federato ad Azure (senza password)
 
