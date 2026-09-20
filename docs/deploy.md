@@ -32,11 +32,52 @@ Lo script ha bisogno di:
 | Azure CLI | sempre | `winget install Microsoft.AzureCLI` |
 | Terraform | se non usi `-SkipInfra` | `winget install HashiCorp.Terraform` |
 | Node.js 22 | se non usi `-SkipWeb` | `winget install OpenJS.NodeJS.LTS` |
-| Docker Desktop | per costruire l'immagine in locale | `winget install Docker.DockerDesktop` |
-| `$env:GITHUB_TOKEN` | per il push su GHCR | token con scope `write:packages` |
+| Docker Desktop | **solo** se vuoi costruire l'immagine in locale | `winget install Docker.DockerDesktop` |
 
-Senza Docker lo script salta il passo dell'immagine e te lo dice: in quel caso
-la costruisce il workflow `deploy-backend.yml` al primo push su `main`.
+## Senza Docker in locale
+
+Non serve installarlo. L'immagine la costruisce GitHub Actions e tu la porti in
+Azure con la sola Azure CLI:
+
+```powershell
+# 1. Infrastruttura
+.\scripts\deploy.ps1 -SkipApi
+
+# 2. Fai costruire l'immagine a GitHub: basta pushare su main.
+git push
+#    Oppure, senza modifiche da pushare, lancia il workflow a mano da
+#    GitHub > Actions > "Deploy API" > Run workflow.
+
+# 3. Quando il workflow e' verde, porta l'immagine in Azure
+.\scripts\update-api.ps1
+```
+
+`update-api.ps1` aggiorna la Container App, aspetta che risponda e lancia il
+selftest dell'AI: in un colpo solo sai se immagine, modello e permessi sono a
+posto.
+
+Il workflow "Deploy API" non ha bisogno di alcun segreto Azure: gli basta il
+`GITHUB_TOKEN` che Actions fornisce da solo. I segreti Azure servono solo se
+vuoi che sia il workflow stesso ad aggiornare la Container App, saltando il
+passo 3.
+
+> **Il repository e' privato?** Allora lo e' anche il package su GHCR, e
+> Container Apps non puo' scaricarlo in anonimo. Crea un token con il solo
+> scope `read:packages` su <https://github.com/settings/tokens> e mettilo in
+> `terraform.tfvars`:
+> ```hcl
+> registry_server   = "ghcr.io"
+> registry_username = "<tuo-utente>"
+> registry_password = "ghp_..."
+> ```
+> Terraform lo salva come secret della Container App. L'alternativa, rendere
+> pubblico il package, espone il codice sorgente: su un repo privato non ha
+> senso.
+>
+> Terza via, se preferisci non gestire token: `create_container_registry = true`
+> crea un ACR (circa 4,60 EUR/mese) e `az acr build --registry <acr> --image
+> interview-prep-copilot-api:latest ./backend` costruisce l'immagine **in
+> Azure**, senza Docker e senza GitHub Actions.
 
 Il resto di questa pagina spiega gli stessi passi uno per uno, utile quando
 qualcosa non va o vuoi capire cosa sta succedendo.

@@ -27,8 +27,12 @@ az account show >/dev/null 2>&1 || { echo "  X  Esegui: az login" >&2; exit 1; }
 ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"; export ARM_SUBSCRIPTION_ID
 echo "  OK  sottoscrizione $(az account show --query name -o tsv)"
 
+USE_GITHUB_BUILD=false
 if ! $SKIP_API && ! command -v docker >/dev/null; then
-  echo "  !   Docker non trovato: salto l'immagine dell'API."
+  # Senza Docker l'immagine la costruisce GitHub Actions: qui la portiamo in
+  # Azure con la sola az CLI.
+  echo "  OK  Docker assente: usero' l'immagine costruita da GitHub Actions"
+  USE_GITHUB_BUILD=true
   SKIP_API=true
 fi
 
@@ -81,6 +85,12 @@ if ! $SKIP_WEB; then
   [ -d node_modules ] || npm ci
   VITE_API_BASE_URL="$API_URL" npm run build
   npx --yes @azure/static-web-apps-cli deploy ./dist --deployment-token "$SWA_TOKEN" --env production
+fi
+
+if $USE_GITHUB_BUILD; then
+  step "Immagine dell API"
+  echo "  Quando il workflow 'Deploy API' e' terminato, lancia:"
+  echo "    ./scripts/update-api.sh"
 fi
 
 step "Fatto"

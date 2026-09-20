@@ -169,15 +169,23 @@ variable "ai_location" {
 }
 
 variable "ai_model_name" {
-  description = "Modello da deployare. gpt-4o-mini è il più economico fra quelli capaci."
+  description = <<-EOT
+    Modello da deployare. Il default gpt-5-mini è il punto di equilibrio: ragiona,
+    quindi va molto meglio di gpt-4o-mini su revisione del CV e del codice, ma
+    costa una frazione del modello pieno.
+    Verifica che ci sia nella tua regione con scripts/list-models.*
+  EOT
   type        = string
-  default     = "gpt-4o-mini"
+  default     = "gpt-5-mini"
 }
 
 variable "ai_model_version" {
-  description = "Versione del modello. Verificala nel portale AI Foundry prima dell'apply."
+  description = <<-EOT
+    Versione del modello. Deve esistere per il modello scelto: prendila
+    dall'elenco di scripts/list-models.*, non tirarla a indovinare.
+  EOT
   type        = string
-  default     = "2024-07-18"
+  default     = "2025-08-07"
 }
 
 variable "ai_api_version" {
@@ -186,11 +194,13 @@ variable "ai_api_version" {
     e gpt-4.1. I modelli reasoning (o3, o4-mini, gpt-5) richiedono i parametri
     max_completion_tokens e reasoning_effort, introdotti in una preview più
     recente: per loro serve una versione tipo 2025-01-01-preview o successiva.
-    Verifica quella corrente nella documentazione Azure OpenAI; se sbagli, l'app
-    lo dice chiaramente nei log invece di fallire in silenzio.
+    Se la versione impostata non esiste, il client non si arrende: il servizio
+    risponde elencando quelle che accetta, e lui riprova con la più recente
+    fra quelle. Lo segnala nei log e in /api/ai/selftest, così puoi fissare
+    qui il valore giusto ed evitare il tentativo sprecato a ogni riavvio.
   EOT
   type        = string
-  default     = "2024-10-21"
+  default     = "2025-01-01-preview"
 }
 
 variable "ai_model_family" {
@@ -216,7 +226,7 @@ variable "ai_reasoning_effort" {
     Ignorato dai modelli non reasoning.
   EOT
   type        = string
-  default     = ""
+  default     = "low"
 
   validation {
     condition     = contains(["", "low", "medium", "high"], var.ai_reasoning_effort)
@@ -236,7 +246,7 @@ variable "ai_capacity" {
     sufficiente per un utente singolo e un tetto utile contro i consumi anomali.
   EOT
   type        = number
-  default     = 10
+  default     = 20
 }
 
 variable "ai_use_managed_identity" {

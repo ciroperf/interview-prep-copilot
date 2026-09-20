@@ -19,6 +19,8 @@ from app.ai.client import (
     adapt_style,
     build_messages,
     guess_style,
+    is_api_version_error,
+    supported_api_versions,
 )
 from app.config import Settings
 
@@ -44,8 +46,22 @@ class FakeCompletions:
         self.rifiuta = rifiuta
         self.content = content
         self.chiamate: list[dict] = []
+        self.versioni_viste: list[str] = []
+        # Se valorizzato, accetta solo queste api-version e rifiuta le altre
+        # elencando quelle supportate, come fa il servizio vero.
+        self.versioni_valide: set[str] | None = None
+        self.client = None
 
     async def create(self, **kwargs):
+        if self.client is not None:
+            self.versioni_viste.append(self.client.api_version)
+        if self.versioni_valide is not None and self.client is not None:
+            corrente = self.client.api_version
+            if corrente not in self.versioni_valide:
+                elenco = ", ".join(sorted(self.versioni_valide))
+                raise RuntimeError(
+                    f"Invalid API version '{corrente}'. Supported versions: {elenco}."
+                )
         self.chiamate.append(kwargs)
         if "max_tokens" in self.rifiuta and "max_tokens" in kwargs:
             raise RuntimeError(ERRORE_MAX_TOKENS)
@@ -69,8 +85,12 @@ def build_client(deployment: str, rifiuta: set[str], **extra) -> tuple[AIClient,
     )
     client = AIClient(settings)
     fake = FakeCompletions(rifiuta)
-    # Iniettiamo il finto client: _ensure_client restituisce quello già presente.
-    client._client = SimpleNamespace(chat=SimpleNamespace(completions=fake))
+    fake.client = client
+    finto = SimpleNamespace(chat=SimpleNamespace(completions=fake))
+    # Agganciamo il finto a _ensure_client e non a _client: quando il client
+    # cambia api-version azzera _client per ricostruirlo, e con la sola
+    # iniezione su _client proverebbe a costruirne uno vero.
+    client._ensure_client = lambda: finto  # type: ignore[method-assign]
     return client, fake
 
 
@@ -203,7 +223,23 @@ async def test_il_reasoning_effort_viene_inviato_solo_se_configurato():
     await client.complete_json("sistema", "utente")
     assert fake.chiamate[0]["reasoning_effort"] == "high"
 
-    client, fake = build_client("o4-mini", rifiuta=set())
+    # Vuoto significa "lascia decidere al modello": il parametro non va inviato.
+    client, fake = build_client("o4-mini", rifiuta=set(), ai_reasoning_effort="")
+    await client.complete_json("sistema", "utente")
+    assert "reasoning_effort" not in fake.chiamate[0]
+
+
+async def test_il_default_manda_reasoning_effort_low():
+    """Il default punta a gpt-5-mini con effort basso: e' il compromesso scelto
+    fra qualita' e latenza, e una regressione qui si noterebbe solo in bolletta."""
+    client, fake = build_client("gpt-5-mini", rifiuta=set())
+    await client.complete_json("sistema", "utente")
+    assert fake.chiamate[0]["reasoning_effort"] == "low"
+
+
+async def test_un_modello_standard_non_riceve_reasoning_effort():
+    """Il default e' 'low', ma su un modello che non ragiona sarebbe rifiutato."""
+    client, fake = build_client("gpt-4.1-mini", rifiuta=set())
     await client.complete_json("sistema", "utente")
     assert "reasoning_effort" not in fake.chiamate[0]
 
@@ -247,3 +283,88 @@ async def test_una_variante_chat_usa_i_parametri_standard():
     assert len(fake.chiamate) == 1
     assert fake.chiamate[0]["temperature"] == 0.7
     assert "max_tokens" in fake.chiamate[0]
+
+
+
+# --- fallback sulla api-version ---------------------------------------------
+
+
+def test_riconosce_un_errore_di_api_version():
+    assert is_api_version_error("Invalid API version '2025-01-01-preview'.") is True
+    assert is_api_version_error("429 Too Many Requests") is False
+
+
+def test_estrae_le_versioni_supportate_dalla_piu_recente():
+    errore = (
+        "Invalid API version '2030-01-01-preview'. Supported versions: "
+        "2024-10-21, 2025-04-01-preview, 2024-12-01-preview."
+    )
+    assert supported_api_versions(errore) == [
+        "2030-01-01-preview",
+        "2025-04-01-preview",
+        "2024-12-01-preview",
+        "2024-10-21",
+    ]
+
+
+def test_a_parita_di_data_la_ga_viene_prima_della_preview():
+    versioni = supported_api_versions("Supported: 2025-01-01-preview, 2025-01-01.")
+    assert versioni == ["2025-01-01", "2025-01-01-preview"]
+
+
+async def test_una_api_version_inesistente_viene_sostituita_da_sola():
+    """Il caso che conta: la versione nel Terraform non esiste piu'. Senza questo
+    l'AI smetterebbe di funzionare in silenzio, ricadendo sulle euristiche."""
+    client, fake = build_client(
+        "gpt-5-mini", rifiuta=set(), azure_openai_api_version="2030-01-01-preview"
+    )
+    fake.versioni_valide = {"2024-10-21", "2025-04-01-preview"}
+
+    await client.complete_json("sistema", "utente")
+
+    assert client.api_version == "2025-04-01-preview", "deve scegliere la più recente offerta"
+    assert fake.versioni_viste[0] == "2030-01-01-preview", (
+        "il primo tentativo deve usare la versione configurata"
+    )
+
+
+async def test_la_versione_corretta_viene_ricordata():
+    client, fake = build_client(
+        "gpt-5-mini", rifiuta=set(), azure_openai_api_version="2030-01-01-preview"
+    )
+    fake.versioni_valide = {"2025-04-01-preview"}
+
+    await client.complete_json("sistema", "utente")
+    chiamate_primo_giro = len(fake.versioni_viste)
+
+    await client.complete_json("sistema", "utente")
+    assert len(fake.versioni_viste) == chiamate_primo_giro + 1, (
+        "il secondo giro non deve ripetere la ricerca della versione"
+    )
+
+
+async def test_se_nessuna_versione_e_utilizzabile_l_errore_arriva_all_utente():
+    client, fake = build_client(
+        "gpt-5-mini", rifiuta=set(), azure_openai_api_version="2030-01-01-preview"
+    )
+    # Il servizio rifiuta e non propone alternative: non c'è niente da provare.
+    fake.versioni_valide = set()
+
+    with pytest.raises(RuntimeError, match="Invalid API version"):
+        await client.complete_json("sistema", "utente")
+
+
+async def test_version_e_stile_si_correggono_nella_stessa_sequenza():
+    """Versione sbagliata e parametri sbagliati insieme: devono risolversi entrambi."""
+    client, fake = build_client(
+        "deployment-anonimo",
+        rifiuta={"max_tokens", "temperature"},
+        azure_openai_api_version="2030-01-01-preview",
+    )
+    fake.versioni_valide = {"2025-04-01-preview"}
+
+    await client.complete_json("sistema", "utente")
+
+    assert client.api_version == "2025-04-01-preview"
+    assert client.style.is_reasoning is True
+    assert "max_completion_tokens" in fake.chiamate[-1]

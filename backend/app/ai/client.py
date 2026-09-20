@@ -110,6 +110,27 @@ def adapt_style(style: CallStyle, error: str) -> CallStyle | None:
     return None
 
 
+# Una api-version ha la forma 2025-01-01 oppure 2025-01-01-preview.
+API_VERSION_RE = re.compile(r"\d{4}-\d{2}-\d{2}(?:-preview)?")
+
+
+def is_api_version_error(error: str) -> bool:
+    message = error.lower()
+    return "api version" in message or "api-version" in message
+
+
+def supported_api_versions(error: str) -> list[str]:
+    """Estrae le api-version citate nel messaggio d'errore, dalla più recente.
+
+    Quando si passa una versione sconosciuta, il servizio risponde elencando
+    quelle che accetta. Invece di far indovinare all'utente la stringa giusta,
+    la prendiamo da lì: è l'unica fonte sempre aggiornata.
+    """
+    trovate = {m.group(0) for m in API_VERSION_RE.finditer(error)}
+    # Ordine: prima la data, poi le GA prima delle preview a parità di data.
+    return sorted(trovate, key=lambda v: (v[:10], not v.endswith("-preview")), reverse=True)
+
+
 def build_messages(style: CallStyle, system: str, user: str) -> list[dict[str, str]]:
     if style.system_role == "merged":
         return [{"role": "user", "content": f"{system}\n\n---\n\n{user}"}]
@@ -133,6 +154,10 @@ class AIClient:
         self._style: CallStyle = guess_style(
             self.settings.azure_openai_deployment, self.settings.ai_model_family
         )
+        # La api-version può cambiare a runtime se il servizio rifiuta quella
+        # configurata: teniamola qui e non nelle settings, che sono immutabili.
+        self._api_version: str = self.settings.azure_openai_api_version
+        self._api_versions_tried: set[str] = set()
 
     # --- ciclo di vita ------------------------------------------------------
 
@@ -152,7 +177,7 @@ class AIClient:
 
             kwargs: dict[str, Any] = {
                 "azure_endpoint": self.settings.azure_openai_endpoint,
-                "api_version": self.settings.azure_openai_api_version,
+                "api_version": self._api_version,
                 "timeout": self.settings.ai_request_timeout_seconds,
                 "max_retries": 2,
             }
@@ -179,6 +204,11 @@ class AIClient:
     def style(self) -> CallStyle:
         """Stile attualmente in uso. Esposto per diagnostica e test."""
         return self._style
+
+    @property
+    def api_version(self) -> str:
+        """Versione dell'API realmente in uso: può differire da quella configurata."""
+        return self._api_version
 
     def _kwargs(
         self,
@@ -217,15 +247,18 @@ class AIClient:
         Solleva l'errore originale se non è riconducibile a un parametro che
         sappiamo negoziare: non ha senso ritentare su una quota esaurita.
         """
-        client = self._ensure_client()
         style = self._style
-        # Al massimo quattro correzioni: token, temperature, reasoning_effort, ruolo.
-        for _ in range(4):
+        # Quattro correzioni di stile (token, temperature, reasoning_effort,
+        # ruolo) più qualche cambio di api-version: il limite evita cicli.
+        for _ in range(8):
+            client = self._ensure_client()
             try:
                 response = await client.chat.completions.create(
                     **self._kwargs(style, system, user, temperature, max_tokens), **extra
                 )
             except Exception as exc:
+                if self._try_other_api_version(str(exc)):
+                    continue
                 adapted = adapt_style(style, str(exc))
                 if adapted is None or adapted == style:
                     raise
@@ -240,7 +273,36 @@ class AIClient:
                 logger.info("Stile di chiamata appreso per questo deployment: %s", style)
                 self._style = style
             return response
-        raise RuntimeError("Impossibile trovare uno stile di chiamata accettato dal deployment")
+        raise RuntimeError("Impossibile trovare una configurazione accettata dal deployment")
+
+    def _try_other_api_version(self, error: str) -> bool:
+        """Se il servizio rifiuta la api-version, ne sceglie una fra quelle che elenca.
+
+        Il messaggio d'errore contiene le versioni supportate: prenderle da lì
+        evita di dover indovinare una stringa che cambia a ogni generazione di
+        modelli. Restituisce True se c'è da riprovare.
+        """
+        if not is_api_version_error(error):
+            return False
+
+        self._api_versions_tried.add(self._api_version)
+        candidate = [
+            v for v in supported_api_versions(error) if v not in self._api_versions_tried
+        ]
+        if not candidate:
+            return False
+
+        scelta = candidate[0]
+        logger.warning(
+            "api-version %s rifiutata, riprovo con %s. "
+            "Imposta ai_api_version a questo valore per evitare il tentativo sprecato.",
+            self._api_version,
+            scelta,
+        )
+        self._api_version = scelta
+        # Il client va ricostruito: la versione fa parte della sua configurazione.
+        self._client = None
+        return True
 
     async def complete_text(
         self,

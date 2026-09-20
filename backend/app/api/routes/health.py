@@ -82,21 +82,27 @@ async def ai_selftest(ai: AIDep, settings: SettingsDep) -> dict:
         return {
             "ok": False,
             "deployment": settings.azure_openai_deployment,
-            "api_version": settings.azure_openai_api_version,
+            "api_version_configured": settings.azure_openai_api_version,
+            "api_version_used": ai.api_version,
             "latency_ms": round((time.perf_counter() - avvio) * 1000),
             "error": str(exc)[:600],
             "hint": _selftest_hint(str(exc)),
         }
 
     finale = ai.style
+    versione_usata = ai.api_version
+    cambiata = versione_usata != settings.azure_openai_api_version
     return {
         "ok": True,
         "deployment": settings.azure_openai_deployment,
-        "api_version": settings.azure_openai_api_version,
+        "api_version_configured": settings.azure_openai_api_version,
+        # Può differire: se il servizio rifiuta quella configurata, il client ne
+        # sceglie una fra quelle che il messaggio d'errore elenca.
+        "api_version_used": versione_usata,
         "latency_ms": round((time.perf_counter() - avvio) * 1000),
         "family_guessed": "reasoning" if prima.is_reasoning else "standard",
         "family_actual": "reasoning" if finale.is_reasoning else "standard",
-        "adapted": finale != prima,
+        "adapted": finale != prima or cambiata,
         "style": {
             "token_param": finale.token_param,
             "temperature": finale.supports_temperature,
@@ -104,7 +110,28 @@ async def ai_selftest(ai: AIDep, settings: SettingsDep) -> dict:
             "reasoning_effort": settings.ai_reasoning_effort if finale.is_reasoning else "",
         },
         "response": risposta,
+        "hint": _fix_config_hint(settings, finale, prima, versione_usata),
     }
+
+
+def _fix_config_hint(settings, finale, prima, versione_usata: str) -> str:
+    """Suggerisce come rendere stabile ciò che il client ha dovuto scoprire.
+
+    Tutto funziona anche senza seguirlo, ma ogni riavvio ripagherebbe i
+    tentativi: fissare i valori li elimina.
+    """
+    correzioni: list[str] = []
+    if versione_usata != settings.azure_openai_api_version:
+        correzioni.append(f'ai_api_version = "{versione_usata}"')
+    if finale != prima:
+        famiglia = "reasoning" if finale.is_reasoning else "standard"
+        correzioni.append(f'ai_model_family = "{famiglia}"')
+    if not correzioni:
+        return "Configurazione corretta: nessun tentativo sprecato."
+    return (
+        "Funziona, ma il client ha dovuto correggersi. Metti in "
+        "terraform.tfvars: " + "; ".join(correzioni)
+    )
 
 
 def _selftest_hint(error: str) -> str:

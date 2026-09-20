@@ -8,7 +8,6 @@ on:
       - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
 
-# Serve per pubblicare su GHCR e per il login federato ad Azure (OIDC).
 permissions:
   contents: read
   packages: write
@@ -22,9 +21,13 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}-api
 
 jobs:
-  deploy:
+  # La costruzione non richiede alcun segreto Azure: serve solo GITHUB_TOKEN,
+  # che Actions fornisce da solo. È il percorso per chi non ha Docker in locale.
+  build:
+    name: Build e push su GHCR
     runs-on: ubuntu-latest
-    environment: production
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -48,7 +51,49 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Riepilogo
+        id: meta
+        run: |
+          echo "image=${IMAGE}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Immagine pubblicata"
+            echo
+            echo '```'
+            echo "${IMAGE}:${{ github.sha }}"
+            echo "${IMAGE}:latest"
+            echo '```'
+            echo
+            echo "Per portarla in Azure dal tuo computer, senza Docker:"
+            echo
+            echo '```powershell'
+            echo ".\\scripts\\update-api.ps1"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # L'aggiornamento della Container App parte solo se hai configurato il login
+  # federato. Senza, l'immagine resta su GHCR e la porti in Azure con
+  # scripts/update-api.ps1, che usa la az CLI che hai gia' installato.
+  azure:
+    name: Aggiorna la Container App
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AZURE_CONFIGURED: ${{ secrets.AZURE_CLIENT_ID }}
+    steps:
+      - name: Verifica se il deploy automatico è configurato
+        id: check
+        run: |
+          if [ -n "$AZURE_CONFIGURED" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Segreti Azure non configurati: l'immagine è pronta su GHCR." >> "$GITHUB_STEP_SUMMARY"
+            echo "Aggiorna la Container App con: .\\scripts\\update-api.ps1" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Login ad Azure
+        if: steps.check.outputs.enabled == 'true'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -56,16 +101,18 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Aggiorna la Container App
+        if: steps.check.outputs.enabled == 'true'
         # Si punta al digest immutabile del commit, non a :latest: così una
         # revisione resta sempre riconducibile al codice che la ha prodotta.
         run: |
           az containerapp update \
             --name "${{ secrets.AZURE_CONTAINER_APP_NAME }}" \
             --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-            --image "${{ env.IMAGE }}:${{ github.sha }}" \
+            --image "${{ needs.build.outputs.image }}" \
             --output none
 
       - name: Verifica che la nuova revisione risponda
+        if: steps.check.outputs.enabled == 'true'
         run: |
           FQDN=$(az containerapp show \
             --name "${{ secrets.AZURE_CONTAINER_APP_NAME }}" \

@@ -1,60 +1,81 @@
-# Copia in terraform.tfvars e adatta. terraform.tfvars è in .gitignore.
+# Copia in terraform.tfvars e adatta. terraform.tfvars e' in .gitignore.
+#
+# I default nel codice sono gia' quelli consigliati: per un primo deploy basta
+# togliere il commento a budget_alert_email e lasciare tutto il resto com'e'.
+
+# --- L'unica cosa davvero da compilare -------------------------------------
+# budget_alert_email = "tu@esempio.it"
 
 # --- Obbligatorio se non usi ARM_SUBSCRIPTION_ID ---------------------------
 # subscription_id = "00000000-0000-0000-0000-000000000000"
 
-# --- Identità del progetto -------------------------------------------------
-name_prefix = "ipc"
-environment = "prod"
-location    = "swedencentral"
+# --- Identita' del progetto (default: ipc / prod / swedencentral) ----------
+# name_prefix = "ipc"
+# environment = "prod"
+# location    = "swedencentral"
 
-# Per usare un resource group che hai già:
+# Per usare un resource group che hai gia':
 # create_resource_group = false
 # resource_group_name   = "rg-mio-esistente"
 
-# --- Costi -----------------------------------------------------------------
-# 0 = l'app si spegne quando non la usi (cold start di qualche secondo).
-min_replicas = 0
-max_replicas = 1
-
-# Avviso via email quando la spesa mensile si avvicina alla soglia.
-monthly_budget_eur = 15
-budget_alert_email = "tu@esempio.it"
-
 # --- AI --------------------------------------------------------------------
-# Per sapere cosa e' davvero deployabile nella tua regione:
+# Default: gpt-5-mini con reasoning_effort = "low". Ragiona, quindi va molto
+# meglio di gpt-4o-mini su revisione del CV e del codice, ma costa una frazione
+# del modello pieno.
+#
+# Per vedere cosa e' davvero deployabile nella tua regione:
 #   .\scripts\list-models.ps1 -Location swedencentral     (Windows)
 #   ./scripts/list-models.sh swedencentral                  (macOS/Linux)
 # Guida alla scelta: docs/modelli.md
-enable_ai        = true
-ai_location      = "swedencentral"
-ai_model_name    = "gpt-4o-mini"
-ai_model_version = "2024-07-18"
-ai_capacity      = 10
+#
+# ai_model_name       = "gpt-5-mini"
+# ai_model_version    = "2025-08-07"
+# ai_deployment_sku   = "GlobalStandard"      # controlla nell'elenco!
+# ai_api_version      = "2025-01-01-preview"
+# ai_reasoning_effort = "low"                 # low | medium | high
+# ai_capacity         = 20                    # migliaia di token al minuto
 
-# Versione dell'API. 2024-10-21 e' GA e copre gpt-4o e gpt-4.1.
-# I modelli reasoning (o3, o4-mini, gpt-5) richiedono una preview piu' recente,
-# per esempio "2025-01-01-preview".
-ai_api_version = "2024-10-21"
+# Per azzerare la spesa AI: l'app resta usabile con le euristiche.
+# enable_ai = false
 
-# auto deduce la famiglia dal nome del deployment e si corregge da sola al primo
-# errore dell'API. Forzala solo se il deployment ha un nome che non lo rivela.
-ai_model_family = "auto"
+# --- Costi -----------------------------------------------------------------
+# 0 = l'app si spegne quando non la usi (cold start di qualche secondo).
+# min_replicas = 0
+# max_replicas = 1
+# monthly_budget_eur = 15
 
-# Solo per i modelli reasoning: low | medium | high. Vuoto = default del modello.
-# Alzarlo migliora la qualita' e alza il costo (i token di ragionamento si pagano).
-ai_reasoning_effort = ""
+# --- Funzionalita' opzionali ------------------------------------------------
+# Conserva i CV caricati su Blob Storage. Di default vengono letti e scartati.
+# store_cv_files = true
+
+# Esecuzione sul server del codice inviato dall'utente.
+# NON attivarla su un'app raggiungibile da internet: vedi docs/sicurezza.md.
+# enable_code_execution = false
+
+# Dominio personalizzato per il frontend, oltre a quello della Static Web App.
+# allowed_origins = ["https://prep.miodominio.it"]
 
 # --- Immagine dell'API -----------------------------------------------------
-# Lascia il default al primo apply: il workflow di deploy pubblica l'immagine
-# vera e aggiorna la Container App.
+# Il workflow "Deploy API" costruisce l'immagine su GitHub e la pubblica su
+# GHCR: al primo apply lascia il default, ci pensa poi scripts/update-api.ps1.
 # container_image = "ghcr.io/ciroperf/interview-prep-copilot-api:latest"
 
-# Un ACR Basic costa circa 4,60 EUR/mese: con un package pubblico su GHCR
-# non serve e il pull è anonimo.
-create_container_registry = false
-
-# --- Opzionali -------------------------------------------------------------
-# access_code    = "scegline-uno-tuo"   # se vuoto ne viene generato uno
-# store_cv_files = false                 # true per conservare i CV caricati
-# allowed_origins = ["https://prep.miodominio.it"]
+# IMPORTANTE se il repository su GitHub e' PRIVATO.
+# Anche il package GHCR lo e', e Container Apps non puo' scaricarlo in anonimo.
+# Hai due strade:
+#
+#   A) Package privato + credenziali (gratis, consigliata per repo privati).
+#      Crea un token su https://github.com/settings/tokens con il solo scope
+#      read:packages, poi:
+# registry_server   = "ghcr.io"
+# registry_username = "ciroperf"
+# registry_password = "ghp_..."     # finisce in un secret della Container App
+#
+#   B) Rendere pubblico il package.
+#      Gratis e senza token, ma l'immagine contiene il codice sorgente Python:
+#      su un repository privato equivale a pubblicarlo. Sconsigliata.
+#
+#   C) Azure Container Registry, circa 4,60 EUR/mese.
+#      Privato, nessun token da gestire, e con "az acr build" l'immagine si
+#      costruisce in cloud senza Docker in locale.
+# create_container_registry = true

@@ -42,8 +42,10 @@ class Settings(BaseSettings):
     # --- AI (Azure AI Foundry / Azure OpenAI) -------------------------------
     azure_openai_endpoint: str = ""
     azure_openai_api_key: str = ""
-    azure_openai_deployment: str = "gpt-4o-mini"
-    azure_openai_api_version: str = "2024-10-21"
+    azure_openai_deployment: str = "gpt-5-mini"
+    # Se non esiste, il client ne sceglie una fra quelle che il servizio elenca
+    # nel messaggio d'errore (vedi ai/client.py, _try_other_api_version).
+    azure_openai_api_version: str = "2025-01-01-preview"
     ai_request_timeout_seconds: float = 90.0
     ai_max_output_tokens: int = 4096
 
@@ -52,7 +54,7 @@ class Settings(BaseSettings):
     # e torna una stringa vuota. Per loro si usa questo tetto, più alto.
     ai_reasoning_max_output_tokens: int = 16000
     # low | medium | high. Vuoto = non inviarlo, lascia il default del modello.
-    ai_reasoning_effort: str = ""
+    ai_reasoning_effort: str = "low"
     # auto | standard | reasoning. Con auto la famiglia si deduce dal nome del
     # deployment e si corregge da sola al primo errore dell'API.
     ai_model_family: Literal["auto", "standard", "reasoning"] = "auto"

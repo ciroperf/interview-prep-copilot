@@ -60,11 +60,12 @@ if (-not $account) { Fail "Non sei autenticato. Esegui: az login" }
 Ok "Sottoscrizione: $($account.name)"
 $env:ARM_SUBSCRIPTION_ID = $account.id
 
+# Senza Docker l'immagine la costruisce GitHub Actions: qui ci limitiamo a
+# portare in Azure quella gia' pubblicata su GHCR, con la sola az CLI.
 $hasDocker = [bool](Get-Command docker -ErrorAction SilentlyContinue)
-if (-not $SkipApi -and -not $hasDocker) {
-    Warn "Docker non trovato: l'immagine dell'API non verra' costruita in locale."
-    Warn "Alternativa: pusha su GitHub e lascia fare al workflow deploy-backend.yml."
-    $SkipApi = $true
+$useGitHubBuild = (-not $SkipApi) -and (-not $hasDocker)
+if ($useGitHubBuild) {
+    Ok "Docker assente: usero' l'immagine costruita da GitHub Actions"
 }
 
 if (-not $GitHubUser) {
@@ -111,8 +112,31 @@ try {
 } finally { Pop-Location }
 
 # ---------------------------------------------------------------------------
+if ($useGitHubBuild) {
+    Step "Immagine dell'API (costruita da GitHub Actions)"
+
+    if (-not $GitHubUser) { Fail "Non riesco a dedurre l'utente GitHub. Usa -GitHubUser <nome>." }
+    $repoName = ""
+    $remote = git -C $root remote get-url origin 2>$null
+    if ($remote -match "github\.com[:/][^/]+/([^/.]+)") { $repoName = $Matches[1] }
+
+    Write-Host "  Il workflow 'Deploy API' costruisce e pubblica su GHCR."
+    Write-Host "  Controlla che sia finito: https://github.com/$GitHubUser/$repoName/actions"
+    Write-Host ""
+    $risposta = Read-Host "  Il workflow e' terminato con successo? [s/N]"
+    if ($risposta -notmatch '^[sSyY]') {
+        Warn "Salto l'aggiornamento dell'API."
+        Warn "Quando il workflow e' finito, lancia: .\scripts\update-api.ps1"
+        $SkipApi = $true
+    } else {
+        & (Join-Path $PSScriptRoot "update-api.ps1")
+        if ($LASTEXITCODE -ne 0) { Fail "Aggiornamento dell'API non riuscito" }
+        $SkipApi = $true   # gia' fatto, salta il ramo con Docker
+    }
+}
+
 if (-not $SkipApi) {
-    Step "Immagine dell'API"
+    Step "Immagine dell'API (build locale con Docker)"
 
     if (-not $GitHubUser) { Fail "Non riesco a dedurre l'utente GitHub. Usa -GitHubUser <nome>." }
 
@@ -188,4 +212,7 @@ Write-Host "  Codice accesso: $code" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "  Il codice di accesso e' anche recuperabile con:"
 Write-Host "    terraform -chdir=terraform output -raw access_code"
+Write-Host ""
+Write-Host "  Per verificare che il modello AI risponda davvero:"
+Write-Host "    .\scripts\update-api.ps1      (aggiorna e lancia il selftest)"
 Write-Host ""
