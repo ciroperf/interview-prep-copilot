@@ -51,6 +51,13 @@ Apps prenderebbero 401 e la revisione non partirebbe mai, e `/api/meta`, che il
 frontend interroga prima del login per sapere come autenticarsi. Nessuno dei due
 espone dati riservati.
 
+`entra_allow_azure_cli = true` (default) pre-autorizza anche la Azure CLI, così
+`az account get-access-token` ottiene un token per l'API senza schermata di
+consenso: è quello che usano gli script per verificare l'AI dopo un deploy. Non
+allarga chi può entrare — con `entra_restrict_to_owner = true` serve comunque
+l'assegnazione esplicita — ma se preferisci che nessun token sia ottenibile da
+riga di comando, mettilo a `false`.
+
 **Richiede** il permesso di creare app registration nel tenant. Se la tua
 organizzazione lo vieta, chiedi a un amministratore oppure resta sul codice.
 

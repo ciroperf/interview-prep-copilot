@@ -186,6 +186,21 @@ variable "entra_allow_localhost" {
   default     = true
 }
 
+variable "entra_allow_azure_cli" {
+  description = <<-EOT
+    Pre-autorizza la Azure CLI sull'app registration, cosi' che
+    `az account get-access-token` ottenga un token per l'API senza consenso
+    interattivo. Serve al selftest dell'AI di scripts/update-api.ps1, che
+    altrimenti si becca un 401 e viene saltato.
+
+    Non allarga l'accesso: con entra_restrict_to_owner = true entra comunque
+    solo chi e' assegnato all'applicazione. Mettilo a false se preferisci che
+    nessun token per questa API sia ottenibile da riga di comando.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "entra_extra_redirect_uris" {
   description = <<-EOT
     Altri URI di reindirizzamento, es. un dominio personalizzato.

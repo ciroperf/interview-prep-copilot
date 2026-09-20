@@ -49,6 +49,9 @@
 # Richiede il permesso di creare app registration nel tenant.
 # enable_entra_auth       = true
 # entra_restrict_to_owner = true    # entra solo tu, non tutto il tenant
+# Pre-autorizza la Azure CLI: serve al selftest dell'AI di update-api.ps1,
+# che altrimenti prende 401 e viene saltato. Non allarga chi puo' entrare.
+# entra_allow_azure_cli   = true
 
 # --- Funzionalita' opzionali ------------------------------------------------
 # Conserva i CV caricati su Blob Storage. Di default vengono letti e scartati.

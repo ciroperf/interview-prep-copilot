@@ -133,6 +133,7 @@ try {
     $entraApiScope = terraform output -raw entra_api_scope
     $authMode      = terraform output -raw auth_mode
     $acrName       = terraform output -raw container_registry_name
+    $acrServer     = terraform output -raw container_registry_login_server
 } catch {
     Fail "Non riesco a leggere gli output di Terraform. Hai gia' fatto un apply?"
 } finally { Pop-Location }
@@ -167,7 +168,10 @@ if (-not $SkipApi -and $imageSource -eq "acr") {
     if ($LASTEXITCODE -ne 0) { Fail "az acr build fallito" }
     Ok "Immagine costruita e pubblicata"
 
-    & (Join-Path $PSScriptRoot "update-api.ps1") -Image "$(terraform -chdir=$tf output -raw container_registry_login_server)/${repoImage}:$sha"
+    # Il server del registro arriva dagli output letti sopra: PowerShell non
+    # espande le variabili dentro un argomento che inizia per "-" e contiene
+    # "=", quindi "terraform -chdir=$tf" passerebbe il nome letterale.
+    & (Join-Path $PSScriptRoot "update-api.ps1") -Image "$acrServer/${repoImage}:$sha"
     if ($LASTEXITCODE -ne 0) { Fail "Aggiornamento dell'API non riuscito" }
     $SkipApi = $true
 }

@@ -183,6 +183,20 @@ $code = terraform output -raw access_code
 curl.exe -s -X POST "$api/api/ai/selftest" -H "X-Access-Code: $code"
 ```
 
+Con `enable_entra_auth = true` il codice non vale più: l'autenticazione
+integrata risponde 401 a qualunque richiesta senza Bearer. Il token lo chiedi
+alla Azure CLI, già autenticata come te:
+
+```powershell
+$api    = terraform output -raw api_url
+$client = terraform output -raw entra_client_id
+$token  = az account get-access-token --resource "api://$client" --query accessToken -o tsv
+curl.exe -s -X POST "$api/api/ai/selftest" -H "Authorization: Bearer $token"
+```
+
+`.\scripts\update-api.ps1` fa da solo la scelta fra i due, leggendo
+`auth_mode` dagli output di Terraform.
+
 ```json
 { "ok": true, "deployment": "gpt-5-mini", "latency_ms": 1840,
   "family_guessed": "reasoning", "family_actual": "reasoning", "adapted": false,

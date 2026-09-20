@@ -10,6 +10,9 @@
 locals {
   entra_enabled = var.enable_entra_auth
 
+  # Client id della Azure CLI: e' lo stesso in tutti i tenant Microsoft.
+  azure_cli_client_id = "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
+
   frontend_url = "https://${azurerm_static_web_app.this.default_host_name}"
 
   # Gli URI di reindirizzamento ammessi dopo il login. Localhost serve per
@@ -86,6 +89,20 @@ resource "azuread_application_pre_authorized" "spa" {
   count                = local.entra_enabled ? 1 : 0
   application_id       = azuread_application.app[0].id
   authorized_client_id = azuread_application.app[0].client_id
+  permission_ids       = [random_uuid.scope[0].result]
+
+  depends_on = [azuread_application_identifier_uri.app]
+}
+
+# Pre-autorizzare anche la Azure CLI permette a `az account get-access-token`
+# di ottenere un token per questa API senza schermata di consenso: e' cosi' che
+# scripts/update-api.ps1 verifica l'AI da riga di comando dopo un deploy.
+# Non allarga chi puo' entrare: con entra_restrict_to_owner resta necessaria
+# l'assegnazione esplicita all'applicazione.
+resource "azuread_application_pre_authorized" "azure_cli" {
+  count                = local.entra_enabled && var.entra_allow_azure_cli ? 1 : 0
+  application_id       = azuread_application.app[0].id
+  authorized_client_id = local.azure_cli_client_id
   permission_ids       = [random_uuid.scope[0].result]
 
   depends_on = [azuread_application_identifier_uri.app]

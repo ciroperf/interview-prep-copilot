@@ -18,6 +18,16 @@ Tutte le rotte tranne `/api/health` e `/api/meta` richiedono l'header
 curl -s -X POST "$API/api/ai/selftest" -H "X-Access-Code: $CODE" | python3 -m json.tool
 ```
 
+Con il login Microsoft attivo il codice non autentica più nulla: serve un token
+utente, e la Azure CLI ne ha già uno se è pre-autorizzata sull'app registration
+(`entra_allow_azure_cli = true`, che è il default).
+
+```bash
+TOKEN="$(az account get-access-token --resource "api://$CLIENT_ID" \
+  --query accessToken --output tsv)"
+curl -s -X POST "$API/api/ai/selftest" -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+```
+
 Il selftest è il modo rapido di verificare modello, versione dell'API e
 permessi dopo un cambio di configurazione. Risponde `400` se l'AI non è
 configurata; se la chiamata fallisce restituisce `ok: false` con l'errore e un

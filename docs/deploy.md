@@ -72,6 +72,12 @@ git push
 selftest dell'AI: in un colpo solo sai se immagine, modello e permessi sono a
 posto.
 
+Con il login Microsoft attivo il selftest ha bisogno di un token utente, che lo
+script chiede alla Azure CLI. Funziona se `entra_allow_azure_cli` è rimasto a
+`true` (il default) e hai fatto `az login` con l'account assegnato all'app;
+altrimenti lo script lo dice e salta il controllo, e la verifica la fai dal
+browser generando un piano.
+
 Il workflow "Deploy API" non ha bisogno di alcun segreto Azure: gli basta il
 `GITHUB_TOKEN` che Actions fornisce da solo. I segreti Azure servono solo se
 vuoi che sia il workflow stesso ad aggiornare la Container App, saltando il
