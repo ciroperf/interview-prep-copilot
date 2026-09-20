@@ -56,6 +56,11 @@ API_URL="$(terraform -chdir="$TF" output -raw api_url)"
 WEB_URL="$(terraform -chdir="$TF" output -raw frontend_url)"
 CODE="$(terraform -chdir="$TF" output -raw access_code)"
 SWA_TOKEN="$(terraform -chdir="$TF" output -raw static_web_app_deployment_token)"
+# Vuoti quando enable_entra_auth = false.
+ENTRA_CLIENT_ID="$(terraform -chdir="$TF" output -raw entra_client_id)"
+ENTRA_TENANT_ID="$(terraform -chdir="$TF" output -raw entra_tenant_id)"
+ENTRA_API_SCOPE="$(terraform -chdir="$TF" output -raw entra_api_scope)"
+AUTH_MODE="$(terraform -chdir="$TF" output -raw auth_mode)"
 
 if ! $SKIP_API; then
   step "Immagine dell'API"
@@ -83,7 +88,11 @@ if ! $SKIP_WEB; then
   step "Frontend"
   cd "$ROOT/frontend"
   [ -d node_modules ] || npm ci
-  VITE_API_BASE_URL="$API_URL" npm run build
+  VITE_API_BASE_URL="$API_URL" \
+  VITE_ENTRA_CLIENT_ID="$ENTRA_CLIENT_ID" \
+  VITE_ENTRA_TENANT_ID="$ENTRA_TENANT_ID" \
+  VITE_ENTRA_API_SCOPE="$ENTRA_API_SCOPE" \
+    npm run build
   npx --yes @azure/static-web-apps-cli deploy ./dist --deployment-token "$SWA_TOKEN" --env production
 fi
 
@@ -98,6 +107,7 @@ cat <<MSG
 
   App           : $WEB_URL
   API           : $API_URL
-  Codice accesso: $CODE
+  Accesso       : $AUTH_MODE
+  Codice accesso: $CODE   (ignorato con il login Microsoft)
 
 MSG

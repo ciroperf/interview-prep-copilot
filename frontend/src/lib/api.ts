@@ -1,5 +1,6 @@
 /** Client HTTP verso l'API. Un solo punto per base URL, codice di accesso ed errori. */
 
+import { entraEnabled, getAccessToken } from './auth'
 import type {
   CodeReview,
   CodingProblem,
@@ -58,8 +59,17 @@ export function setAccessCode(code: string): void {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
-  const code = getAccessCode()
-  if (code) headers.set('X-Access-Code', code)
+
+  if (entraEnabled) {
+    // Con il login Microsoft il token va nel Bearer: lo valida
+    // l'autenticazione integrata di Container Apps prima del backend.
+    const token = await getAccessToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+  } else {
+    const code = getAccessCode()
+    if (code) headers.set('X-Access-Code', code)
+  }
+
   if (init.body && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }

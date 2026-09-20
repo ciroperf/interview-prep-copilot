@@ -128,8 +128,14 @@ Browser ─► Static Web App (React) ─► Container App (FastAPI) ─┬─�
 ```
 
 Nessun segreto fra i componenti: la Container App usa una managed identity con
-i ruoli RBAC minimi su storage e AI. L'unico segreto è il codice di accesso
-dell'app.
+i ruoli RBAC minimi su storage e AI.
+
+Per l'accesso ci sono due modalità: un codice condiviso (default) oppure il
+**login Microsoft con Entra ID**, che si attiva con `enable_entra_auth = true`.
+In quel caso Terraform crea l'app registration, il frontend usa MSAL per
+ottenere un token con OAuth2 e PKCE, e l'autenticazione integrata di Container
+Apps lo valida prima che la richiesta raggiunga l'applicazione. Dettagli in
+[docs/sicurezza.md](docs/sicurezza.md).
 
 * **Backend** — Python 3.12, FastAPI, Pydantic. I servizi non importano
   FastAPI: la logica si testa senza client HTTP.

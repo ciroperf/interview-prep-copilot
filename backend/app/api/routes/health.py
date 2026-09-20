@@ -39,7 +39,10 @@ async def meta(settings: SettingsDep, kb: KnowledgeDep) -> dict:
             else settings.ai_max_output_tokens
         ),
         "code_execution_enabled": settings.enable_code_execution,
-        "access_code_required": bool(settings.access_code),
+        "auth_mode": settings.auth_mode,
+        "access_code_required": (
+            settings.auth_mode == "access_code" and bool(settings.access_code)
+        ),
         "storage_backend": settings.storage_backend,
         "content": {
             "topics": len(kb.topics),

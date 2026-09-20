@@ -129,6 +129,48 @@ variable "store_cv_files" {
   default     = false
 }
 
+# ---------------------------------------------------------------------------
+# Autenticazione
+# ---------------------------------------------------------------------------
+
+variable "enable_entra_auth" {
+  description = <<-EOT
+    true sostituisce il codice di accesso condiviso con il login Microsoft
+    (Entra ID). Terraform crea l'app registration e configura l'autenticazione
+    integrata di Container Apps; il frontend usa MSAL per ottenere il token.
+
+    Richiede il permesso di creare app registration nel tenant. Se la tua
+    organizzazione lo vieta, chiedi a un amministratore o resta sul codice.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "entra_restrict_to_owner" {
+  description = <<-EOT
+    true: entra solo chi viene assegnato esplicitamente all'applicazione, e
+    Terraform assegna te. false: chiunque abbia un account nel tenant.
+    Per un'app personale il valore giusto e' true.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "entra_allow_localhost" {
+  description = <<-EOT
+    Aggiunge http://localhost:5173 fra i redirect ammessi, per sviluppare il
+    frontend in locale contro l'API vera. Toglilo se non ti serve.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "entra_extra_redirect_uris" {
+  description = "Altri URI di reindirizzamento, es. un dominio personalizzato."
+  type        = list(string)
+  default     = []
+}
+
 variable "storage_shared_access_key_enabled" {
   description = <<-EOT
     Chiavi dell'account storage. L'app non le usa mai (va di managed identity),

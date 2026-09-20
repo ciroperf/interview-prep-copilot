@@ -76,3 +76,30 @@ output "next_steps" {
     4. Apri: https://${azurerm_static_web_app.this.default_host_name}
   EOT
 }
+
+
+# ---------------------------------------------------------------------------
+# Autenticazione (valorizzati solo con enable_entra_auth = true)
+# ---------------------------------------------------------------------------
+
+output "entra_client_id" {
+  description = "Client ID dell'app registration. Va in VITE_ENTRA_CLIENT_ID."
+  value       = local.entra_enabled ? azuread_application.app[0].client_id : ""
+}
+
+output "entra_tenant_id" {
+  description = "Tenant ID. Va in VITE_ENTRA_TENANT_ID."
+  value       = local.entra_enabled ? data.azuread_client_config.current[0].tenant_id : ""
+}
+
+output "entra_api_scope" {
+  description = "Scope da richiedere con MSAL. Va in VITE_ENTRA_API_SCOPE."
+  value = local.entra_enabled ? (
+    "api://${azuread_application.app[0].client_id}/access_as_user"
+  ) : ""
+}
+
+output "auth_mode" {
+  description = "Come si accede all'app su questa istanza."
+  value       = local.entra_enabled ? "entra_id" : "access_code"
+}

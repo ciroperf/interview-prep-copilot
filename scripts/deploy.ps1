@@ -107,6 +107,12 @@ try {
     $swaName = terraform output -raw static_web_app_name
     $code    = terraform output -raw access_code
     $swaToken = terraform output -raw static_web_app_deployment_token
+    # Vuoti quando enable_entra_auth = false: in quel caso il bundle resta in
+    # modalita' codice di accesso.
+    $entraClientId = terraform output -raw entra_client_id
+    $entraTenantId = terraform output -raw entra_tenant_id
+    $entraApiScope = terraform output -raw entra_api_scope
+    $authMode      = terraform output -raw auth_mode
 } catch {
     Fail "Non riesco a leggere gli output di Terraform. Hai gia' fatto un apply?"
 } finally { Pop-Location }
@@ -191,10 +197,15 @@ if (-not $SkipWeb) {
     Push-Location (Join-Path $root "frontend")
     try {
         if (-not (Test-Path "node_modules")) { npm ci }
-        $env:VITE_API_BASE_URL = $apiUrl
+        # L'URL dell'API e la configurazione del login sono variabili di BUILD:
+        # finiscono dentro il bundle, quindi cambiarle richiede un nuovo build.
+        $env:VITE_API_BASE_URL   = $apiUrl
+        $env:VITE_ENTRA_CLIENT_ID = $entraClientId
+        $env:VITE_ENTRA_TENANT_ID = $entraTenantId
+        $env:VITE_ENTRA_API_SCOPE = $entraApiScope
         npm run build
         if ($LASTEXITCODE -ne 0) { Fail "build del frontend fallita" }
-        Ok "Bundle compilato con API = $apiUrl"
+        Ok "Bundle compilato con API = $apiUrl, accesso = $authMode"
 
         npx --yes @azure/static-web-apps-cli deploy ./dist --deployment-token $swaToken --env production
         if ($LASTEXITCODE -ne 0) { Fail "pubblicazione sulla Static Web App fallita" }
@@ -208,7 +219,11 @@ Step "Fatto"
 Write-Host ""
 Write-Host "  App           : $webUrl" -ForegroundColor Green
 Write-Host "  API           : $apiUrl"
-Write-Host "  Codice accesso: $code" -ForegroundColor Yellow
+if ($authMode -eq "entra_id") {
+    Write-Host "  Accesso       : login Microsoft (Entra ID)" -ForegroundColor Yellow
+} else {
+    Write-Host "  Codice accesso: $code" -ForegroundColor Yellow
+}
 Write-Host ""
 Write-Host "  Il codice di accesso e' anche recuperabile con:"
 Write-Host "    terraform -chdir=terraform output -raw access_code"

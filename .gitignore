@@ -13,7 +13,10 @@ build/
 # Node
 node_modules/
 frontend/dist/
+frontend/dist-*/
 .vite/
+# Cache incrementale di tsc: e' un artefatto di build, cambia a ogni compilazione.
+*.tsbuildinfo
 
 # Dati locali e segreti
 .env

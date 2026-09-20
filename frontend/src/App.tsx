@@ -3,6 +3,7 @@ import { Link, NavLink, Route, Routes } from 'react-router-dom'
 
 import { ErrorBox, Spinner } from './components/ui'
 import { ApiError, api, getAccessCode, setAccessCode } from './lib/api'
+import { currentAccount, entraEnabled, login, logout } from './lib/auth'
 import type { Meta } from './lib/types'
 import CodingPage from './pages/CodingPage'
 import CvPage from './pages/CvPage'
@@ -75,12 +76,69 @@ function AccessGate({ onUnlock }: { onUnlock: () => void }) {
   )
 }
 
+function MicrosoftGate({ onSignedIn }: { onSignedIn: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function accedi() {
+    setBusy(true)
+    setError('')
+    try {
+      await login()
+      onSignedIn()
+    } catch (err) {
+      // Il blocco dei popup è la causa più comune, e il messaggio di MSAL da
+      // solo non lo lascia capire.
+      const message = err instanceof Error ? err.message : 'Errore imprevisto'
+      setError(
+        message.includes('popup')
+          ? 'Il browser ha bloccato la finestra di accesso. Consentila e riprova.'
+          : message,
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="container" style={{ maxWidth: 420, paddingTop: 80 }}>
+      <div className="card center">
+        <h1>Interview Prep Copilot</h1>
+        <p className="muted">Accedi con il tuo account Microsoft per continuare.</p>
+        {error && <div className="alert error">{error}</div>}
+        <button className="primary" onClick={accedi} disabled={busy}>
+          {busy && <span className="spinner" />} Accedi con Microsoft
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [meta, setMeta] = useState<Meta | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [locked, setLocked] = useState(false)
+  const [account, setAccount] = useState<string | null>(null)
+  const [checkingAccount, setCheckingAccount] = useState(entraEnabled)
   const [nonce, setNonce] = useState(0)
+
+  // Con il login Microsoft la sessione la tiene MSAL: qui si guarda solo se
+  // esiste già, per non chiedere di riaccedere a ogni ricarica.
+  useEffect(() => {
+    if (!entraEnabled) return
+    let alive = true
+    currentAccount()
+      .then((found) => {
+        if (alive) setAccount(found?.username ?? null)
+      })
+      .catch(() => {
+        if (alive) setAccount(null)
+      })
+      .finally(() => {
+        if (alive) setCheckingAccount(false)
+      })
+  }, [nonce])
 
   useEffect(() => {
     let alive = true
@@ -90,7 +148,7 @@ export default function App() {
       .then(async (value) => {
         if (!alive) return
         setMeta(value)
-        if (value.access_code_required) {
+        if (!entraEnabled && value.access_code_required) {
           // /meta è pubblica: verifichiamo il codice su una rotta protetta.
           try {
             await api.categories()
@@ -112,7 +170,7 @@ export default function App() {
     }
   }, [nonce])
 
-  if (loading) return <Spinner label="Connessione all'API…" />
+  if (loading || checkingAccount) return <Spinner label="Connessione all'API…" />
   if (error) {
     return (
       <div className="container" style={{ maxWidth: 560, paddingTop: 64 }}>
@@ -123,6 +181,9 @@ export default function App() {
         </p>
       </div>
     )
+  }
+  if (entraEnabled && !account) {
+    return <MicrosoftGate onSignedIn={() => setNonce((n) => n + 1)} />
   }
   if (locked) return <AccessGate onUnlock={() => setNonce((n) => n + 1)} />
 
@@ -150,6 +211,18 @@ export default function App() {
             <span className="badge nowrap" title="Nessun modello configurato: l'app usa le euristiche deterministiche.">
               AI non attiva
             </span>
+          )}
+          {entraEnabled && account && (
+            <button
+              className="ghost sm nowrap"
+              title={`Connesso come ${account}`}
+              onClick={async () => {
+                await logout()
+                setAccount(null)
+              }}
+            >
+              Esci
+            </button>
           )}
         </header>
 

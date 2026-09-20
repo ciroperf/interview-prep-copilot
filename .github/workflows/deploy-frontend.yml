@@ -34,6 +34,11 @@ jobs:
         # build, non di runtime, quindi un cambio di URL richiede un nuovo build.
         env:
           VITE_API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          # Vuoti se non usi il login Microsoft: il bundle resta in modalita'
+          # codice di accesso. I valori li stampa `terraform output`.
+          VITE_ENTRA_CLIENT_ID: ${{ secrets.ENTRA_CLIENT_ID }}
+          VITE_ENTRA_TENANT_ID: ${{ secrets.ENTRA_TENANT_ID }}
+          VITE_ENTRA_API_SCOPE: ${{ secrets.ENTRA_API_SCOPE }}
         run: |
           npm ci
           npm run build

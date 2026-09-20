@@ -29,12 +29,38 @@ AIDep = Annotated[AIClient, Depends(get_ai_client)]
 async def require_access(
     settings: SettingsDep,
     x_access_code: Annotated[str | None, Header(alias="X-Access-Code")] = None,
+    principal_id: Annotated[
+        str | None, Header(alias="X-MS-CLIENT-PRINCIPAL-ID")
+    ] = None,
+    principal_name: Annotated[
+        str | None, Header(alias="X-MS-CLIENT-PRINCIPAL-NAME")
+    ] = None,
 ) -> None:
-    """Protezione a codice condiviso: l'app è pensata per un singolo utente.
+    """Verifica che chi chiama abbia diritto di farlo, nel modo configurato.
 
-    Se `access_code` è vuoto l'API resta aperta, cosa accettabile solo in locale.
-    In Azure il codice viene sempre impostato dal Terraform.
+    Con `entra_id` la validazione del token è già avvenuta: l'autenticazione
+    integrata di Container Apps sta davanti all'applicazione, rifiuta da sé le
+    richieste senza un Bearer valido e inietta l'identità negli header
+    X-MS-CLIENT-PRINCIPAL-*. Questi header sono affidabili perché quel livello
+    rimuove quelli eventualmente inviati dal client; qui si controlla solo che
+    ci siano, il che copre il caso di una configurazione incompleta.
+
+    Con `access_code` si confronta un codice condiviso. Se è vuoto l'API resta
+    aperta: accettabile solo in locale.
     """
+    if settings.auth_mode == "entra_id":
+        if not (principal_id or principal_name):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=(
+                    "Autenticazione Microsoft richiesta. Se vedi questo errore da "
+                    "un'applicazione già autenticata, l'autenticazione integrata "
+                    "della Container App non è attiva."
+                ),
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return
+
     expected = settings.access_code
     if not expected:
         return

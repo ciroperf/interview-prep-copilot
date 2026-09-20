@@ -5,13 +5,63 @@ contesto: sono adeguate a un progetto personale, non a un servizio multi-utente.
 
 ## Modello di accesso
 
-Un **codice di accesso condiviso**, confrontato a tempo costante con
-`hmac.compare_digest`. Il client lo conserva in `localStorage` e lo invia
-nell'header `X-Access-Code`.
+Due modalità, scelte con `enable_entra_auth` nel Terraform.
+
+### Login Microsoft (Entra ID) — consigliata
+
+```hcl
+enable_entra_auth       = true
+entra_restrict_to_owner = true
+```
+
+Il flusso è **OAuth2 Authorization Code con PKCE**:
+
+```
+Browser
+  │ 1. MSAL apre un popup su login.microsoftonline.com
+  │ 2. l'utente si autentica, torna un authorization code
+  │ 3. MSAL lo scambia con un access token (PKCE, nessun client secret)
+  ▼
+Static Web App ──Authorization: Bearer <token>──► Container App
+                                                   └ autenticazione integrata:
+                                                     valida firma, issuer,
+                                                     audience e scadenza
+```
+
+Chi fa cosa:
+
+* **Terraform** crea l'app registration, espone lo scope `access_as_user`,
+  registra gli URI di reindirizzamento e configura l'autenticazione integrata
+  della Container App con `unauthenticatedClientAction = Return401`.
+* **MSAL** nel frontend ottiene e rinnova il token. Sta in `sessionStorage`,
+  non in `localStorage`: non sopravvive alla chiusura del browser.
+* **L'autenticazione integrata di Container Apps** valida il token *prima* che
+  la richiesta arrivi all'applicazione, e inietta l'identità negli header
+  `X-MS-CLIENT-PRINCIPAL-*`.
+* **Il backend** non verifica firme: si fida di quegli header, perché quel
+  livello rimuove quelli eventualmente inviati dal client. Controlla solo che
+  ci siano, il che intercetta una configurazione incompleta.
+
+Con `entra_restrict_to_owner = true` entra **solo chi è assegnato
+esplicitamente** all'applicazione, e Terraform assegna te. Con `false`, chiunque
+abbia un account nel tuo tenant.
+
+Due percorsi restano pubblici: `/api/health`, altrimenti le probe di Container
+Apps prenderebbero 401 e la revisione non partirebbe mai, e `/api/meta`, che il
+frontend interroga prima del login per sapere come autenticarsi. Nessuno dei due
+espone dati riservati.
+
+**Richiede** il permesso di creare app registration nel tenant. Se la tua
+organizzazione lo vieta, chiedi a un amministratore oppure resta sul codice.
+
+### Codice di accesso condiviso — default
+
+Un codice confrontato a tempo costante con `hmac.compare_digest`, conservato dal
+client in `localStorage` e inviato nell'header `X-Access-Code`.
 
 Cosa protegge: impedisce a chi trova l'URL di usare la tua app e di consumare i
-tuoi token. Cosa non fa: non distingue utenti, non ha scadenza, non ha
-revoca selettiva. `/api/health` resta pubblico perché serve alle probe.
+tuoi token. Cosa non fa: non distingue utenti, non ha scadenza, non ha revoca
+selettiva.
 
 Il codice lo genera Terraform se non lo specifichi:
 
@@ -19,17 +69,8 @@ Il codice lo genera Terraform se non lo specifichi:
 terraform output -raw access_code
 ```
 
-Per alzare l'asticella, Container Apps ha l'autenticazione integrata con Entra
-ID, che si attiva senza toccare il codice dell'applicazione:
-
-```bash
-az containerapp auth microsoft update \
-  --name <container-app> --resource-group <rg> \
-  --client-id <app-id> --tenant-id <tenant> \
-  --yes
-az containerapp auth update --name <container-app> --resource-group <rg> \
-  --unauthenticated-client-action RedirectToLoginPage
-```
+Passando a Entra, il codice smette di valere: un vecchio codice rimasto in giro
+non diventa una scorciatoia.
 
 ## Segreti
 

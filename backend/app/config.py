@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -23,11 +24,23 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # Elenco di origin ammessi dal CORS. In locale Vite gira su 5173.
-    cors_origins: list[str] = Field(
+    #
+    # NoDecode è necessario: senza, pydantic-settings prova a interpretare il
+    # valore della variabile d'ambiente come JSON e fallisce con SettingsError
+    # prima che il validator qui sotto possa vederlo. Il Terraform passa questa
+    # variabile come lista separata da virgole, quindi senza NoDecode il
+    # container non partirebbe affatto.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
     )
 
-    # Codice di accesso condiviso: l'app e' pensata per un singolo utente.
+    # Come si entra nell'app:
+    #   access_code -> codice condiviso nell'header X-Access-Code
+    #   entra_id    -> login Microsoft, validato dall'autenticazione integrata
+    #                  di Container Apps prima che la richiesta arrivi qui
+    auth_mode: Literal["access_code", "entra_id"] = "access_code"
+
+    # Codice di accesso condiviso, usato solo con auth_mode = access_code.
     # Se vuoto, l'API resta aperta (accettabile solo in locale).
     access_code: str = ""
 
@@ -73,15 +86,23 @@ class Settings(BaseSettings):
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
-        # Permette sia la lista JSON sia la forma "a,b,c" comoda nelle app settings di Azure.
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return []
-            if stripped.startswith("["):
-                return value
-            return [item.strip() for item in stripped.split(",") if item.strip()]
-        return value
+        """Accetta sia la lista JSON sia la forma "a,b,c".
+
+        Con NoDecode sul campo, qui arriva sempre la stringa grezza: la
+        decodifica del JSON tocca a noi. La forma con le virgole è quella che
+        usa il Terraform, perché è l'unica comoda in una variabile d'ambiente.
+        """
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            return []
+        if stripped.startswith("["):
+            try:
+                return json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"CORS_ORIGINS non è JSON valido: {exc}") from exc
+        return [item.strip() for item in stripped.split(",") if item.strip()]
 
     @property
     def ai_configured(self) -> bool:

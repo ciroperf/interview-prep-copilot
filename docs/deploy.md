@@ -236,6 +236,50 @@ az ad app federated-credential create --id "$OBJ_ID" --parameters '{
 Da quel momento un push su `main` che tocca `backend/` ricostruisce e rilascia
 l'API, e uno che tocca `frontend/` ripubblica il sito.
 
+## Attivare il login Microsoft
+
+Di default si entra con un codice condiviso. Per passare a Entra ID:
+
+```hcl
+# terraform.tfvars
+enable_entra_auth       = true
+entra_restrict_to_owner = true    # entra solo tu
+```
+
+```powershell
+terraform apply
+```
+
+Terraform crea l'app registration, la registra come SPA con gli URI di
+reindirizzamento giusti e configura l'autenticazione integrata della Container
+App. Poi ricompila il frontend, perché la configurazione del login è una
+variabile di **build**:
+
+```powershell
+.\scripts\deploy.ps1 -SkipInfra -SkipApi
+```
+
+Lo script legge da solo `entra_client_id`, `entra_tenant_id` e
+`entra_api_scope` dagli output e li passa alla build.
+
+Se usi le GitHub Actions, aggiungi tre secret all'ambiente `production`:
+
+| Secret | Valore |
+|---|---|
+| `ENTRA_CLIENT_ID` | `terraform output -raw entra_client_id` |
+| `ENTRA_TENANT_ID` | `terraform output -raw entra_tenant_id` |
+| `ENTRA_API_SCOPE` | `terraform output -raw entra_api_scope` |
+
+Verifica aprendo l'app: deve comparire "Accedi con Microsoft" al posto del
+campo per il codice.
+
+> Serve il permesso di creare app registration nel tenant. Se
+> l'organizzazione lo vieta, l'apply fallisce con un errore di autorizzazione:
+> chiedi a un amministratore o resta sul codice di accesso.
+
+> Il popup è bloccato dal browser? L'app lo dice esplicitamente. Consenti i
+> popup per il dominio della Static Web App.
+
 ## Aggiornare il modello AI
 
 Prima guarda cosa è davvero disponibile nella tua regione:
