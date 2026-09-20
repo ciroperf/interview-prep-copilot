@@ -1,0 +1,345 @@
+# Categoria "Databases & Data Handling" - concetti 11-20 della checklist.
+- id: db-11-sql-vs-nosql
+  title: SQL vs NoSQL - quando usare cosa
+  category: databases
+  track: knowledge
+  level: medium
+  tags: [database, sql, nosql, design]
+  estimated_minutes: 30
+  summary: >-
+    La domanda non è quale sia più veloce, ma quali garanzie ti servono e come
+    interrogherai i dati. I database relazionali ti danno schema, join e transazioni
+    multi-riga; i NoSQL ti danno modelli specializzati e scalabilità orizzontale più
+    semplice, al prezzo di dover conoscere i pattern di accesso in anticipo.
+  key_points:
+    - "Relazionale: schema forte, join, transazioni ACID, query non previste in fase di design restano possibili"
+    - "Document (MongoDB, Cosmos): documenti annidati, schema flessibile, ottimo quando l'aggregato si legge e si scrive intero"
+    - "Key-value (Redis, DynamoDB): latenza minima, accesso per chiave, zero query ad-hoc"
+    - "Colonnare (ClickHouse, BigQuery): analitica su grandi volumi, pessimo per scritture puntuali"
+    - "Grafo (Neo4j): relazioni a profondità variabile, dove i join ricorsivi in SQL esplodono"
+    - "In NoSQL si modella per query: la denormalizzazione è la norma, non l'eccezione"
+    - "Oggi la scelta è meno netta: Postgres fa JSONB, ricerca full-text e sharding con estensioni"
+  interview_answer: >-
+    Parto dal default relazionale, di solito Postgres, e chiedo cosa mi costringerebbe ad
+    allontanarmene. Se i pattern di accesso sono noti e servono latenze sotto il
+    millisecondo su chiave, un key-value ha senso. Se i dati sono aggregati che leggo e
+    scrivo interi, un document store toglie join inutili. Se devo fare analitica su
+    miliardi di righe, un colonnare. Il motivo per cui parto dal relazionale è che le
+    transazioni e le query non previste sono le cose che si rimpiangono di più: i pattern
+    di accesso cambiano, e in NoSQL cambiare pattern spesso significa rimodellare i dati.
+  pitfalls:
+    - "Scegliere NoSQL per la scalabilità quando il carico reale sta comodamente su una singola istanza Postgres"
+    - "Usare un document store e poi ricostruire i join a mano nel codice applicativo"
+    - "Credere che NoSQL significhi senza schema: lo schema c'è, è solo implicito nel codice"
+  follow_up_questions:
+    - "Quando conviene denormalizzare in un database relazionale?"
+    - "Come modelleresti un feed social su DynamoDB?"
+
+- id: db-12-indexes
+  title: Indici e come velocizzano le query
+  category: databases
+  track: knowledge
+  level: medium
+  tags: [database, performance, sql]
+  estimated_minutes: 35
+  summary: >-
+    Un indice è una struttura ordinata (quasi sempre un B-tree) che permette di trovare
+    le righe senza scandire la tabella. Accelera le letture e rallenta le scritture,
+    perché ogni INSERT, UPDATE e DELETE deve aggiornare anche gli indici.
+  key_points:
+    - "B-tree: ricerca, range e ORDER BY. È il default e copre il 90% dei casi"
+    - "Hash: solo uguaglianza, niente range. Utile in casi specifici"
+    - "GIN/GiST: full-text, JSONB, dati geospaziali"
+    - "Indice composito: l'ordine delle colonne conta. Un indice (a, b) serve per WHERE a e per WHERE a AND b, non per WHERE b da solo (regola del leftmost prefix)"
+    - "Covering index: se l'indice contiene tutte le colonne richieste, il DB non tocca la tabella (index-only scan)"
+    - "Cardinalità: indicizzare una colonna booleana è spesso inutile, il planner preferisce il seq scan"
+    - "Una funzione sulla colonna annulla l'indice: WHERE lower(email)=... richiede un indice funzionale su lower(email)"
+    - "EXPLAIN ANALYZE è lo strumento per capire cosa sta davvero succedendo"
+  interview_answer: >-
+    Un indice è una copia ordinata di alcune colonne che permette al database di fare una
+    ricerca logaritmica invece di leggere tutta la tabella. Il costo è sulle scritture e
+    sullo spazio, quindi non ne aggiungo a caso: parto dalle query lente reali, guardo
+    l'EXPLAIN ANALYZE e verifico se sto facendo un seq scan dove mi aspettavo un index
+    scan. Le due cose che controllo più spesso sono l'ordine delle colonne negli indici
+    compositi, per via del leftmost prefix, e le funzioni applicate alla colonna nel WHERE,
+    perché rendono l'indice inutilizzabile a meno di non crearne uno funzionale.
+  pitfalls:
+    - "Indicizzare ogni colonna per sicurezza, degradando tutte le scritture"
+    - "Indice composito nell'ordine sbagliato, che quindi non viene mai usato"
+    - "WHERE con funzioni o cast impliciti che invalidano l'indice"
+    - "Creare un indice su una tabella grande in produzione senza CREATE INDEX CONCURRENTLY"
+  follow_up_questions:
+    - "Hai un indice su (user_id, created_at). Serve per WHERE created_at > X?"
+    - "Perché aggiungere indici può peggiorare le performance complessive?"
+  resources:
+    - title: "Use The Index, Luke!"
+      url: "https://use-the-index-luke.com/"
+      kind: article
+
+- id: db-13-acid
+  title: Proprietà ACID
+  category: databases
+  track: knowledge
+  level: easy
+  tags: [database, transazioni, sql]
+  estimated_minutes: 20
+  summary: >-
+    ACID descrive le garanzie di una transazione: Atomicità (tutto o niente), Consistenza
+    (i vincoli restano validi), Isolamento (le transazioni concorrenti non si disturbano),
+    Durabilità (una volta confermata, resta).
+  key_points:
+    - "Atomicity: il rollback riporta allo stato iniziale, nessuna esecuzione parziale"
+    - "Consistency: i vincoli del database (chiavi, unique, check) valgono prima e dopo. Non è la consistenza dei sistemi distribuiti di CAP"
+    - "Isolation: è l'unica proprietà negoziabile, tramite i livelli di isolamento"
+    - "Durability: garantita dal write-ahead log scritto su disco prima del commit"
+    - "La C di ACID e la C di CAP sono cose diverse: confonderle è un errore frequente"
+  interview_answer: >-
+    Atomicità, consistenza, isolamento e durabilità. Nella pratica quella su cui si lavora
+    davvero è l'isolamento, perché le altre tre o ci sono o non ci sono, mentre
+    l'isolamento si sceglie per livelli e ogni livello ha un costo. Un dettaglio che
+    sottolineo sempre è che la C di ACID riguarda i vincoli di integrità del database e non
+    ha niente a che vedere con la C di CAP, che parla di visibilità delle scritture fra
+    nodi.
+  pitfalls:
+    - "Confondere la Consistency di ACID con quella di CAP"
+    - "Dare per scontato che il default sia Serializable: quasi mai lo è"
+  follow_up_questions:
+    - "Come fa il database a garantire la durabilità se manca la corrente?"
+
+- id: db-14-transactions-isolation
+  title: Transazioni e livelli di isolamento
+  category: databases
+  track: knowledge
+  level: hard
+  tags: [database, transazioni, concorrenza]
+  estimated_minutes: 40
+  summary: >-
+    I livelli di isolamento stabiliscono quali anomalie di concorrenza sono tollerate.
+    Più alto è il livello, meno anomalie e meno concorrenza. Conoscere le anomalie conta
+    più che memorizzare la tabella.
+  key_points:
+    - "Dirty read: leggi dati non ancora confermati da un'altra transazione"
+    - "Non-repeatable read: rileggi la stessa riga e trovi un valore diverso"
+    - "Phantom read: rileggi lo stesso intervallo e trovi righe nuove"
+    - "Read Uncommitted permette tutto; Read Committed blocca le dirty read; Repeatable Read blocca anche le non-repeatable; Serializable blocca tutto"
+    - "Default: Postgres e SQL Server usano Read Committed, MySQL InnoDB usa Repeatable Read"
+    - "Il Repeatable Read di Postgres è uno snapshot isolation: blocca anche i phantom, ma non previene tutte le write skew"
+    - "Write skew: due transazioni leggono lo stesso stato e scrivono righe diverse, violando insieme un invariante (il classico caso dei due medici di guardia)"
+    - "Transazioni lunghe sono un problema operativo: tengono i lock e gonfiano il bloat"
+  interview_answer: >-
+    Ragiono per anomalie, non per nomi di livello. Le tre classiche sono dirty read,
+    non-repeatable read e phantom, e ogni livello ne esclude un sottoinsieme. Nella pratica
+    la maggior parte dei sistemi gira su Read Committed, che va benissimo finché non ho
+    invarianti che coinvolgono più righe. Quando li ho, come il vincolo che almeno un
+    medico resti di guardia, Read Committed non basta e nemmeno lo snapshot isolation, per
+    via della write skew: lì serve Serializable oppure un lock esplicito con SELECT FOR
+    UPDATE sulle righe coinvolte.
+  pitfalls:
+    - "Assumere che il proprio DB usi Serializable di default"
+    - "Non gestire il retry: in Serializable le transazioni possono fallire e vanno ritentate"
+    - "Tenere aperta una transazione durante una chiamata HTTP esterna"
+  follow_up_questions:
+    - "Cos'è la write skew e perché lo snapshot isolation non la previene?"
+    - "Quando useresti SELECT ... FOR UPDATE?"
+
+- id: db-15-normalization
+  title: Normalizzazione vs denormalizzazione
+  category: databases
+  track: knowledge
+  level: medium
+  tags: [database, design, modellazione]
+  estimated_minutes: 25
+  summary: >-
+    Normalizzare elimina la duplicazione: ogni fatto è scritto in un solo posto, quindi
+    non può diventare incoerente. Denormalizzare duplica di proposito per evitare join
+    costosi, accettando l'onere di tenere allineate le copie.
+  key_points:
+    - "1NF valori atomici, 2NF niente dipendenze parziali dalla chiave, 3NF niente dipendenze transitive"
+    - "Normalizzato: scritture semplici e sicure, letture con più join"
+    - "Denormalizzato: letture veloci, scritture che devono aggiornare N posti"
+    - "Denormalizzazioni comuni: contatori materializzati, campi copiati per evitare un join, viste materializzate"
+    - "Il dato denormalizzato è una cache: vale la stessa domanda, come lo invalido"
+    - "In NoSQL la denormalizzazione è il punto di partenza, non un'ottimizzazione"
+  interview_answer: >-
+    Parto normalizzato perché la correttezza è più difficile da recuperare della
+    performance. Denormalizzo solo quando ho una query lenta misurata e il join è
+    davvero il collo di bottiglia, e quando lo faccio tratto il campo duplicato come una
+    cache: decido esplicitamente chi lo aggiorna e cosa succede se va fuori sincrono. Il
+    caso tipico è un contatore di commenti sul post: tenerlo aggiornato con un trigger o
+    un evento è molto meno costoso di un COUNT su ogni lettura, ma va messo in conto che
+    ora esiste un secondo posto dove la verità può divergere.
+  pitfalls:
+    - "Denormalizzare prima di avere un problema misurato"
+    - "Duplicare dati senza definire chi è responsabile dell'aggiornamento"
+    - "Normalizzare all'estremo e ritrovarsi con query a otto join per una schermata"
+  follow_up_questions:
+    - "Come mantieni coerente un contatore denormalizzato sotto carico concorrente?"
+
+- id: db-16-pagination
+  title: Paginazione - offset vs cursor
+  category: databases
+  track: knowledge
+  level: medium
+  tags: [database, api, performance]
+  estimated_minutes: 25
+  summary: >-
+    La paginazione a offset è semplice ma degrada in profondità e salta o duplica righe
+    se i dati cambiano. La paginazione a cursore (keyset) resta veloce a qualunque
+    profondità ed è stabile, ma non permette di saltare a pagina arbitraria.
+  key_points:
+    - "OFFSET 100000 LIMIT 20 costringe il DB a leggere e scartare 100.000 righe"
+    - "Se qualcuno inserisce una riga fra la pagina 1 e la 2, con offset vedi un elemento due volte o non lo vedi affatto"
+    - "Keyset: WHERE (created_at, id) < (:last_created_at, :last_id) ORDER BY created_at DESC, id DESC LIMIT 20"
+    - "Il cursore deve includere un tie-breaker unico (l'id) o le righe con lo stesso timestamp si perdono"
+    - "Il cursore si restituisce opaco (base64) per poterne cambiare il formato senza rompere i client"
+    - "Offset resta accettabile su dataset piccoli o back-office dove serve il 'vai a pagina N'"
+  interview_answer: >-
+    Per feed e liste infinite uso la paginazione a cursore, perché con l'offset il database
+    deve comunque leggere e buttare via tutte le righe precedenti, quindi la pagina 5000
+    costa molto più della pagina 1. C'è anche un problema di correttezza che spesso pesa di
+    più: con l'offset, se arrivano nuovi elementi mentre l'utente scorre, alcuni vengono
+    saltati e altri mostrati due volte. Il cursore risolve entrambi, a patto di ordinare su
+    una coppia di colonne di cui una sia unica, tipicamente timestamp più id, altrimenti i
+    record con lo stesso timestamp scompaiono.
+  pitfalls:
+    - "Cursore senza tie-breaker unico: perdi righe con timestamp identico"
+    - "Esporre il cursore come id numerico grezzo, legandoti all'implementazione"
+    - "Usare offset su un feed social e stupirsi dei duplicati"
+  follow_up_questions:
+    - "Come implementeresti un cursore su un ordinamento per rilevanza calcolata?"
+
+- id: db-17-sharding-partitioning
+  title: Sharding e partizionamento
+  category: databases
+  track: knowledge
+  level: hard
+  tags: [database, scalabilita, distribuito]
+  estimated_minutes: 35
+  summary: >-
+    Partizionare significa dividere una tabella in pezzi; fare sharding significa
+    distribuire quei pezzi su macchine diverse. Il partizionamento risolve problemi di
+    manutenzione e di dimensione, lo sharding risolve problemi di capacità di scrittura.
+  key_points:
+    - "Partizionamento verticale: colonne diverse su tabelle diverse. Orizzontale: righe diverse su partizioni diverse"
+    - "Strategie di shard key: range (semplice, rischio hotspot), hash (distribuzione uniforme, addio range query), directory (flessibile, richiede un lookup)"
+    - "La shard key è la decisione più difficile da cambiare: sbagliarla costa una migrazione"
+    - "Le query cross-shard sono costose: join e aggregazioni devono essere fatte a livello applicativo"
+    - "Le transazioni cross-shard richiedono 2PC o saga: meglio progettare perché non servano"
+    - "Il consistent hashing limita il rimescolamento quando aggiungi o togli nodi"
+    - "Il partizionamento per data è il caso più comune e più utile: DROP PARTITION per la retention è istantaneo"
+  interview_answer: >-
+    Prima di sharding provo tutto il resto: indici, read replica, caching, partizionamento
+    locale. Lo sharding lo considero quando il collo di bottiglia sono le scritture su una
+    sola macchina, perché introduce costi permanenti. La scelta della shard key è la parte
+    che pesa davvero: deve distribuire uniformemente ma anche tenere insieme i dati che
+    interrogo insieme, altrimenti ogni query diventa uno scatter-gather su tutti i nodi.
+    In un sistema multi-tenant di solito parto dal tenant id, perché quasi tutte le query
+    sono già naturalmente limitate a un tenant, a patto di gestire a parte i tenant enormi
+    che da soli farebbero hotspot.
+  pitfalls:
+    - "Shard key a bassa cardinalità o con distribuzione sbilanciata: un nodo va in fiamme e gli altri dormono"
+    - "Fare sharding come prima mossa invece che come ultima"
+    - "Dimenticare che unique globali e auto-increment smettono di funzionare"
+  follow_up_questions:
+    - "Come faresti resharding senza downtime?"
+    - "Perché il consistent hashing riduce il rimescolamento dei dati?"
+
+- id: db-18-read-replicas
+  title: Read replica e scalabilità delle scritture
+  category: databases
+  track: knowledge
+  level: medium
+  tags: [database, scalabilita, replica]
+  estimated_minutes: 30
+  summary: >-
+    Le read replica scalano le letture copiando i dati dal primario. Non scalano le
+    scritture, che restano su un solo nodo, e introducono il replication lag: una lettura
+    subito dopo una scrittura può non vedere il dato appena scritto.
+  key_points:
+    - "Replica asincrona: veloce, ma una failover può perdere le ultime transazioni"
+    - "Replica sincrona: nessuna perdita, ma ogni commit paga la latenza della replica"
+    - "Replication lag: tipicamente millisecondi, ma sotto carico può arrivare a secondi"
+    - "Read-your-own-writes: dopo una scrittura, instrada le letture di quell'utente sul primario per qualche secondo"
+    - "Per scalare le scritture servono altre strade: sharding, batching, CQRS, code"
+    - "Le replica servono anche per HA e per isolare i job analitici dal traffico applicativo"
+  interview_answer: >-
+    Le replica sono la prima leva quando il carico è sbilanciato sulle letture, che è il
+    caso normale. Il punto da non sottovalutare è il lag: con replica asincrona l'utente
+    che salva un profilo e ricarica la pagina può vedere ancora i dati vecchi. Lo gestisco
+    con il read-your-own-writes, mandando al primario le letture dello stesso utente per
+    una breve finestra dopo una sua scrittura. Se invece il collo di bottiglia sono le
+    scritture, le replica non aiutano per niente e devo guardare altrove: batching, code
+    per assorbire i picchi, o partizionare i dati.
+  pitfalls:
+    - "Mandare sulle replica le letture che seguono immediatamente una scrittura"
+    - "Pensare che aggiungere replica risolva un problema di scritture"
+    - "Non monitorare il replication lag e scoprirlo da un bug report"
+  follow_up_questions:
+    - "Come gestisci il read-your-own-writes con le replica?"
+
+- id: db-19-duplicate-records
+  title: Gestire i record duplicati
+  category: databases
+  track: knowledge
+  level: medium
+  tags: [database, integrita, concorrenza]
+  estimated_minutes: 25
+  summary: >-
+    I duplicati nascono quasi sempre da una race condition tra un controllo e una
+    scrittura, oppure da retry su operazioni non idempotenti. La difesa vera è un vincolo
+    nel database, non un if nel codice applicativo.
+  key_points:
+    - "Il pattern SELECT-then-INSERT è una race: due richieste parallele passano entrambe il controllo"
+    - "UNIQUE constraint è l'unica difesa affidabile: è il database a serializzare"
+    - "INSERT ... ON CONFLICT DO NOTHING/UPDATE (Postgres) o INSERT IGNORE / ON DUPLICATE KEY (MySQL) risolvono elegantemente l'upsert"
+    - "Per la deduplicazione logica serve una chiave naturale: email normalizzata, hash del contenuto, idempotency key"
+    - "Per ripulire duplicati esistenti: finestra ROW_NUMBER() OVER (PARTITION BY chiave ORDER BY id) e cancella dove rn > 1"
+    - "Nei sistemi a messaggi la consegna è at-least-once: la deduplicazione a valle è obbligatoria"
+  interview_answer: >-
+    Parto dal presupposto che il controllo applicativo non basti: tra la SELECT che verifica
+    l'assenza e la INSERT c'è una finestra in cui un'altra richiesta può inserire lo stesso
+    record. Quindi metto un vincolo UNIQUE sulla chiave naturale e gestisco l'eccezione,
+    oppure uso direttamente un upsert con ON CONFLICT. Il lavoro vero di solito è definire
+    cosa significa duplicato: se è l'email, va normalizzata prima, altrimenti Mario@x.it e
+    mario@x.it convivono e il vincolo non serve a niente.
+  pitfalls:
+    - "Fidarsi del SELECT-then-INSERT sotto concorrenza"
+    - "Vincolo unique su un campo non normalizzato"
+    - "Consumatori di code senza deduplicazione, con consegna at-least-once"
+  follow_up_questions:
+    - "Come deduplichi messaggi in un consumer Kafka?"
+
+- id: db-20-locking
+  title: Locking ottimistico vs pessimistico
+  category: databases
+  track: knowledge
+  level: medium
+  tags: [database, concorrenza, transazioni]
+  estimated_minutes: 30
+  summary: >-
+    Il locking pessimistico blocca la risorsa prima di modificarla, assumendo che il
+    conflitto sia probabile. Quello ottimistico non blocca nulla e verifica al momento
+    della scrittura che nessuno abbia modificato il dato nel frattempo.
+  key_points:
+    - "Pessimistico: SELECT ... FOR UPDATE. Sicuro, ma serializza gli accessi e può generare deadlock"
+    - "Ottimistico: colonna version o updated_at, UPDATE ... WHERE id=? AND version=?. Se aggiorna 0 righe c'è stato conflitto"
+    - "Ottimistico conviene con pochi conflitti: nessun lock tenuto, throughput alto"
+    - "Pessimistico conviene con molti conflitti: il retry continuo dell'ottimistico costerebbe di più"
+    - "Con l'ottimistico serve sempre una politica di retry e un messaggio sensato per l'utente"
+    - "L'ottimistico è anche l'unica opzione realistica quando la transazione attraversa più richieste HTTP (lost update su form web)"
+  interview_answer: >-
+    Scelgo in base alla probabilità di conflitto. Su un form di modifica profilo uso
+    l'ottimistico con un numero di versione: l'update ha la versione nella clausola WHERE e
+    se torna zero righe so che qualcun altro ha salvato nel frattempo, quindi avviso
+    l'utente invece di sovrascrivere silenziosamente. Su qualcosa come la prenotazione
+    dell'ultimo posto disponibile, dove i conflitti sono la norma, uso il pessimistico con
+    SELECT FOR UPDATE, perché con l'ottimistico avrei una tempesta di retry. L'ottimistico
+    è comunque l'unica opzione quando la modifica si estende su più richieste HTTP, perché
+    non posso tenere una transazione aperta mentre l'utente compila un form.
+  pitfalls:
+    - "Lock pessimistici tenuti durante chiamate di rete: latenza altrui che diventa contesa tua"
+    - "Ottimistico senza gestione del conflitto: l'update fallisce in silenzio"
+    - "Ordine di acquisizione dei lock non coerente tra transazioni: deadlock"
+  follow_up_questions:
+    - "Come previeni i deadlock con il locking pessimistico?"
+    - "Cos'è il lost update e quale strategia lo previene?"

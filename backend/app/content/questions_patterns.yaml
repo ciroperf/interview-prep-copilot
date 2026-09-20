@@ -1,0 +1,348 @@
+# Domande sui pattern di strutturazione del codice.
+- id: q-pat-01-a
+  topic_id: pat-01-layered-architecture
+  difficulty: easy
+  prompt: "In un'architettura a livelli, qual è la regola fondamentale sulle dipendenze?"
+  options:
+    - "Ogni livello può chiamare qualunque altro livello"
+    - "Le dipendenze vanno in una sola direzione: controller verso service verso repository"
+    - "Il repository deve poter chiamare il service per validare i dati"
+    - "Tutti i livelli devono conoscere il framework HTTP"
+  answer_index: 1
+  explanation: "Una dipendenza all'indietro, come un repository che chiama un service, crea cicli e rende impossibile riusare o testare i livelli bassi separatamente."
+
+- id: q-pat-01-b
+  topic_id: pat-01-layered-architecture
+  difficulty: medium
+  prompt: "Come capisci se il confine fra controller e service è tracciato bene?"
+  options:
+    - "Se il service ha meno di 100 righe"
+    - "Se puoi invocare lo stesso caso d'uso da una CLI o da un consumer di coda senza toccare il service"
+    - "Se il controller restituisce sempre JSON"
+    - "Se ogni entità ha il suo service"
+  answer_index: 1
+  explanation: "Se il service richiede un oggetto Request o restituisce uno status code è legato al web: la logica non è riusabile fuori dal contesto HTTP."
+
+- id: q-pat-02-a
+  topic_id: pat-02-repository
+  difficulty: medium
+  prompt: "Qual è il beneficio più concreto del repository pattern nella pratica quotidiana?"
+  options:
+    - "Poter cambiare database senza modifiche, cosa che succede spesso"
+    - "Poter testare la logica di business senza un database reale, con un'implementazione in memoria"
+    - "Rendere le query più veloci"
+    - "Eliminare la necessità di un ORM"
+  answer_index: 1
+  explanation: "La portabilità fra database è un beneficio teorico raramente sfruttato; la testabilità si incassa a ogni esecuzione della suite."
+
+- id: q-pat-02-b
+  topic_id: pat-02-repository
+  difficulty: hard
+  prompt: "Quale segnale indica che un repository sta perdendo il suo scopo?"
+  options:
+    - "Ha più di cinque metodi"
+    - "Espone un metodo generico tipo query(filtro) che lascia trapelare i dettagli della persistenza"
+    - "Restituisce entità di dominio"
+    - "Viene iniettato nel service"
+  answer_index: 1
+  explanation: "Un'interfaccia generica costringe il chiamante a conoscere la struttura dei dati: l'astrazione esiste solo di nome."
+
+- id: q-pat-02-c
+  topic_id: pat-02-repository
+  difficulty: medium
+  prompt: "Su quale criterio definisci quanti repository creare?"
+  options:
+    - "Uno per tabella del database"
+    - "Uno per aggregato di dominio"
+    - "Uno per ogni endpoint dell'API"
+    - "Uno solo, generico, per tutta l'applicazione"
+  answer_index: 1
+  explanation: "Un repository per tabella rispecchia lo schema invece del dominio, e fa perdere il senso dell'aggregato come unità di coerenza."
+
+- id: q-pat-03-a
+  topic_id: pat-03-service-layer
+  difficulty: hard
+  prompt: "Cos'è un anemic domain model e perché è considerato un anti-pattern?"
+  options:
+    - "Un modello con poche entità, difficile da estendere"
+    - "Entità ridotte a contenitori di dati con getter e setter, mentre tutta la logica sta in service procedurali"
+    - "Un modello senza relazioni fra le tabelle"
+    - "Un dominio che non usa un ORM"
+  answer_index: 1
+  explanation: "Si ottiene codice procedurale con una sintassi a oggetti: le regole che riguardano un oggetto sono lontane dai dati che vincolano, e finiscono duplicate."
+
+- id: q-pat-03-b
+  topic_id: pat-03-service-layer
+  difficulty: medium
+  prompt: "Un caso d'uso scrive su tre repository diversi. Dove va aperta la transazione?"
+  options:
+    - "In ciascun repository, che fa commit dopo ogni scrittura"
+    - "Nel service, che racchiude le tre scritture in un'unica transazione"
+    - "Nel controller, prima di chiamare il service"
+    - "Nel database, tramite un trigger"
+  answer_index: 1
+  explanation: "Con il commit dentro il repository si ottengono tre transazioni separate: un errore a metà lascia dati incoerenti."
+
+- id: q-pat-04-a
+  topic_id: pat-04-dto-entity-model
+  difficulty: medium
+  prompt: "Cos'è l'over-posting e come lo previene l'uso di un DTO in ingresso?"
+  options:
+    - "Inviare troppe richieste: il DTO le limita"
+    - "Il client valorizza campi che non dovrebbe poter scrivere, come is_admin: il DTO espone solo i campi modificabili"
+    - "Superare la dimensione massima del body: il DTO la riduce"
+    - "Duplicare i record: il DTO li deduplica"
+  answer_index: 1
+  explanation: "Accettare direttamente l'entity come corpo della richiesta lascia scrivere qualunque campo mappato, inclusi quelli di sicurezza."
+
+- id: q-pat-04-b
+  topic_id: pat-04-dto-entity-model
+  difficulty: medium
+  prompt: "Perché conviene avere DTO distinti per richiesta e risposta?"
+  options:
+    - "Per raddoppiare il numero di classi e rendere il codice più esplicito"
+    - "Perché i campi accettati e quelli restituiti non coincidono: la password entra ma non deve uscire"
+    - "Perché il framework lo richiede"
+    - "Per poter usare tipi diversi negli stessi campi"
+  answer_index: 1
+  explanation: "Un DTO unico costringe a rendere opzionale quasi tutto e rende facile esporre per sbaglio un campo sensibile."
+
+- id: q-pat-05-a
+  topic_id: pat-05-dependency-injection
+  difficulty: medium
+  prompt: "Qual è la differenza fra dependency injection e service locator?"
+  options:
+    - "Nessuna, sono sinonimi"
+    - "Con la DI le dipendenze sono esplicite nella firma; con il service locator l'oggetto le va a cercare da sé e restano nascoste"
+    - "Il service locator è più sicuro"
+    - "La DI funziona solo con i container"
+  answer_index: 1
+  explanation: "Il service locator sposta la dipendenza dentro il metodo: non si vede dal costruttore e i test devono conoscere il registro globale."
+
+- id: q-pat-05-b
+  topic_id: pat-05-dependency-injection
+  difficulty: medium
+  prompt: "Un costruttore ha otto dipendenze iniettate. Cosa segnala?"
+  options:
+    - "Che la dependency injection è usata male e andrebbe rimossa"
+    - "Che la classe ha troppe responsabilità e va probabilmente divisa"
+    - "Che serve un container DI"
+    - "Niente di particolare, è normale nei service"
+  answer_index: 1
+  explanation: "La constructor injection rende visibile un problema che c'era comunque: è un pregio, non un difetto del pattern."
+
+- id: q-pat-06-a
+  topic_id: pat-06-hexagonal-clean
+  difficulty: hard
+  prompt: "Nell'architettura esagonale, dove va dichiarata l'interfaccia del repository?"
+  options:
+    - "Nel package dell'infrastruttura, vicino all'implementazione"
+    - "Nel dominio: è il dominio a dichiarare cosa gli serve, l'infrastruttura la implementa"
+    - "In un package condiviso, fuori da entrambi"
+    - "Nel controller che la usa"
+  answer_index: 1
+  explanation: "È esattamente l'inversione delle dipendenze: se l'interfaccia sta nell'infrastruttura, il dominio continua a dipendere da essa."
+
+- id: q-pat-06-b
+  topic_id: pat-06-hexagonal-clean
+  difficulty: medium
+  prompt: "Qual è il test più rapido per capire se la dependency rule è rispettata?"
+  options:
+    - "Contare i livelli del progetto"
+    - "Verificare che nel package del dominio non ci sia nessun import del framework web o dell'ORM"
+    - "Controllare che esistano le interfacce"
+    - "Verificare che ci sia un container DI configurato"
+  answer_index: 1
+  explanation: "Se il dominio importa il framework, dipende dall'infrastruttura, per quante interfacce siano state scritte."
+
+- id: q-pat-06-c
+  topic_id: pat-06-hexagonal-clean
+  difficulty: medium
+  prompt: "Quando l'architettura esagonale non vale il suo costo?"
+  options:
+    - "Quando il team è numeroso"
+    - "Su un CRUD con poca logica di business: si ottengono livelli di indirezione per una semplice insert"
+    - "Quando si usa un database relazionale"
+    - "Quando il dominio è complesso"
+  answer_index: 1
+  explanation: "Il costo sono molte interfacce con una sola implementazione: si ripaga solo se il dominio ha regole vere e vive più a lungo delle tecnologie."
+
+- id: q-pat-07-a
+  topic_id: pat-07-ddd-tactical
+  difficulty: medium
+  prompt: "Qual è la differenza fra entity e value object?"
+  options:
+    - "L'entity sta su database, il value object in memoria"
+    - "L'entity ha un'identità che persiste nel tempo, il value object è definito dal suo valore ed è immutabile"
+    - "Il value object non può avere metodi"
+    - "L'entity è sempre più grande"
+  answer_index: 1
+  explanation: "Due indirizzi con gli stessi campi sono lo stesso indirizzo; due persone con gli stessi dati restano persone diverse."
+
+- id: q-pat-07-b
+  topic_id: pat-07-ddd-tactical
+  difficulty: hard
+  prompt: "Perché un aggregato dovrebbe riferirsi a un altro aggregato tramite id e non con un riferimento diretto?"
+  options:
+    - "Per risparmiare memoria"
+    - "Per mantenere confini transazionali netti ed evitare di caricare e modificare più aggregati insieme"
+    - "Perché gli ORM non supportano i riferimenti"
+    - "Per poter usare database diversi"
+  answer_index: 1
+  explanation: "Il riferimento diretto invita a navigare e modificare l'altro aggregato nella stessa transazione, violando la regola una transazione, un aggregato."
+
+- id: q-pat-07-c
+  topic_id: pat-07-ddd-tactical
+  difficulty: medium
+  prompt: "Cosa si intende per primitive obsession?"
+  options:
+    - "Usare troppe variabili primitive per la performance"
+    - "Rappresentare concetti di dominio con tipi primitivi (una email come stringa) invece che con value object validati"
+    - "Preferire int a float"
+    - "Evitare le classi in favore delle funzioni"
+  answer_index: 1
+  explanation: "Un value object Email validato alla costruzione rende impossibile l'esistenza di un'istanza invalida, eliminando i controlli sparsi."
+
+- id: q-pat-08-a
+  topic_id: pat-08-unit-of-work
+  difficulty: medium
+  prompt: "Quale problema risolve l'Unit of Work rispetto al solo repository pattern?"
+  options:
+    - "Rende le query più veloci"
+    - "Stabilisce chi decide quando fare commit, in modo che un'operazione su più repository sia atomica"
+    - "Elimina la necessità di un ORM"
+    - "Gestisce la cache delle entità"
+  answer_index: 1
+  explanation: "Il repository sa leggere e scrivere ma non deve decidere il confine transazionale, altrimenti ogni save produce un commit separato."
+
+- id: q-pat-08-b
+  topic_id: pat-08-unit-of-work
+  difficulty: medium
+  prompt: "Quale di questi è già un'implementazione di Unit of Work?"
+  options:
+    - "Il connection pool"
+    - "La Session di SQLAlchemy o il DbContext di Entity Framework"
+    - "Il repository generico"
+    - "Il container di dependency injection"
+  answer_index: 1
+  explanation: "Tracciano le modifiche e le confermano insieme al commit: reimplementarle da zero è quasi sempre lavoro sprecato."
+
+- id: q-pat-09-a
+  topic_id: pat-09-gof-patterns
+  difficulty: medium
+  prompt: "Quale pattern useresti per sostituire una catena di if-else che sceglie fra metodi di pagamento diversi?"
+  options:
+    - "Singleton"
+    - "Strategy"
+    - "Observer"
+    - "Template Method"
+  answer_index: 1
+  explanation: "Strategy incapsula ogni algoritmo dietro un'interfaccia comune: aggiungere un metodo di pagamento non richiede di toccare il codice esistente."
+
+- id: q-pat-09-b
+  topic_id: pat-09-gof-patterns
+  difficulty: medium
+  prompt: "Perché il Singleton è spesso considerato un anti-pattern?"
+  options:
+    - "Perché è lento da istanziare"
+    - "Perché è stato globale con una dipendenza nascosta: rende i test dipendenti dall'ordine di esecuzione"
+    - "Perché non funziona in applicazioni multi-thread"
+    - "Perché richiede troppo codice"
+  answer_index: 1
+  explanation: "La dipendenza non compare nella firma e lo stato sopravvive fra i test, che iniziano a passare o fallire a seconda dell'ordine."
+
+- id: q-pat-09-c
+  topic_id: pat-09-gof-patterns
+  difficulty: hard
+  prompt: "Perché in Python molti pattern GoF risultano ridondanti?"
+  options:
+    - "Perché Python non supporta le interfacce"
+    - "Perché funzioni e classi sono oggetti di prima classe: Strategy diventa spesso semplicemente passare una funzione"
+    - "Perché Python è interpretato"
+    - "Perché il duck typing impedisce il polimorfismo"
+  answer_index: 1
+  explanation: "Molti pattern GoF compensano l'assenza di funzioni di prima classe nei linguaggi per cui furono scritti."
+
+- id: q-pat-10-a
+  topic_id: pat-10-project-structure
+  difficulty: medium
+  prompt: "Qual è il vantaggio principale dell'organizzazione per feature rispetto a quella per livello?"
+  options:
+    - "Riduce il numero totale di file"
+    - "Il codice che cambia insieme sta insieme: una modifica funzionale tocca una cartella invece di cinque"
+    - "Rende superfluo il service layer"
+    - "Migliora le performance a runtime"
+  answer_index: 1
+  explanation: "La coesione si misura su cosa cambia insieme, e una funzionalità attraversa sempre tutti i livelli tecnici."
+
+- id: q-pat-10-b
+  topic_id: pat-10-project-structure
+  difficulty: medium
+  prompt: "Perché una cartella utils/ o common/ tende a diventare problematica?"
+  options:
+    - "Perché rallenta la compilazione"
+    - "Perché non ha un criterio di coesione: accoglie tutto ciò che non si sa dove mettere e finisce per essere importata ovunque"
+    - "Perché i linter la segnalano"
+    - "Perché non può contenere classi"
+  answer_index: 1
+  explanation: "Diventa un punto di accoppiamento globale: ogni modulo dipende da essa e nessuno sa più cosa contiene davvero."
+
+- id: q-pat-11-a
+  topic_id: pat-11-cqrs
+  difficulty: hard
+  prompt: "CQRS richiede necessariamente event sourcing?"
+  options:
+    - "Sì, sono due facce dello stesso pattern"
+    - "No: sono indipendenti. Si può fare CQRS con un solo database e due percorsi di codice"
+    - "Sì, altrimenti i modelli di lettura non si aggiornano"
+    - "No, ma richiede sempre due database separati"
+  answer_index: 1
+  explanation: "Vengono citati insieme spesso, ma la forma leggera di CQRS sullo stesso database dà già gran parte del beneficio."
+
+- id: q-pat-11-b
+  topic_id: pat-11-cqrs
+  difficulty: medium
+  prompt: "Qual è il caso d'uso tipico in cui CQRS conviene?"
+  options:
+    - "Un CRUD con poche entità"
+    - "Una schermata di riepilogo che sul modello di dominio richiederebbe sei join e il caricamento di aggregati interi"
+    - "Un'applicazione con un solo utente"
+    - "Un sistema senza database"
+  answer_index: 1
+  explanation: "La lettura può proiettare direttamente su un DTO con una query mirata, senza piegare il modello di scrittura a esigenze di visualizzazione."
+
+- id: q-pat-12-a
+  topic_id: pat-12-error-handling
+  difficulty: medium
+  prompt: "Un saldo insufficiente durante un pagamento: come va modellato?"
+  options:
+    - "Come errore generico 500, gestito dal middleware"
+    - "Come esito atteso del dominio, con un'eccezione di dominio esplicita tradotta poi in una risposta 4xx"
+    - "Con un return None e un controllo a valle"
+    - "Con un log di warning, senza interrompere il flusso"
+  answer_index: 1
+  explanation: "È un esito previsto delle regole di business, non un guasto: va nel contratto dell'operazione, non fra gli errori inattesi."
+
+- id: q-pat-12-b
+  topic_id: pat-12-error-handling
+  difficulty: medium
+  prompt: "Dove va fatta la traduzione da eccezione di dominio a status code HTTP?"
+  options:
+    - "In ogni controller, con un try/except dedicato"
+    - "In un punto solo, tipicamente un exception handler del framework, così i service non conoscono HTTP"
+    - "Nel repository, che sa quale errore è avvenuto"
+    - "Nel client, che interpreta il messaggio"
+  answer_index: 1
+  explanation: "Centralizzare evita mappature duplicate e incoerenti, e mantiene il dominio indipendente dal trasporto."
+
+- id: q-pat-12-c
+  topic_id: pat-12-error-handling
+  difficulty: easy
+  prompt: "Perché un except generico che ingoia ogni eccezione è pericoloso?"
+  options:
+    - "Perché rallenta l'esecuzione"
+    - "Perché nasconde i bug reali e trasforma un guasto in un comportamento sbagliato silenzioso"
+    - "Perché impedisce di usare i log"
+    - "Perché è vietato dai linter"
+  answer_index: 1
+  explanation: "Un errore non gestibile deve fallire in fretta e rumorosamente, con abbastanza contesto per la diagnosi."

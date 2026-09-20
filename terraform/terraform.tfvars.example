@@ -1,0 +1,43 @@
+# Copia in terraform.tfvars e adatta. terraform.tfvars è in .gitignore.
+
+# --- Obbligatorio se non usi ARM_SUBSCRIPTION_ID ---------------------------
+# subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# --- Identità del progetto -------------------------------------------------
+name_prefix = "ipc"
+environment = "prod"
+location    = "swedencentral"
+
+# Per usare un resource group che hai già:
+# create_resource_group = false
+# resource_group_name   = "rg-mio-esistente"
+
+# --- Costi -----------------------------------------------------------------
+# 0 = l'app si spegne quando non la usi (cold start di qualche secondo).
+min_replicas = 0
+max_replicas = 1
+
+# Avviso via email quando la spesa mensile si avvicina alla soglia.
+monthly_budget_eur = 15
+budget_alert_email = "tu@esempio.it"
+
+# --- AI --------------------------------------------------------------------
+enable_ai        = true
+ai_location      = "swedencentral"
+ai_model_name    = "gpt-4o-mini"
+ai_model_version = "2024-07-18"
+ai_capacity      = 10
+
+# --- Immagine dell'API -----------------------------------------------------
+# Lascia il default al primo apply: il workflow di deploy pubblica l'immagine
+# vera e aggiorna la Container App.
+# container_image = "ghcr.io/ciroperf/interview-prep-copilot-api:latest"
+
+# Un ACR Basic costa circa 4,60 EUR/mese: con un package pubblico su GHCR
+# non serve e il pull è anonimo.
+create_container_registry = false
+
+# --- Opzionali -------------------------------------------------------------
+# access_code    = "scegline-uno-tuo"   # se vuoto ne viene generato uno
+# store_cv_files = false                 # true per conservare i CV caricati
+# allowed_origins = ["https://prep.miodominio.it"]

@@ -1,0 +1,432 @@
+# Domande a risposta multipla su Core Concepts e Databases.
+- id: q-core-01-a
+  topic_id: core-01-what-is-an-api
+  difficulty: easy
+  prompt: "Quale di queste modifiche a una API REST esistente è sicuramente breaking per i client?"
+  options:
+    - "Aggiungere un campo opzionale nella risposta"
+    - "Cambiare il tipo di un campo esistente da stringa a intero"
+    - "Aggiungere un nuovo endpoint"
+    - "Migliorare le performance dell'endpoint"
+  answer_index: 1
+  explanation: "Cambiare il tipo di un campo rompe i client che lo deserializzano con il tipo vecchio. Aggiungere campi opzionali o nuovi endpoint è retrocompatibile."
+
+- id: q-core-01-b
+  topic_id: core-01-what-is-an-api
+  difficulty: medium
+  prompt: "Perché esporre direttamente le tabelle del database come API è considerato un anti-pattern?"
+  options:
+    - "Perché il database diventa più lento"
+    - "Perché ogni refactor interno dello schema diventa una modifica breaking per i client"
+    - "Perché JSON non può rappresentare le righe di una tabella"
+    - "Perché impedisce di usare gli indici"
+  answer_index: 1
+  explanation: "Il contratto pubblico si lega all'implementazione interna: non puoi più rinominare una colonna senza rompere i client."
+
+- id: q-core-02-a
+  topic_id: core-02-rest-vs-graphql
+  difficulty: medium
+  prompt: "Qual è il principale vantaggio di REST rispetto a GraphQL che si perde adottando GraphQL?"
+  options:
+    - "La possibilità di usare JSON"
+    - "Il caching HTTP nativo tramite GET, URL ed ETag"
+    - "L'autenticazione con token"
+    - "La possibilità di avere più endpoint"
+  answer_index: 1
+  explanation: "In GraphQL tutto passa da un POST su un singolo URL, quindi CDN e proxy HTTP non possono cachare come farebbero con le GET REST."
+
+- id: q-core-02-b
+  topic_id: core-02-rest-vs-graphql
+  difficulty: hard
+  prompt: "Cos'è il problema N+1 in GraphQL e come si risolve tipicamente?"
+  options:
+    - "Troppi endpoint: si risolve unificandoli"
+    - "Un resolver per campo di lista esegue una query per ogni elemento: si risolve con il batching, es. DataLoader"
+    - "Query troppo profonde: si risolve con il depth limit"
+    - "Troppi campi nella risposta: si risolve con la paginazione"
+  answer_index: 1
+  explanation: "Risolvendo una lista di N elementi, il resolver del campo annidato viene chiamato N volte generando N query. DataLoader accorpa le richieste in un solo batch."
+
+- id: q-core-03-a
+  topic_id: core-03-http-methods
+  difficulty: easy
+  prompt: "Quale affermazione su DELETE è corretta?"
+  options:
+    - "Non è idempotente perché la seconda chiamata restituisce 404"
+    - "È idempotente: lo stato finale del server è lo stesso dopo una o più chiamate"
+    - "È safe perché non modifica dati sensibili"
+    - "È sempre cacheabile"
+  answer_index: 1
+  explanation: "L'idempotenza riguarda lo stato del server, non il codice di risposta. Dopo uno o dieci DELETE la risorsa è comunque assente."
+
+- id: q-core-03-b
+  topic_id: core-03-http-methods
+  difficulty: medium
+  prompt: "Perché un endpoint che modifica dati non deve mai essere esposto tramite GET?"
+  options:
+    - "Perché GET ha un limite di lunghezza dell'URL"
+    - "Perché GET è safe per specifica: prefetch del browser, crawler e proxy possono invocarlo spontaneamente"
+    - "Perché GET non supporta HTTPS"
+    - "Perché GET non può avere parametri"
+  answer_index: 1
+  explanation: "Qualunque agente può ripetere una GET assumendo che non abbia effetti collaterali: prefetch e crawler provocherebbero modifiche involontarie."
+
+- id: q-core-04-a
+  topic_id: core-04-http-status-codes
+  difficulty: easy
+  prompt: "Un utente autenticato prova ad accedere a una risorsa per cui non ha i permessi. Quale codice è corretto?"
+  options:
+    - "401 Unauthorized"
+    - "403 Forbidden"
+    - "400 Bad Request"
+    - "500 Internal Server Error"
+  answer_index: 1
+  explanation: "401 significa identità non stabilita, 403 identità nota ma permessi insufficienti."
+
+- id: q-core-04-b
+  topic_id: core-04-http-status-codes
+  difficulty: medium
+  prompt: "Perché è sbagliato restituire 200 con un campo error nel body invece del codice di errore corretto?"
+  options:
+    - "Perché il body non può contenere oggetti"
+    - "Perché rompe retry automatici, metriche di errore e alert che si basano sullo status code"
+    - "Perché 200 non permette di inviare JSON"
+    - "Perché i browser rifiutano quel tipo di risposta"
+  answer_index: 1
+  explanation: "Tutta l'infrastruttura HTTP, dai client ai dashboard, ragiona sullo status code: mascherare gli errori dietro un 200 la rende cieca."
+
+- id: q-core-05-a
+  topic_id: core-05-stateless-vs-stateful
+  difficulty: medium
+  prompt: "Cosa rende un servizio stateless?"
+  options:
+    - "Il fatto che non usi alcun database"
+    - "Il fatto che non conservi in memoria di processo stato necessario alle richieste successive"
+    - "Il fatto che non usi cookie"
+    - "Il fatto che risponda sempre la stessa cosa"
+  answer_index: 1
+  explanation: "Lo stato esiste ma è esterno, in un database o in una cache condivisa: qualunque istanza può servire qualunque richiesta."
+
+- id: q-core-05-b
+  topic_id: core-05-stateless-vs-stateful
+  difficulty: medium
+  prompt: "Perché salvare i file caricati dagli utenti sul disco locale di un container è problematico?"
+  options:
+    - "Perché il disco è troppo lento"
+    - "Perché il filesystem è effimero e non condiviso: i file spariscono al restart e le altre istanze non li vedono"
+    - "Perché i container non possono scrivere su disco"
+    - "Perché viola il protocollo HTTP"
+  answer_index: 1
+  explanation: "Serve uno storage condiviso e durevole, tipicamente object storage, altrimenti il comportamento dipende da quale istanza serve la richiesta."
+
+- id: q-core-06-a
+  topic_id: core-06-authn-vs-authz
+  difficulty: medium
+  prompt: "Un endpoint GET /orders/{id} verifica il token ma non che l'ordine appartenga all'utente. Che vulnerabilità è?"
+  options:
+    - "SQL injection"
+    - "IDOR - Insecure Direct Object Reference"
+    - "CSRF"
+    - "XSS"
+  answer_index: 1
+  explanation: "È un controllo di accesso mancante a livello di oggetto: cambiando l'id nell'URL si leggono i dati di altri utenti."
+
+- id: q-core-06-b
+  topic_id: core-06-authn-vs-authz
+  difficulty: easy
+  prompt: "Nascondere un pulsante nella UI agli utenti senza permessi è una misura di sicurezza sufficiente?"
+  options:
+    - "Sì, se la UI è compilata e offuscata"
+    - "No: il controllo va fatto sul server, perché il client è sotto il controllo dell'utente"
+    - "Sì, se si usa HTTPS"
+    - "Sì, per le applicazioni interne"
+  answer_index: 1
+  explanation: "Chiunque può chiamare l'API direttamente: la UI è un'indicazione di usabilità, non un confine di sicurezza."
+
+- id: q-core-07-a
+  topic_id: core-07-sessions-vs-jwt
+  difficulty: medium
+  prompt: "Qual è lo svantaggio principale dei JWT rispetto alle sessioni server-side?"
+  options:
+    - "Non possono contenere informazioni sull'utente"
+    - "Non sono revocabili prima della scadenza senza introdurre uno stato server"
+    - "Richiedono sempre una query al database"
+    - "Non funzionano su HTTPS"
+  answer_index: 1
+  explanation: "La verifica è offline, quindi il server non ha un punto in cui dire che quel token non vale più: serve una denylist o token brevi con refresh."
+
+- id: q-core-07-b
+  topic_id: core-07-sessions-vs-jwt
+  difficulty: medium
+  prompt: "Perché salvare un JWT in localStorage è meno sicuro di un cookie HttpOnly?"
+  options:
+    - "Perché localStorage ha un limite di dimensione"
+    - "Perché è leggibile da qualunque JavaScript nella pagina, quindi un XSS lo esfiltra"
+    - "Perché localStorage non è cifrato su disco"
+    - "Perché i cookie sono firmati automaticamente"
+  answer_index: 1
+  explanation: "Un cookie HttpOnly non è accessibile a JavaScript, quindi un XSS non può leggerne il valore."
+
+- id: q-core-08-a
+  topic_id: core-08-oauth2
+  difficulty: medium
+  prompt: "In OAuth 2.0 / OIDC, quale token va usato per stabilire l'identità dell'utente?"
+  options:
+    - "L'access token"
+    - "L'id_token di OpenID Connect"
+    - "Il refresh token"
+    - "Il client secret"
+  answer_index: 1
+  explanation: "L'access token autorizza l'accesso a risorse ed è opaco per il client; l'identità sta nell'id_token, previsto da OIDC."
+
+- id: q-core-08-b
+  topic_id: core-08-oauth2
+  difficulty: hard
+  prompt: "A cosa serve PKCE nel flow Authorization Code?"
+  options:
+    - "A cifrare l'access token"
+    - "A impedire che un attaccante che intercetta l'authorization code possa scambiarlo con un token"
+    - "A evitare di dover usare HTTPS"
+    - "A ridurre il numero di richieste"
+  answer_index: 1
+  explanation: "Il client genera un code_verifier segreto e ne invia l'hash: senza il verifier originale il code intercettato è inutilizzabile."
+
+- id: q-core-09-a
+  topic_id: core-09-rate-limiting-throttling
+  difficulty: medium
+  prompt: "Quale algoritmo di rate limiting permette burst controllati mantenendo un throughput medio stabile?"
+  options:
+    - "Fixed window"
+    - "Token bucket"
+    - "Random drop"
+    - "Round robin"
+  answer_index: 1
+  explanation: "La capacità del bucket definisce il burst tollerato, il refill rate il throughput sostenuto nel tempo."
+
+- id: q-core-09-b
+  topic_id: core-09-rate-limiting-throttling
+  difficulty: medium
+  prompt: "Perché un rate limiter con contatore in memoria di processo è inaffidabile su più istanze?"
+  options:
+    - "Perché la memoria è troppo lenta"
+    - "Perché ogni istanza conta solo le proprie richieste: con N istanze il limite effettivo diventa N volte quello previsto"
+    - "Perché i contatori in memoria non supportano i numeri grandi"
+    - "Perché il garbage collector li azzera"
+  answer_index: 1
+  explanation: "Serve un contatore condiviso, tipicamente Redis con operazioni atomiche."
+
+- id: q-core-10-a
+  topic_id: core-10-idempotency
+  difficulty: hard
+  prompt: "Per implementare correttamente una idempotency key su un pagamento, dove va inserito il record della chiave?"
+  options:
+    - "In una cache in memoria prima di iniziare"
+    - "Nella stessa transazione dell'operazione, con un vincolo di unicità"
+    - "In un log su file dopo il commit"
+    - "In una tabella separata, dopo aver verificato con una SELECT che non esista"
+  answer_index: 1
+  explanation: "Solo il vincolo unique dentro la stessa transazione elimina la race: due richieste parallele non possono passare entrambe."
+
+- id: q-core-10-b
+  topic_id: core-10-idempotency
+  difficulty: medium
+  prompt: "Chi deve generare l'idempotency key?"
+  options:
+    - "Il server, a ogni richiesta ricevuta"
+    - "Il client, e deve riusare la stessa chiave su tutti i retry dello stesso tentativo logico"
+    - "Il load balancer"
+    - "Il database, tramite auto-increment"
+  answer_index: 1
+  explanation: "Se la generasse il server cambierebbe a ogni retry e non servirebbe a nulla: è il client che sa che sta ritentando la stessa operazione."
+
+- id: q-db-11-a
+  topic_id: db-11-sql-vs-nosql
+  difficulty: medium
+  prompt: "Qual è il vantaggio più rilevante di un database relazionale che si perde passando a un document store?"
+  options:
+    - "La possibilità di salvare testo"
+    - "Le transazioni multi-riga e la possibilità di fare query non previste in fase di design"
+    - "La velocità di lettura per chiave"
+    - "La replica dei dati"
+  answer_index: 1
+  explanation: "In NoSQL si modella per query note: cambiare pattern di accesso spesso richiede di rimodellare i dati."
+
+- id: q-db-11-b
+  topic_id: db-11-sql-vs-nosql
+  difficulty: easy
+  prompt: "Cosa significa che un document store è schemaless?"
+  options:
+    - "Che i dati non hanno struttura"
+    - "Che lo schema non è imposto dal database ma resta implicito nel codice applicativo"
+    - "Che non servono indici"
+    - "Che ogni documento deve avere gli stessi campi"
+  answer_index: 1
+  explanation: "Lo schema esiste sempre: la differenza è che non viene validato dal database, quindi i dati incoerenti entrano senza errori."
+
+- id: q-db-12-a
+  topic_id: db-12-indexes
+  difficulty: hard
+  prompt: "Hai un indice composito su (user_id, created_at). Quale query NON può sfruttarlo efficacemente?"
+  options:
+    - "WHERE user_id = 5"
+    - "WHERE user_id = 5 AND created_at > '2024-01-01'"
+    - "WHERE created_at > '2024-01-01'"
+    - "WHERE user_id = 5 ORDER BY created_at DESC"
+  answer_index: 2
+  explanation: "Regola del leftmost prefix: senza la prima colonna dell'indice, il B-tree non può essere navigato in modo selettivo."
+
+- id: q-db-12-b
+  topic_id: db-12-indexes
+  difficulty: medium
+  prompt: "Perché WHERE lower(email) = 'a@b.it' non usa l'indice su email?"
+  options:
+    - "Perché lower non è una funzione SQL valida"
+    - "Perché l'indice contiene i valori originali, non quelli trasformati: serve un indice funzionale su lower(email)"
+    - "Perché le stringhe non sono indicizzabili"
+    - "Perché il planner disabilita gli indici sulle email"
+  answer_index: 1
+  explanation: "Applicare una funzione alla colonna rende inutilizzabile l'indice su quella colonna: va creato un indice sull'espressione."
+
+- id: q-db-13-a
+  topic_id: db-13-acid
+  difficulty: medium
+  prompt: "Cosa garantisce la C di ACID?"
+  options:
+    - "Che tutti i nodi di un cluster vedano lo stesso dato"
+    - "Che i vincoli di integrità del database siano validi prima e dopo la transazione"
+    - "Che le letture siano sempre aggiornate"
+    - "Che le transazioni siano eseguite in ordine"
+  answer_index: 1
+  explanation: "È la consistenza dei vincoli (chiavi, unique, check), diversa dalla C di CAP che riguarda la visibilità fra nodi."
+
+- id: q-db-14-a
+  topic_id: db-14-transactions-isolation
+  difficulty: hard
+  prompt: "Due transazioni leggono che ci sono 2 medici di guardia e ognuna mette in ferie un medico diverso. L'invariante minimo un medico viene violato. Come si chiama questa anomalia?"
+  options:
+    - "Dirty read"
+    - "Phantom read"
+    - "Write skew"
+    - "Lost update"
+  answer_index: 2
+  explanation: "Le due transazioni scrivono righe diverse basandosi su una lettura comune: lo snapshot isolation non la previene, serve Serializable o un lock esplicito."
+
+- id: q-db-14-b
+  topic_id: db-14-transactions-isolation
+  difficulty: medium
+  prompt: "Qual è il livello di isolamento di default in PostgreSQL?"
+  options:
+    - "Read Uncommitted"
+    - "Read Committed"
+    - "Repeatable Read"
+    - "Serializable"
+  answer_index: 1
+  explanation: "PostgreSQL e SQL Server usano Read Committed; MySQL InnoDB usa Repeatable Read."
+
+- id: q-db-15-a
+  topic_id: db-15-normalization
+  difficulty: medium
+  prompt: "Qual è il costo principale della denormalizzazione?"
+  options:
+    - "Le query diventano più lente"
+    - "Il dato duplicato può divergere: serve decidere chi lo aggiorna e cosa fare se va fuori sincrono"
+    - "Non si possono più usare gli indici"
+    - "Il database occupa meno spazio"
+  answer_index: 1
+  explanation: "Si scambia semplicità di scrittura con velocità di lettura, assumendosi il rischio di incoerenza."
+
+- id: q-db-16-a
+  topic_id: db-16-pagination
+  difficulty: medium
+  prompt: "Perché OFFSET 100000 LIMIT 20 è lento anche con un indice?"
+  options:
+    - "Perché LIMIT non è ottimizzato"
+    - "Perché il database deve comunque attraversare e scartare le 100.000 righe precedenti"
+    - "Perché OFFSET disabilita gli indici"
+    - "Perché richiede un full table scan sempre"
+  answer_index: 1
+  explanation: "L'offset non è una posizione calcolabile direttamente: va raggiunta scorrendo, quindi il costo cresce con la profondità."
+
+- id: q-db-16-b
+  topic_id: db-16-pagination
+  difficulty: hard
+  prompt: "Perché un cursore basato solo su created_at può perdere righe?"
+  options:
+    - "Perché le date occupano troppo spazio"
+    - "Perché più righe possono avere lo stesso timestamp: serve un tie-breaker unico come l'id"
+    - "Perché created_at non è indicizzabile"
+    - "Perché i fusi orari cambiano il valore"
+  answer_index: 1
+  explanation: "Con timestamp identici al confine della pagina, alcune righe vengono saltate: si ordina su (created_at, id)."
+
+- id: q-db-17-a
+  topic_id: db-17-sharding-partitioning
+  difficulty: hard
+  prompt: "Qual è il rischio principale di una shard key a bassa cardinalità?"
+  options:
+    - "Che le query diventino più semplici"
+    - "Hotspot: pochi shard ricevono quasi tutto il carico mentre gli altri restano scarichi"
+    - "Che si perdano i dati"
+    - "Che gli indici non funzionino"
+  answer_index: 1
+  explanation: "La distribuzione uniforme è il requisito fondamentale della shard key, insieme al fatto di tenere insieme i dati interrogati insieme."
+
+- id: q-db-18-a
+  topic_id: db-18-read-replicas
+  difficulty: medium
+  prompt: "Un utente salva il profilo e subito dopo ricarica la pagina, vedendo i dati vecchi. Qual è la causa più probabile?"
+  options:
+    - "La cache del browser"
+    - "Replication lag: la lettura è andata su una replica non ancora aggiornata"
+    - "Un errore di validazione"
+    - "Il rate limiting"
+  answer_index: 1
+  explanation: "Con replica asincrona c'è una finestra in cui il dato è sul primario ma non ancora sulle replica: si mitiga con il read-your-own-writes."
+
+- id: q-db-18-b
+  topic_id: db-18-read-replicas
+  difficulty: easy
+  prompt: "Aggiungere read replica aiuta a scalare le scritture?"
+  options:
+    - "Sì, distribuiscono anche le scritture"
+    - "No: le scritture restano sul primario. Servono sharding, batching o code"
+    - "Sì, se sono sincrone"
+    - "Sì, se sono più di tre"
+  answer_index: 1
+  explanation: "Le replica scalano le letture; il throughput di scrittura resta vincolato al nodo primario."
+
+- id: q-db-19-a
+  topic_id: db-19-duplicate-records
+  difficulty: medium
+  prompt: "Perché il pattern SELECT per verificare, poi INSERT non previene i duplicati?"
+  options:
+    - "Perché la SELECT è lenta"
+    - "Perché fra il controllo e l'inserimento un'altra transazione può inserire lo stesso record"
+    - "Perché INSERT non rispetta i vincoli"
+    - "Perché la SELECT non vede le righe non committate"
+  answer_index: 1
+  explanation: "È una classica race check-then-act: l'unica difesa affidabile è un vincolo UNIQUE gestito dal database."
+
+- id: q-db-20-a
+  topic_id: db-20-locking
+  difficulty: medium
+  prompt: "In quale scenario il locking ottimistico è preferibile a quello pessimistico?"
+  options:
+    - "Quando i conflitti sono frequenti"
+    - "Quando i conflitti sono rari e non si vuole tenere lock durante l'attesa dell'utente"
+    - "Quando serve la massima sicurezza sui dati finanziari"
+    - "Quando si usa un database NoSQL"
+  answer_index: 1
+  explanation: "Con pochi conflitti il retry occasionale costa meno del lock; inoltre è l'unica opzione se la modifica attraversa più richieste HTTP."
+
+- id: q-db-20-b
+  topic_id: db-20-locking
+  difficulty: medium
+  prompt: "Come si implementa tipicamente il locking ottimistico?"
+  options:
+    - "Con SELECT FOR UPDATE"
+    - "Con una colonna version inclusa nella WHERE dell'UPDATE: zero righe aggiornate significa conflitto"
+    - "Con un lock distribuito su Redis"
+    - "Alzando il livello di isolamento a Serializable"
+  answer_index: 1
+  explanation: "L'UPDATE è condizionato alla versione letta: se nel frattempo qualcuno ha scritto, la condizione non matcha e si gestisce il conflitto."

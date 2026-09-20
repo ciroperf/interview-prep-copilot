@@ -1,0 +1,13 @@
+# Stato remoto: consigliato se lavori da più macchine o vuoi che lo stato
+# sopravviva al tuo portatile. Rinomina in backend.tf dopo aver creato le
+# risorse con scripts/bootstrap-state.sh, poi lancia `terraform init -migrate-state`.
+
+terraform {
+  backend "azurerm" {
+    resource_group_name  = "rg-tfstate"
+    storage_account_name = "sttfstateXXXXX" # output dello script di bootstrap
+    container_name       = "tfstate"
+    key                  = "interview-prep-copilot.tfstate"
+    use_azuread_auth     = true
+  }
+}

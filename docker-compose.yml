@@ -1,0 +1,45 @@
+# Avvio locale dell'intero stack: API + frontend con hot reload.
+#   docker compose up --build
+# Il frontend risponde su http://localhost:5173 e proxa /api verso l'API.
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      ENVIRONMENT: local
+      STORAGE_BACKEND: json
+      DATA_DIR: /data
+      CORS_ORIGINS: http://localhost:5173
+      # Popola queste per attivare l'AI (vedi .env.example).
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-gpt-4o-mini}
+    volumes:
+      - api-data:/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  web:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_DEV_API: http://api:8000
+    volumes:
+      - ./frontend:/app
+      - web-modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  api-data:
+  web-modules:

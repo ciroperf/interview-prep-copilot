@@ -1,0 +1,710 @@
+# Problemi di coding in stile colloquio. Ogni problema ha test eseguibili e una
+# soluzione di riferimento usata per il confronto (mai inviata al client).
+- id: p-two-sum
+  title: Two Sum
+  topic_ids: [dsa-03-hash-maps, dsa-02-arrays-two-pointers]
+  tags: [hash-map, array]
+  difficulty: easy
+  estimated_minutes: 20
+  target_complexity: "O(n) tempo, O(n) spazio"
+  statement: |
+    Dato un array di interi `nums` e un intero `target`, restituisci gli indici dei due
+    numeri la cui somma è uguale a `target`.
+
+    Puoi assumere che esista esattamente una soluzione e che non si possa usare lo stesso
+    elemento due volte. Restituisci gli indici in ordine crescente.
+  function_name: two_sum
+  starter_code: |
+    def two_sum(nums: list[int], target: int) -> list[int]:
+        # Il tuo codice qui
+        pass
+  examples:
+    - "two_sum([2, 7, 11, 15], 9) -> [0, 1]"
+    - "two_sum([3, 2, 4], 6) -> [1, 2]"
+  hints:
+    - "La soluzione ingenua con due cicli annidati è O(n^2). Cosa ti servirebbe sapere in O(1)?"
+    - "Mentre scorri, per ogni numero ti serve sapere se hai già visto target - numero."
+    - "Salva in un dizionario valore -> indice man mano che avanzi."
+  tests:
+    - kwargs: {nums: [2, 7, 11, 15], target: 9}
+      expected: [0, 1]
+    - kwargs: {nums: [3, 2, 4], target: 6}
+      expected: [1, 2]
+    - kwargs: {nums: [3, 3], target: 6}
+      expected: [0, 1]
+    - kwargs: {nums: [-1, -2, -3, -4, -5], target: -8}
+      expected: [2, 4]
+      hidden: true
+    - kwargs: {nums: [0, 4, 3, 0], target: 0}
+      expected: [0, 3]
+      hidden: true
+  solution: |
+    def two_sum(nums: list[int], target: int) -> list[int]:
+        seen: dict[int, int] = {}
+        for i, n in enumerate(nums):
+            if target - n in seen:
+                return [seen[target - n], i]
+            seen[n] = i
+        return []
+
+- id: p-valid-parentheses
+  title: Parentesi bilanciate
+  topic_ids: [dsa-07-stacks-queues]
+  tags: [stack, stringhe]
+  difficulty: easy
+  estimated_minutes: 20
+  target_complexity: "O(n) tempo, O(n) spazio"
+  statement: |
+    Data una stringa `s` contenente solo i caratteri `(`, `)`, `{`, `}`, `[`, `]`,
+    determina se è bilanciata.
+
+    Una stringa è bilanciata se ogni parentesi aperta è chiusa dallo stesso tipo di
+    parentesi e nell'ordine corretto.
+  function_name: is_valid
+  starter_code: |
+    def is_valid(s: str) -> bool:
+        # Il tuo codice qui
+        pass
+  examples:
+    - "is_valid('()[]{}') -> True"
+    - "is_valid('([)]') -> False"
+  hints:
+    - "L'ultima parentesi aperta deve essere la prima a chiudersi. Che struttura ha questa proprietà?"
+    - "Usa uno stack: push sulle aperte, e sulla chiusa verifica che la cima corrisponda."
+    - "Non dimenticare di controllare che lo stack sia vuoto alla fine."
+  tests:
+    - kwargs: {s: "()"}
+      expected: true
+    - kwargs: {s: "()[]{}"}
+      expected: true
+    - kwargs: {s: "(]"}
+      expected: false
+    - kwargs: {s: "([)]"}
+      expected: false
+    - kwargs: {s: "{[]}"}
+      expected: true
+    - kwargs: {s: ""}
+      expected: true
+      hidden: true
+    - kwargs: {s: "]"}
+      expected: false
+      hidden: true
+    - kwargs: {s: "((("}
+      expected: false
+      hidden: true
+  solution: |
+    def is_valid(s: str) -> bool:
+        pairs = {")": "(", "]": "[", "}": "{"}
+        stack: list[str] = []
+        for ch in s:
+            if ch in pairs:
+                if not stack or stack.pop() != pairs[ch]:
+                    return False
+            else:
+                stack.append(ch)
+        return not stack
+
+- id: p-move-zeroes
+  title: Sposta gli zeri
+  topic_ids: [dsa-02-arrays-two-pointers]
+  tags: [due-puntatori, array, in-place]
+  difficulty: easy
+  estimated_minutes: 20
+  target_complexity: "O(n) tempo, O(1) spazio extra"
+  statement: |
+    Dato un array `nums`, sposta tutti gli zeri alla fine mantenendo l'ordine relativo
+    degli elementi non nulli. Restituisci l'array risultante.
+
+    Cerca di farlo con un solo passaggio e senza allocare un secondo array.
+  function_name: move_zeroes
+  starter_code: |
+    def move_zeroes(nums: list[int]) -> list[int]:
+        # Il tuo codice qui
+        pass
+  examples:
+    - "move_zeroes([0, 1, 0, 3, 12]) -> [1, 3, 12, 0, 0]"
+  hints:
+    - "Tieni un puntatore alla prossima posizione libera per un elemento non nullo."
+    - "Scorri l'array: quando trovi un valore diverso da zero, scrivilo nella posizione libera e avanzala."
+    - "Alla fine riempi di zeri da quella posizione in poi."
+  tests:
+    - kwargs: {nums: [0, 1, 0, 3, 12]}
+      expected: [1, 3, 12, 0, 0]
+    - kwargs: {nums: [0]}
+      expected: [0]
+    - kwargs: {nums: [1, 2, 3]}
+      expected: [1, 2, 3]
+    - kwargs: {nums: [0, 0, 1]}
+      expected: [1, 0, 0]
+      hidden: true
+    - kwargs: {nums: []}
+      expected: []
+      hidden: true
+  solution: |
+    def move_zeroes(nums: list[int]) -> list[int]:
+        slot = 0
+        for i, n in enumerate(nums):
+            if n != 0:
+                nums[slot], nums[i] = nums[i], nums[slot]
+                slot += 1
+        return nums
+
+- id: p-max-subarray
+  title: Sottoarray di somma massima (Kadane)
+  topic_ids: [dsa-11-dynamic-programming]
+  tags: [dp, array, kadane]
+  difficulty: medium
+  estimated_minutes: 25
+  target_complexity: "O(n) tempo, O(1) spazio"
+  statement: |
+    Dato un array di interi `nums`, trova il sottoarray contiguo non vuoto con la somma
+    più grande e restituisci tale somma.
+
+    L'array può contenere numeri negativi.
+  function_name: max_subarray
+  starter_code: |
+    def max_subarray(nums: list[int]) -> int:
+        # Il tuo codice qui
+        pass
+  examples:
+    - "max_subarray([-2, 1, -3, 4, -1, 2, 1, -5, 4]) -> 6  # il sottoarray [4, -1, 2, 1]"
+  hints:
+    - "Per ogni posizione, chiediti: conviene estendere il sottoarray precedente o ricominciare da qui?"
+    - "Se la somma corrente diventa negativa, ricominciare conviene sempre."
+    - "Tieni due variabili: la somma corrente e il massimo visto finora."
+  tests:
+    - kwargs: {nums: [-2, 1, -3, 4, -1, 2, 1, -5, 4]}
+      expected: 6
+    - kwargs: {nums: [1]}
+      expected: 1
+    - kwargs: {nums: [5, 4, -1, 7, 8]}
+      expected: 23
+    - kwargs: {nums: [-1]}
+      expected: -1
+      hidden: true
+    - kwargs: {nums: [-3, -2, -5]}
+      expected: -2
+      hidden: true
+  solution: |
+    def max_subarray(nums: list[int]) -> int:
+        best = current = nums[0]
+        for n in nums[1:]:
+            current = max(n, current + n)
+            best = max(best, current)
+        return best
+
+- id: p-longest-substring
+  title: Sottostringa più lunga senza caratteri ripetuti
+  topic_ids: [dsa-12-sliding-window, dsa-03-hash-maps]
+  tags: [sliding-window, stringhe]
+  difficulty: medium
+  estimated_minutes: 30
+  target_complexity: "O(n) tempo, O(min(n, alfabeto)) spazio"
+  statement: |
+    Data una stringa `s`, restituisci la lunghezza della sottostringa più lunga senza
+    caratteri ripetuti.
+  function_name: length_of_longest_substring
+  starter_code: |
+    def length_of_longest_substring(s: str) -> int:
+        # Il tuo codice qui
+        pass
+  examples:
+    - "length_of_longest_substring('abcabcbb') -> 3  # 'abc'"
+    - "length_of_longest_substring('bbbbb') -> 1"
+  hints:
+    - "Mantieni una finestra che contiene solo caratteri distinti."
+    - "Quando incontri un carattere già presente, sposta il bordo sinistro oltre la sua occorrenza precedente."
+    - "Un dizionario carattere -> ultimo indice evita di spostare il bordo un passo alla volta."
+  tests:
+    - kwargs: {s: "abcabcbb"}
+      expected: 3
+    - kwargs: {s: "bbbbb"}
+      expected: 1
+    - kwargs: {s: "pwwkew"}
+      expected: 3
+    - kwargs: {s: ""}
+      expected: 0
+    - kwargs: {s: "abba"}
+      expected: 2
+      hidden: true
+    - kwargs: {s: "dvdf"}
+      expected: 3
+      hidden: true
+  solution: |
+    def length_of_longest_substring(s: str) -> int:
+        last: dict[str, int] = {}
+        left = best = 0
+        for right, ch in enumerate(s):
+            if ch in last and last[ch] >= left:
+                left = last[ch] + 1
+            last[ch] = right
+            best = max(best, right - left + 1)
+        return best
+
+- id: p-group-anagrams
+  title: Raggruppa anagrammi
+  topic_ids: [dsa-03-hash-maps, dsa-04-strings]
+  tags: [hash-map, stringhe]
+  difficulty: medium
+  estimated_minutes: 25
+  target_complexity: "O(n * k log k) tempo con k lunghezza media delle parole"
+  statement: |
+    Dato un array di stringhe, raggruppa insieme gli anagrammi.
+
+    Per rendere il risultato confrontabile: ordina alfabeticamente le parole dentro ogni
+    gruppo e ordina i gruppi in base alla loro prima parola.
+  function_name: group_anagrams
+  starter_code: |
+    def group_anagrams(words: list[str]) -> list[list[str]]:
+        # Il tuo codice qui
+        pass
+  examples:
+    - "group_anagrams(['eat','tea','tan','ate','nat','bat']) -> [['ate','eat','tea'],['bat'],['nat','tan']]"
+  hints:
+    - "Due parole sono anagrammi se hanno la stessa firma. Quale firma puoi calcolare?"
+    - "La firma può essere la parola con le lettere ordinate, oppure il conteggio delle lettere."
+    - "Raggruppa in un dizionario firma -> lista di parole, poi ordina come richiesto."
+  tests:
+    - kwargs: {words: ["eat", "tea", "tan", "ate", "nat", "bat"]}
+      expected: [["ate", "eat", "tea"], ["bat"], ["nat", "tan"]]
+    - kwargs: {words: [""]}
+      expected: [[""]]
+    - kwargs: {words: ["a"]}
+      expected: [["a"]]
+    - kwargs: {words: ["abc", "cba", "bac", "xyz"]}
+      expected: [["abc", "bac", "cba"], ["xyz"]]
+      hidden: true
+  solution: |
+    def group_anagrams(words: list[str]) -> list[list[str]]:
+        groups: dict[str, list[str]] = {}
+        for word in words:
+            key = "".join(sorted(word))
+            groups.setdefault(key, []).append(word)
+        return sorted([sorted(g) for g in groups.values()], key=lambda g: g[0])
+
+- id: p-merge-intervals
+  title: Unisci intervalli sovrapposti
+  topic_ids: [dsa-14-sorting]
+  tags: [ordinamento, intervalli]
+  difficulty: medium
+  estimated_minutes: 25
+  target_complexity: "O(n log n) tempo per l'ordinamento"
+  statement: |
+    Dato un elenco di intervalli `[inizio, fine]`, unisci tutti quelli che si sovrappongono
+    e restituisci la lista risultante ordinata per inizio.
+
+    Due intervalli che si toccano agli estremi, come [1,3] e [3,5], vanno uniti.
+  function_name: merge_intervals
+  starter_code: |
+    def merge_intervals(intervals: list[list[int]]) -> list[list[int]]:
+        # Il tuo codice qui
+        pass
+  examples:
+    - "merge_intervals([[1,3],[2,6],[8,10],[15,18]]) -> [[1,6],[8,10],[15,18]]"
+  hints:
+    - "Se gli intervalli fossero ordinati per inizio, ti basterebbe un solo passaggio."
+    - "Ordina per inizio, poi confronta ogni intervallo con l'ultimo che hai messo nel risultato."
+    - "Si sovrappongono se l'inizio del nuovo è minore o uguale alla fine dell'ultimo."
+  tests:
+    - kwargs: {intervals: [[1, 3], [2, 6], [8, 10], [15, 18]]}
+      expected: [[1, 6], [8, 10], [15, 18]]
+    - kwargs: {intervals: [[1, 4], [4, 5]]}
+      expected: [[1, 5]]
+    - kwargs: {intervals: []}
+      expected: []
+    - kwargs: {intervals: [[1, 4], [0, 4]]}
+      expected: [[0, 4]]
+      hidden: true
+    - kwargs: {intervals: [[1, 4], [2, 3]]}
+      expected: [[1, 4]]
+      hidden: true
+  solution: |
+    def merge_intervals(intervals: list[list[int]]) -> list[list[int]]:
+        if not intervals:
+            return []
+        out: list[list[int]] = []
+        for start, end in sorted(intervals):
+            if out and start <= out[-1][1]:
+                out[-1][1] = max(out[-1][1], end)
+            else:
+                out.append([start, end])
+        return out
+
+- id: p-product-except-self
+  title: Prodotto di tutti gli altri elementi
+  topic_ids: [dsa-02-arrays-two-pointers]
+  tags: [array, prefix]
+  difficulty: medium
+  estimated_minutes: 30
+  target_complexity: "O(n) tempo, O(1) spazio extra oltre all'output"
+  statement: |
+    Dato un array `nums`, restituisci un array `out` dove `out[i]` è il prodotto di tutti
+    gli elementi di `nums` tranne `nums[i]`.
+
+    Risolvilo senza usare la divisione e in tempo lineare.
+  function_name: product_except_self
+  starter_code: |
+    def product_except_self(nums: list[int]) -> list[int]:
+        # Il tuo codice qui
+        pass
+  examples:
+    - "product_except_self([1, 2, 3, 4]) -> [24, 12, 8, 6]"
+  hints:
+    - "Il risultato per i è (prodotto di tutto a sinistra di i) per (prodotto di tutto a destra)."
+    - "Fai un primo passaggio da sinistra accumulando i prefissi nell'array di output."
+    - "Fai un secondo passaggio da destra moltiplicando per il suffisso accumulato in una variabile."
+  tests:
+    - kwargs: {nums: [1, 2, 3, 4]}
+      expected: [24, 12, 8, 6]
+    - kwargs: {nums: [-1, 1, 0, -3, 3]}
+      expected: [0, 0, 9, 0, 0]
+    - kwargs: {nums: [2, 3]}
+      expected: [3, 2]
+      hidden: true
+    - kwargs: {nums: [0, 0]}
+      expected: [0, 0]
+      hidden: true
+  solution: |
+    def product_except_self(nums: list[int]) -> list[int]:
+        n = len(nums)
+        out = [1] * n
+        prefix = 1
+        for i in range(n):
+            out[i] = prefix
+            prefix *= nums[i]
+        suffix = 1
+        for i in range(n - 1, -1, -1):
+            out[i] *= suffix
+            suffix *= nums[i]
+        return out
+
+- id: p-top-k-frequent
+  title: I k elementi più frequenti
+  topic_ids: [dsa-10-heaps, dsa-03-hash-maps]
+  tags: [heap, hash-map]
+  difficulty: medium
+  estimated_minutes: 30
+  target_complexity: "O(n log k) tempo"
+  statement: |
+    Dato un array di interi `nums` e un intero `k`, restituisci i `k` elementi più
+    frequenti.
+
+    Ordina il risultato per frequenza decrescente e, a parità di frequenza, per valore
+    crescente.
+  function_name: top_k_frequent
+  starter_code: |
+    def top_k_frequent(nums: list[int], k: int) -> list[int]:
+        # Il tuo codice qui
+        pass
+  examples:
+    - "top_k_frequent([1,1,1,2,2,3], 2) -> [1, 2]"
+  hints:
+    - "Prima conta le occorrenze con un dizionario."
+    - "Ordinare tutto costa O(n log n): con un heap di dimensione k scendi a O(n log k)."
+    - "Attenzione al criterio di parità richiesto dalla consegna."
+  tests:
+    - kwargs: {nums: [1, 1, 1, 2, 2, 3], k: 2}
+      expected: [1, 2]
+    - kwargs: {nums: [1], k: 1}
+      expected: [1]
+    - kwargs: {nums: [4, 4, 5, 5, 6], k: 2}
+      expected: [4, 5]
+    - kwargs: {nums: [3, 3, 1, 1, 2], k: 3}
+      expected: [1, 3, 2]
+      hidden: true
+  solution: |
+    def top_k_frequent(nums: list[int], k: int) -> list[int]:
+        from collections import Counter
+
+        counts = Counter(nums)
+        ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        return [value for value, _ in ordered[:k]]
+
+- id: p-num-islands
+  title: Numero di isole
+  topic_ids: [dsa-09-graphs]
+  tags: [grafi, bfs, dfs, matrice]
+  difficulty: medium
+  estimated_minutes: 35
+  target_complexity: "O(righe * colonne) tempo"
+  statement: |
+    Data una griglia di caratteri dove `1` è terra e `0` è acqua, conta il numero di
+    isole.
+
+    Un'isola è un gruppo di celle di terra collegate orizzontalmente o verticalmente (non
+    in diagonale). La griglia è circondata da acqua.
+  function_name: num_islands
+  starter_code: |
+    def num_islands(grid: list[list[str]]) -> int:
+        # Il tuo codice qui
+        pass
+  examples:
+    - "num_islands([['1','1','0'],['0','1','0'],['0','0','1']]) -> 2"
+  hints:
+    - "Una matrice con celle adiacenti è un grafo travestito."
+    - "Scorri tutte le celle: quando trovi terra non ancora visitata, hai trovato una nuova isola."
+    - "Da quella cella esplora con BFS o DFS tutta l'isola marcandola come visitata."
+  tests:
+    - kwargs:
+        grid: [["1", "1", "0"], ["0", "1", "0"], ["0", "0", "1"]]
+      expected: 2
+    - kwargs:
+        grid: [["1", "1", "1"], ["1", "1", "1"]]
+      expected: 1
+    - kwargs:
+        grid: [["0", "0"], ["0", "0"]]
+      expected: 0
+    - kwargs:
+        grid: []
+      expected: 0
+      hidden: true
+    - kwargs:
+        grid: [["1", "0", "1", "0", "1"]]
+      expected: 3
+      hidden: true
+  solution: |
+    def num_islands(grid: list[list[str]]) -> int:
+        if not grid or not grid[0]:
+            return 0
+        rows, cols = len(grid), len(grid[0])
+        seen = set()
+        count = 0
+
+        def flood(r0: int, c0: int) -> None:
+            stack = [(r0, c0)]
+            while stack:
+                r, c = stack.pop()
+                for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < rows and 0 <= nc < cols:
+                        if grid[nr][nc] == "1" and (nr, nc) not in seen:
+                            seen.add((nr, nc))
+                            stack.append((nr, nc))
+
+        for r in range(rows):
+            for c in range(cols):
+                if grid[r][c] == "1" and (r, c) not in seen:
+                    seen.add((r, c))
+                    flood(r, c)
+                    count += 1
+        return count
+
+- id: p-course-schedule
+  title: Fattibilità del piano di studi (ordinamento topologico)
+  topic_ids: [dsa-09-graphs]
+  tags: [grafi, topologico, cicli]
+  difficulty: medium
+  estimated_minutes: 35
+  target_complexity: "O(V + E) tempo"
+  statement: |
+    Ci sono `num_courses` corsi numerati da 0 a num_courses-1. Ogni prerequisito è una
+    coppia `[a, b]` che significa: per seguire il corso `a` devi aver completato `b`.
+
+    Restituisci True se è possibile completare tutti i corsi, False altrimenti.
+  function_name: can_finish
+  starter_code: |
+    def can_finish(num_courses: int, prerequisites: list[list[int]]) -> bool:
+        # Il tuo codice qui
+        pass
+  examples:
+    - "can_finish(2, [[1, 0]]) -> True"
+    - "can_finish(2, [[1, 0], [0, 1]]) -> False  # dipendenza circolare"
+  hints:
+    - "I corsi e i prerequisiti formano un grafo diretto. Quando è impossibile completarli tutti?"
+    - "È impossibile se e solo se esiste un ciclo."
+    - "Usa l'algoritmo di Kahn: parti dai nodi con grado entrante zero e rimuovili uno a uno."
+  tests:
+    - kwargs: {num_courses: 2, prerequisites: [[1, 0]]}
+      expected: true
+    - kwargs: {num_courses: 2, prerequisites: [[1, 0], [0, 1]]}
+      expected: false
+    - kwargs: {num_courses: 3, prerequisites: []}
+      expected: true
+    - kwargs: {num_courses: 4, prerequisites: [[1, 0], [2, 1], [3, 2]]}
+      expected: true
+      hidden: true
+    - kwargs: {num_courses: 3, prerequisites: [[0, 1], [1, 2], [2, 0]]}
+      expected: false
+      hidden: true
+  solution: |
+    def can_finish(num_courses: int, prerequisites: list[list[int]]) -> bool:
+        from collections import deque
+
+        adj: list[list[int]] = [[] for _ in range(num_courses)]
+        indegree = [0] * num_courses
+        for course, prereq in prerequisites:
+            adj[prereq].append(course)
+            indegree[course] += 1
+
+        queue = deque(i for i in range(num_courses) if indegree[i] == 0)
+        done = 0
+        while queue:
+            node = queue.popleft()
+            done += 1
+            for nxt in adj[node]:
+                indegree[nxt] -= 1
+                if indegree[nxt] == 0:
+                    queue.append(nxt)
+        return done == num_courses
+
+- id: p-coin-change
+  title: Resto con il minimo numero di monete
+  topic_ids: [dsa-11-dynamic-programming]
+  tags: [dp, ottimizzazione]
+  difficulty: medium
+  estimated_minutes: 35
+  target_complexity: "O(amount * len(coins)) tempo"
+  statement: |
+    Dato un elenco di tagli di monete `coins` e un importo `amount`, restituisci il numero
+    minimo di monete necessarie per comporre esattamente quell'importo.
+
+    Se non è possibile, restituisci -1. Hai a disposizione infinite monete di ogni taglio.
+  function_name: coin_change
+  starter_code: |
+    def coin_change(coins: list[int], amount: int) -> int:
+        # Il tuo codice qui
+        pass
+  examples:
+    - "coin_change([1, 2, 5], 11) -> 3  # 5 + 5 + 1"
+    - "coin_change([2], 3) -> -1"
+  hints:
+    - "L'approccio greedy (prendi sempre la moneta più grande) non funziona: prova con coins=[1,3,4] e amount=6."
+    - "Definisci dp[x] = numero minimo di monete per comporre x."
+    - "dp[x] = 1 + min(dp[x - moneta]) per ogni moneta che sta in x."
+  tests:
+    - kwargs: {coins: [1, 2, 5], amount: 11}
+      expected: 3
+    - kwargs: {coins: [2], amount: 3}
+      expected: -1
+    - kwargs: {coins: [1], amount: 0}
+      expected: 0
+    - kwargs: {coins: [1, 3, 4], amount: 6}
+      expected: 2
+      hidden: true
+    - kwargs: {coins: [186, 419, 83, 408], amount: 6249}
+      expected: 20
+      hidden: true
+  solution: |
+    def coin_change(coins: list[int], amount: int) -> int:
+        INF = float("inf")
+        dp = [0] + [INF] * amount
+        for value in range(1, amount + 1):
+            for coin in coins:
+                if coin <= value and dp[value - coin] + 1 < dp[value]:
+                    dp[value] = dp[value - coin] + 1
+        return -1 if dp[amount] == INF else int(dp[amount])
+
+- id: p-search-rotated
+  title: Ricerca in array ordinato e ruotato
+  topic_ids: [dsa-05-binary-search]
+  tags: [ricerca-binaria, array]
+  difficulty: medium
+  estimated_minutes: 35
+  target_complexity: "O(log n) tempo"
+  statement: |
+    Un array ordinato in modo crescente e con valori distinti è stato ruotato in un punto
+    sconosciuto. Dato `target`, restituisci il suo indice, oppure -1 se non è presente.
+
+    L'algoritmo deve essere logaritmico.
+  function_name: search_rotated
+  starter_code: |
+    def search_rotated(nums: list[int], target: int) -> int:
+        # Il tuo codice qui
+        pass
+  examples:
+    - "search_rotated([4,5,6,7,0,1,2], 0) -> 4"
+    - "search_rotated([4,5,6,7,0,1,2], 3) -> -1"
+  hints:
+    - "Dividendo l'array a metà, almeno una delle due metà è sicuramente ordinata."
+    - "Capisci quale metà è ordinata confrontando l'estremo con il valore centrale."
+    - "Se il target sta nell'intervallo della metà ordinata, cercalo lì; altrimenti vai nell'altra."
+  tests:
+    - kwargs: {nums: [4, 5, 6, 7, 0, 1, 2], target: 0}
+      expected: 4
+    - kwargs: {nums: [4, 5, 6, 7, 0, 1, 2], target: 3}
+      expected: -1
+    - kwargs: {nums: [1], target: 1}
+      expected: 0
+    - kwargs: {nums: [], target: 5}
+      expected: -1
+      hidden: true
+    - kwargs: {nums: [5, 1, 3], target: 3}
+      expected: 2
+      hidden: true
+  solution: |
+    def search_rotated(nums: list[int], target: int) -> int:
+        lo, hi = 0, len(nums) - 1
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if nums[mid] == target:
+                return mid
+            if nums[lo] <= nums[mid]:
+                if nums[lo] <= target < nums[mid]:
+                    hi = mid - 1
+                else:
+                    lo = mid + 1
+            else:
+                if nums[mid] < target <= nums[hi]:
+                    lo = mid + 1
+                else:
+                    hi = mid - 1
+        return -1
+
+- id: p-min-window
+  title: Sottostringa minima che copre tutti i caratteri
+  topic_ids: [dsa-12-sliding-window, dsa-03-hash-maps]
+  tags: [sliding-window, stringhe, hard]
+  difficulty: hard
+  estimated_minutes: 45
+  target_complexity: "O(len(s) + len(t)) tempo"
+  statement: |
+    Date due stringhe `s` e `t`, restituisci la sottostringa più corta di `s` che contiene
+    tutti i caratteri di `t`, molteplicità incluse.
+
+    Se non esiste, restituisci la stringa vuota. La soluzione è garantita unica.
+  function_name: min_window
+  starter_code: |
+    def min_window(s: str, t: str) -> str:
+        # Il tuo codice qui
+        pass
+  examples:
+    - "min_window('ADOBECODEBANC', 'ABC') -> 'BANC'"
+  hints:
+    - "Espandi il bordo destro finché la finestra non contiene tutto t."
+    - "Quando è valida, contrai da sinistra il più possibile mantenendola valida, e aggiorna il minimo."
+    - "Tieni un contatore di quanti caratteri richiesti sono già soddisfatti per evitare di riconfrontare le mappe ogni volta."
+  tests:
+    - kwargs: {s: "ADOBECODEBANC", t: "ABC"}
+      expected: "BANC"
+    - kwargs: {s: "a", t: "a"}
+      expected: "a"
+    - kwargs: {s: "a", t: "aa"}
+      expected: ""
+    - kwargs: {s: "ab", t: "b"}
+      expected: "b"
+      hidden: true
+    - kwargs: {s: "", t: "a"}
+      expected: ""
+      hidden: true
+  solution: |
+    def min_window(s: str, t: str) -> str:
+        from collections import Counter
+
+        if not s or not t:
+            return ""
+        need = Counter(t)
+        missing = len(t)
+        best_start, best_len = 0, -1
+        left = 0
+        for right, ch in enumerate(s):
+            if need[ch] > 0:
+                missing -= 1
+            need[ch] -= 1
+            while missing == 0:
+                if best_len == -1 or right - left + 1 < best_len:
+                    best_start, best_len = left, right - left + 1
+                need[s[left]] += 1
+                if need[s[left]] > 0:
+                    missing += 1
+                left += 1
+        return "" if best_len == -1 else s[best_start : best_start + best_len]

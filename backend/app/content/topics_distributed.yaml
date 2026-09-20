@@ -1,0 +1,174 @@
+# Categoria "Distributed Systems & Scaling" - concetti 26-30 della checklist.
+- id: dist-26-load-balancing
+  title: Load balancing (round-robin, least connections, hashing)
+  category: distributed
+  track: knowledge
+  level: medium
+  tags: [distribuito, scalabilita, networking]
+  estimated_minutes: 25
+  summary: >-
+    Il load balancer distribuisce il traffico fra le istanze e le toglie dalla rotazione
+    quando non rispondono. L'algoritmo conta meno dell'health check, che è ciò che
+    determina se il sistema si accorge di un guasto.
+  key_points:
+    - "Round-robin: equo se tutte le richieste costano uguale. Weighted round-robin se le istanze sono eterogenee"
+    - "Least connections: migliore con richieste di durata variabile"
+    - "IP hash / consistent hashing: stessa chiave sempre sullo stesso nodo, utile per la località di cache"
+    - "L4 (TCP) è veloce e cieco; L7 (HTTP) può instradare per path, header, cookie e fare retry"
+    - "Health check attivo (il LB interroga) vs passivo (il LB osserva gli errori). Servono entrambi"
+    - "Il consistent hashing evita il rimescolamento totale quando un nodo entra o esce"
+    - "Il LB stesso non deve essere un single point of failure: va reso ridondante"
+  interview_answer: >-
+    Per un servizio stateless con richieste omogenee round-robin va benissimo. Passo a
+    least connections quando la durata delle richieste varia molto, perché il round-robin
+    finisce per accumulare richieste lente sulla stessa istanza. Uso l'hashing quando voglio
+    località, per esempio per far sì che le richieste sullo stesso tenant colpiscano il nodo
+    che ha già la cache calda, e in quel caso scelgo consistent hashing per non rimescolare
+    tutto quando la flotta cambia dimensione. La parte su cui investo più attenzione però è
+    l'health check: un endpoint che risponde 200 perché il processo è vivo ma il database è
+    irraggiungibile è peggio di nessun health check.
+  pitfalls:
+    - "Health check che controlla solo che il processo risponda, non che sia in grado di servire"
+    - "Session affinity usata per compensare un servizio stateful"
+    - "Rimozione troppo aggressiva delle istanze, che causa un effetto valanga"
+  follow_up_questions:
+    - "Differenza tra liveness e readiness probe?"
+
+- id: dist-27-horizontal-vertical
+  title: Scaling orizzontale vs verticale
+  category: distributed
+  track: knowledge
+  level: easy
+  tags: [scalabilita, architettura, cloud]
+  estimated_minutes: 20
+  summary: >-
+    Verticale significa una macchina più grande, orizzontale più macchine. Il verticale è
+    banale ma ha un tetto e un single point of failure; l'orizzontale non ha tetto ma
+    richiede che il servizio sia stateless.
+  key_points:
+    - "Verticale: zero cambi al codice, downtime per il resize, costo superlineare all'aumentare della taglia"
+    - "Orizzontale: capacità teoricamente illimitata, ridondanza inclusa, ma richiede statelessness e load balancing"
+    - "I database si scalano orizzontalmente molto peggio delle applicazioni: da qui replica e sharding"
+    - "Autoscaling: metrica giusta (RPS o lunghezza coda, spesso meglio della CPU), cooldown per evitare flapping"
+    - "Scale-to-zero: paghi solo l'uso, al prezzo di un cold start"
+    - "In pratica si fa entrambi: verticale finché è economico, poi orizzontale"
+  interview_answer: >-
+    Il verticale è la prima mossa perché non costa lavoro: una macchina più grossa e si va
+    avanti. Ha però due limiti, il tetto fisico della taglia massima e il fatto che resto
+    con un singolo punto di guasto. Appena uno dei due diventa rilevante passo
+    all'orizzontale, che richiede il prerequisito di avere un servizio stateless. Per
+    l'autoscaling evito la CPU come unica metrica: su un servizio I/O bound la CPU resta
+    bassa mentre le richieste si accodano, quindi preferisco scalare sulla lunghezza della
+    coda o sulle richieste concorrenti.
+  pitfalls:
+    - "Autoscaling sulla CPU per un servizio I/O bound"
+    - "Scalare l'applicazione lasciando il database come collo di bottiglia"
+    - "Soglie di scaling senza cooldown, che causano flapping"
+  follow_up_questions:
+    - "Che metrica useresti per l'autoscaling di un servizio che chiama API esterne lente?"
+
+- id: dist-28-microservices-monolith
+  title: Microservizi vs monolite (trade-off)
+  category: distributed
+  track: knowledge
+  level: medium
+  tags: [architettura, distribuito, organizzazione]
+  estimated_minutes: 30
+  summary: >-
+    I microservizi comprano indipendenza di deploy e di scaling pagando in complessità
+    operativa e nella perdita delle transazioni locali. La scelta è tanto organizzativa
+    quanto tecnica: la legge di Conway non si aggira.
+  key_points:
+    - "Monolite: transazioni ACID locali, refactor facile, debug lineare, deploy unico"
+    - "Microservizi: deploy e scaling indipendenti, isolamento dei guasti, autonomia dei team"
+    - "Il costo: chiamate di rete che falliscono, consistenza eventuale, tracing distribuito, versioning dei contratti"
+    - "Il monolite modulare è quasi sempre il punto di partenza giusto: confini chiari, un solo deploy"
+    - "Un microservizio che non ha un proprio database non è un microservizio: è un monolite distribuito, il peggiore dei due mondi"
+    - "Estrai un servizio quando hai una ragione precisa: scaling diverso, team diverso, ciclo di rilascio diverso, requisito di isolamento"
+  interview_answer: >-
+    Parto da un monolite modulare, con confini di dominio netti dentro un unico deploy.
+    Questo mi dà il vantaggio principale dei microservizi, cioè i confini, senza pagare la
+    rete. Estraggo un servizio quando ho una ragione concreta: una parte con profilo di
+    carico molto diverso, un team che deve rilasciare a ritmo suo, o un requisito di
+    isolamento. Quello che evito è il monolite distribuito, cioè servizi separati che
+    condividono lo stesso database: lì ho tutti i costi della rete e nessuna autonomia, e
+    ogni cambio di schema diventa un rilascio coordinato.
+  pitfalls:
+    - "Partire da microservizi senza conoscere ancora i confini del dominio"
+    - "Database condiviso fra servizi"
+    - "Chiamate sincrone a catena fra molti servizi: la latenza e i guasti si moltiplicano"
+  follow_up_questions:
+    - "Come gestiresti una transazione che coinvolge tre microservizi?"
+    - "Cos'è un monolite distribuito e perché è il peggiore dei due mondi?"
+
+- id: dist-29-service-communication
+  title: Comunicazione fra servizi (sincrona vs asincrona)
+  category: distributed
+  track: knowledge
+  level: medium
+  tags: [distribuito, architettura, messaggistica]
+  estimated_minutes: 30
+  summary: >-
+    Sincrono significa che il chiamante aspetta e quindi eredita la disponibilità e la
+    latenza del chiamato. Asincrono disaccoppia in tempo, al prezzo della consistenza
+    immediata e di un debugging più complicato.
+  key_points:
+    - "Sincrono (REST, gRPC): semplice, risposta immediata, ma accoppia disponibilità. Se A chiama B e B è giù, A è giù"
+    - "Catene sincrone: la disponibilità si moltiplica. Cinque servizi al 99,9% danno 99,5%"
+    - "Asincrono (code, eventi): il chiamante non aspetta, i picchi si assorbono, i consumatori scalano da soli"
+    - "gRPC conviene per il traffico interno: contratti tipizzati, HTTP/2, streaming, payload binario compatto"
+    - "Regola pratica: sincrono quando serve la risposta per proseguire, asincrono quando è un effetto collaterale (email, indicizzazione, analytics)"
+    - "In asincrono servono sempre: idempotenza del consumer, dead letter queue, tracing con correlation id"
+  interview_answer: >-
+    La domanda che mi faccio è se il chiamante ha davvero bisogno della risposta per
+    proseguire. Se sto validando un pagamento sì, quindi sincrono. Se sto mandando una mail
+    di conferma no, e allora la metto su una coda: l'utente non deve aspettare il provider
+    SMTP e se quello è giù la mail parte dopo invece di far fallire l'ordine. Il rischio
+    delle catene sincrone è che la disponibilità si moltiplica, quindi ogni salto in più
+    abbassa il numero finale. Quando vado asincrono metto in conto subito tre cose:
+    consumer idempotente, dead letter queue e correlation id propagato, altrimenti il
+    debugging diventa impossibile.
+  pitfalls:
+    - "Catene sincrone lunghe senza timeout né circuit breaker"
+    - "Asincrono dove l'utente si aspetta un esito immediato"
+    - "Nessuna dead letter queue: i messaggi problematici girano all'infinito"
+  follow_up_questions:
+    - "Come tracci una richiesta che attraversa una coda?"
+
+- id: dist-30-message-queues
+  title: Message queue (Kafka, RabbitMQ, SQS)
+  category: distributed
+  track: knowledge
+  level: medium
+  tags: [distribuito, messaggistica, kafka]
+  estimated_minutes: 35
+  summary: >-
+    Le code disaccoppiano produttore e consumatore, assorbono i picchi e permettono di
+    ritentare. Log distribuiti come Kafka e broker di messaggi come RabbitMQ risolvono
+    però problemi diversi.
+  key_points:
+    - "Kafka: log append-only partizionato, i messaggi restano dopo il consumo, i consumer tengono un offset. Ottimo per event streaming e replay"
+    - "RabbitMQ: broker con routing ricco (exchange, binding), messaggio rimosso dopo l'ack. Ottimo per task queue e routing complesso"
+    - "SQS: coda gestita, zero operatività. Standard (at-least-once, ordine non garantito) o FIFO (ordine e deduplicazione, throughput minore)"
+    - "L'ordine in Kafka è garantito solo dentro una partizione: la chiave di partizionamento decide cosa resta ordinato"
+    - "Consumer group: il parallelismo massimo è pari al numero di partizioni"
+    - "Consumer lag è la metrica di salute da monitorare"
+    - "Quasi tutti i sistemi sono at-least-once: il consumer deve essere idempotente"
+    - "Dead letter queue per i messaggi che falliscono ripetutamente"
+  interview_answer: >-
+    Scelgo in base a cosa voglio fare del messaggio dopo. Se è un lavoro da svolgere una
+    volta sola e poi dimenticare, una task queue come RabbitMQ o SQS è la scelta naturale.
+    Se è un evento che più consumatori diversi devono poter leggere, magari anche
+    rileggere in futuro per ricostruire uno stato, allora Kafka, perché il log resta e
+    ogni consumer ha il suo offset. Il dettaglio su cui si sbaglia più spesso è l'ordine:
+    in Kafka è garantito solo all'interno di una partizione, quindi se mi serve l'ordine
+    per utente devo usare l'user id come chiave di partizionamento, altrimenti gli eventi
+    dello stesso utente finiscono su partizioni diverse e l'ordine si perde.
+  pitfalls:
+    - "Aspettarsi ordinamento globale in Kafka"
+    - "Consumer non idempotente con consegna at-least-once"
+    - "Più consumer delle partizioni disponibili: alcuni restano inattivi"
+    - "Nessun monitoraggio del consumer lag"
+  follow_up_questions:
+    - "Come garantisci l'ordine degli eventi per un singolo utente in Kafka?"
+    - "Cosa metti in una dead letter queue e come la gestisci?"

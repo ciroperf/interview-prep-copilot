@@ -1,0 +1,444 @@
+# Domande su Caching, Distributed Systems e Reliability.
+- id: q-cache-21-a
+  topic_id: cache-21-what-and-where
+  difficulty: medium
+  prompt: "Nel pattern cache-aside, chi si occupa di popolare la cache in caso di miss?"
+  options:
+    - "Il database, tramite trigger"
+    - "L'applicazione: legge dal DB e scrive in cache prima di rispondere"
+    - "La cache stessa, interrogando il database"
+    - "Il load balancer"
+  answer_index: 1
+  explanation: "In read-through è la cache a caricare il dato; in cache-aside la responsabilità è dell'applicazione."
+
+- id: q-cache-21-b
+  topic_id: cache-21-what-and-where
+  difficulty: medium
+  prompt: "Perché una cache in memoria di processo è rischiosa con più istanze del servizio?"
+  options:
+    - "Perché occupa troppa RAM"
+    - "Perché ogni istanza ha una copia indipendente: le invalidazioni non si propagano e le istanze divergono"
+    - "Perché non supporta il TTL"
+    - "Perché rallenta le letture"
+  answer_index: 1
+  explanation: "Con N istanze hai N verità diverse: va bene solo per dati praticamente immutabili."
+
+- id: q-cache-22-a
+  topic_id: cache-22-eviction
+  difficulty: medium
+  prompt: "Perché conviene aggiungere jitter casuale ai TTL della cache?"
+  options:
+    - "Per risparmiare memoria"
+    - "Per evitare che molte chiavi popolate insieme scadano nello stesso istante, scaricando un picco sul database"
+    - "Per migliorare la compressione"
+    - "Perché Redis lo richiede"
+  answer_index: 1
+  explanation: "Senza jitter le scadenze si sincronizzano e si ottiene un picco periodico di miss."
+
+- id: q-cache-22-b
+  topic_id: cache-22-eviction
+  difficulty: hard
+  prompt: "Cosa succede in Redis con maxmemory raggiunta e policy noeviction?"
+  options:
+    - "Le chiavi più vecchie vengono rimosse"
+    - "Le nuove scritture falliscono con un errore OOM"
+    - "Redis si riavvia"
+    - "I dati vengono scritti su disco"
+  answer_index: 1
+  explanation: "noeviction è il default e non rimuove nulla: le scritture iniziano a fallire, cosa spesso inattesa in produzione."
+
+- id: q-cache-23-a
+  topic_id: cache-23-consistency
+  difficulty: hard
+  prompt: "Dopo aver aggiornato il database, perché è più sicuro invalidare la chiave in cache invece di riscriverla?"
+  options:
+    - "Perché invalidare è più veloce"
+    - "Perché una lettura concorrente partita prima può completare dopo e riscrivere il valore vecchio, che resterebbe per tutto il TTL"
+    - "Perché la cache non supporta le scritture"
+    - "Perché riscrivere consuma più memoria"
+  answer_index: 1
+  explanation: "Con l'invalidazione il caso peggiore è una miss; con la riscrittura il caso peggiore è un valore stantio persistente."
+
+- id: q-cache-23-b
+  topic_id: cache-23-consistency
+  difficulty: hard
+  prompt: "Cos'è una cache stampede e come si mitiga?"
+  options:
+    - "Troppe chiavi in cache: si mitiga con l'eviction"
+    - "Una chiave molto richiesta scade e molte richieste colpiscono il DB insieme: si mitiga con single-flight o rigenerazione anticipata"
+    - "La cache si riempie di dati inutili: si mitiga con il TTL"
+    - "Il database rifiuta le connessioni: si mitiga con il rate limiting"
+  answer_index: 1
+  explanation: "Il single-flight fa rigenerare il valore a una sola richiesta mentre le altre aspettano o ricevono il valore stantio."
+
+- id: q-cache-24-a
+  topic_id: cache-24-cdn
+  difficulty: medium
+  prompt: "Qual è la strategia standard per gli asset statici in CDN?"
+  options:
+    - "max-age breve e purge a ogni deploy"
+    - "Hash del contenuto nel nome del file e Cache-Control immutable con max-age lunghissimo"
+    - "no-store per avere sempre la versione aggiornata"
+    - "Vary su User-Agent"
+  answer_index: 1
+  explanation: "Se il nome cambia quando cambia il contenuto, non serve mai invalidare: la nuova versione ha semplicemente un altro URL."
+
+- id: q-cache-24-b
+  topic_id: cache-24-cdn
+  difficulty: hard
+  prompt: "Perché Vary su User-Agent è quasi sempre una cattiva idea in CDN?"
+  options:
+    - "Perché lo header è opzionale"
+    - "Perché la cardinalità degli User-Agent è altissima: la cache si frammenta e l'hit rate crolla"
+    - "Perché impedisce HTTPS"
+    - "Perché i browser lo ignorano"
+  answer_index: 1
+  explanation: "Ogni variante di User-Agent genera una voce separata: si finisce per non avere praticamente hit."
+
+- id: q-cache-25-a
+  topic_id: cache-25-cache-danger
+  difficulty: hard
+  prompt: "Il tuo database regge il carico solo grazie a un hit rate del 95% su Redis. Qual è il rischio?"
+  options:
+    - "Nessuno, è un uso normale della cache"
+    - "La cache è diventata una dipendenza critica: un flush o un riavvio manda tutto il traffico a freddo sul database"
+    - "Redis consuma troppa memoria"
+    - "Il TTL diventa inaffidabile"
+  answer_index: 1
+  explanation: "Il sistema deve restare corretto, anche se più lento, con cache vuota: altrimenti un riavvio di Redis è un incidente."
+
+- id: q-dist-26-a
+  topic_id: dist-26-load-balancing
+  difficulty: medium
+  prompt: "Perché un health check che verifica solo che il processo risponda può essere dannoso?"
+  options:
+    - "Perché consuma banda"
+    - "Perché un'istanza con il database irraggiungibile risulta sana e continua a ricevere traffico che fallirà"
+    - "Perché rallenta il load balancer"
+    - "Perché i processi non possono auto-diagnosticarsi"
+  answer_index: 1
+  explanation: "La readiness deve riflettere la capacità reale di servire, includendo le dipendenze critiche."
+
+- id: q-dist-26-b
+  topic_id: dist-26-load-balancing
+  difficulty: hard
+  prompt: "Qual è il vantaggio del consistent hashing rispetto a un hash modulo N?"
+  options:
+    - "È più veloce da calcolare"
+    - "Aggiungendo o togliendo un nodo si rimescola solo una frazione delle chiavi invece di quasi tutte"
+    - "Garantisce una distribuzione perfettamente uniforme"
+    - "Non richiede una funzione di hash"
+  answer_index: 1
+  explanation: "Con modulo N un cambio di N rimappa quasi tutte le chiavi; il consistent hashing limita il movimento a circa 1/N."
+
+- id: q-dist-27-a
+  topic_id: dist-27-horizontal-vertical
+  difficulty: medium
+  prompt: "Perché la CPU è spesso una cattiva metrica di autoscaling per un servizio I/O bound?"
+  options:
+    - "Perché la CPU non è misurabile nei container"
+    - "Perché il servizio passa il tempo in attesa: la CPU resta bassa mentre le richieste si accodano"
+    - "Perché la CPU varia troppo rapidamente"
+    - "Perché l'autoscaler non legge la CPU"
+  answer_index: 1
+  explanation: "Meglio scalare su richieste concorrenti, lunghezza della coda o latenza, che riflettono la saturazione reale."
+
+- id: q-dist-28-a
+  topic_id: dist-28-microservices-monolith
+  difficulty: hard
+  prompt: "Perché due microservizi che condividono lo stesso database sono un anti-pattern?"
+  options:
+    - "Perché il database diventa lento"
+    - "Perché è un monolite distribuito: si pagano i costi della rete senza ottenere autonomia di deploy e di schema"
+    - "Perché i database non supportano più client"
+    - "Perché impedisce di usare le transazioni"
+  answer_index: 1
+  explanation: "Ogni cambio di schema richiede un rilascio coordinato: l'indipendenza, unica vera ragione per separare, scompare."
+
+- id: q-dist-28-b
+  topic_id: dist-28-microservices-monolith
+  difficulty: medium
+  prompt: "Qual è il vantaggio che il monolite conserva rispetto ai microservizi?"
+  options:
+    - "Lo scaling indipendente dei componenti"
+    - "Le transazioni ACID locali e la possibilità di refactorare i confini senza coordinamento"
+    - "L'isolamento dei guasti"
+    - "L'autonomia dei team"
+  answer_index: 1
+  explanation: "Con un solo database la transazione risolve la consistenza; fra servizi serve una saga."
+
+- id: q-dist-29-a
+  topic_id: dist-29-service-communication
+  difficulty: medium
+  prompt: "Cinque servizi in catena sincrona, ognuno con disponibilità 99,9%. Qual è la disponibilità complessiva approssimativa?"
+  options:
+    - "99,9%"
+    - "99,5%"
+    - "99,99%"
+    - "95%"
+  answer_index: 1
+  explanation: "Le disponibilità si moltiplicano: 0,999^5 è circa 0,995, cioè 99,5%."
+
+- id: q-dist-29-b
+  topic_id: dist-29-service-communication
+  difficulty: medium
+  prompt: "Quale operazione è la candidata migliore a essere resa asincrona?"
+  options:
+    - "La validazione della carta di credito durante il checkout"
+    - "L'invio della email di conferma ordine"
+    - "Il controllo delle credenziali al login"
+    - "La verifica della disponibilità a magazzino prima di confermare"
+  answer_index: 1
+  explanation: "L'esito non serve per proseguire: mandarla su coda evita che un provider SMTP lento o giù faccia fallire l'ordine."
+
+- id: q-dist-30-a
+  topic_id: dist-30-message-queues
+  difficulty: hard
+  prompt: "In Kafka, come garantisci che gli eventi di uno stesso utente siano elaborati in ordine?"
+  options:
+    - "Usando una sola partizione per tutto il topic"
+    - "Usando l'user id come chiave di partizionamento, così finiscono tutti nella stessa partizione"
+    - "Attivando le transazioni"
+    - "Kafka garantisce sempre l'ordine globale"
+  answer_index: 1
+  explanation: "L'ordine è garantito solo dentro una partizione: la chiave determina la partizione di destinazione."
+
+- id: q-dist-30-b
+  topic_id: dist-30-message-queues
+  difficulty: medium
+  prompt: "Cosa succede se un consumer group ha più consumer delle partizioni disponibili?"
+  options:
+    - "Il throughput aumenta comunque"
+    - "I consumer in eccesso restano inattivi: il parallelismo massimo è pari al numero di partizioni"
+    - "Kafka crea nuove partizioni automaticamente"
+    - "I messaggi vengono duplicati"
+  answer_index: 1
+  explanation: "Ogni partizione è assegnata a un solo consumer del gruppo: oltre quel numero non si guadagna parallelismo."
+
+- id: q-rel-31-a
+  topic_id: rel-31-delivery-semantics
+  difficulty: hard
+  prompt: "Come si ottiene in pratica un comportamento exactly-once?"
+  options:
+    - "Attivando la modalità exactly-once del broker, che copre tutto"
+    - "Con at-least-once più un consumer idempotente che persiste un marker di deduplicazione nella stessa transazione dell'effetto"
+    - "Con at-most-once e retry"
+    - "Non è possibile in nessun modo"
+  answer_index: 1
+  explanation: "L'exactly-once end-to-end non è realizzabile sulla rete: si ottiene l'effetto osservabile rendendo idempotente l'elaborazione."
+
+- id: q-rel-32-a
+  topic_id: rel-32-retries-timeouts-breakers
+  difficulty: medium
+  prompt: "Perché il jitter è indispensabile nel backoff esponenziale?"
+  options:
+    - "Perché rende i retry più veloci"
+    - "Perché senza jitter tutti i client ritentano negli stessi istanti, creando picchi sincronizzati sul servizio che si sta riprendendo"
+    - "Perché è richiesto dal protocollo HTTP"
+    - "Perché riduce il consumo di memoria"
+  answer_index: 1
+  explanation: "Il backoff distanzia i tentativi nel tempo, il jitter li distribuisce fra client diversi."
+
+- id: q-rel-32-b
+  topic_id: rel-32-retries-timeouts-breakers
+  difficulty: hard
+  prompt: "Tre livelli di servizi, ognuno con 3 tentativi di retry. Quante chiamate può generare al massimo una singola richiesta sul servizio più a valle?"
+  options:
+    - "3"
+    - "9"
+    - "27"
+    - "6"
+  answer_index: 2
+  explanation: "I retry annidati si moltiplicano: 3x3x3 = 27. È il motivo per cui serve un budget di retry complessivo."
+
+- id: q-rel-32-c
+  topic_id: rel-32-retries-timeouts-breakers
+  difficulty: medium
+  prompt: "In quale stato un circuit breaker lascia passare un numero limitato di richieste di prova?"
+  options:
+    - "Closed"
+    - "Open"
+    - "Half-open"
+    - "Draining"
+  answer_index: 2
+  explanation: "Dopo il periodo di attesa passa in half-open: se le prove riescono torna closed, altrimenti di nuovo open."
+
+- id: q-rel-33-a
+  topic_id: rel-33-race-conditions
+  difficulty: medium
+  prompt: "Qual è il modo più robusto di incrementare un contatore su database sotto concorrenza?"
+  options:
+    - "SELECT del valore, incremento in memoria, UPDATE con il nuovo valore"
+    - "UPDATE tabella SET n = n + 1 WHERE id = ?, che è atomico lato database"
+    - "Usare una variabile globale nell'applicazione"
+    - "Inserire uno sleep casuale prima dell'update"
+  answer_index: 1
+  explanation: "Il pattern read-modify-write applicativo perde aggiornamenti; l'update atomico elimina la finestra di race."
+
+- id: q-rel-34-a
+  topic_id: rel-34-distributed-locking
+  difficulty: hard
+  prompt: "Perché un lock distribuito con TTL non garantisce mutua esclusione perfetta?"
+  options:
+    - "Perché Redis non è affidabile"
+    - "Perché una pausa GC o un ritardo può far scadere il TTL mentre il titolare crede ancora di avere il lock: serve un fencing token"
+    - "Perché il TTL non è supportato da tutti i client"
+    - "Perché i lock non funzionano su più nodi"
+  answer_index: 1
+  explanation: "Il fencing token, un contatore monotono verificato dalla risorsa, è l'unica difesa contro il titolare scaduto che continua a scrivere."
+
+- id: q-rel-34-b
+  topic_id: rel-34-distributed-locking
+  difficulty: medium
+  prompt: "Perché il rilascio di un lock su Redis deve verificare il proprietario?"
+  options:
+    - "Per motivi di performance"
+    - "Perché se il TTL è scaduto e un altro processo ha preso il lock, un DEL cieco rilascerebbe il lock altrui"
+    - "Perché DEL non funziona sulle chiavi con TTL"
+    - "Perché Redis richiede l'autenticazione"
+  answer_index: 1
+  explanation: "Si usa uno script Lua che confronta il valore univoco e cancella solo se corrisponde, in modo atomico."
+
+- id: q-rel-35-a
+  topic_id: rel-35-event-driven
+  difficulty: hard
+  prompt: "Quale problema risolve l'outbox pattern?"
+  options:
+    - "La lentezza del broker"
+    - "La doppia scrittura: salvare sul database e pubblicare sulla coda non è atomico, un crash nel mezzo lascia il sistema incoerente"
+    - "La deduplicazione dei messaggi"
+    - "L'ordinamento degli eventi"
+  answer_index: 1
+  explanation: "L'evento si scrive in una tabella nella stessa transazione del dato; un relay lo pubblica successivamente."
+
+- id: q-rel-35-b
+  topic_id: rel-35-event-driven
+  difficulty: medium
+  prompt: "Qual è la differenza fra un evento e un comando?"
+  options:
+    - "Nessuna, sono sinonimi"
+    - "L'evento è un fatto già accaduto (OrderPlaced), il comando è una richiesta di azione (PlaceOrder)"
+    - "L'evento è sincrono, il comando asincrono"
+    - "L'evento ha sempre un solo destinatario"
+  answer_index: 1
+  explanation: "Un evento che in realtà ordina a qualcuno di fare qualcosa ricrea l'accoppiamento che si voleva evitare."
+
+- id: q-rel-36-a
+  topic_id: rel-36-saga
+  difficulty: hard
+  prompt: "In una saga, cosa sostituisce il rollback della transazione distribuita?"
+  options:
+    - "Il two-phase commit"
+    - "Un'operazione di compensazione semantica per ogni passo già eseguito"
+    - "Il retry automatico"
+    - "Il lock distribuito"
+  answer_index: 1
+  explanation: "Non si torna indietro nel tempo: si esegue un'azione di business che rimedia, ad esempio un rimborso dopo un addebito."
+
+- id: q-rel-36-b
+  topic_id: rel-36-saga
+  difficulty: medium
+  prompt: "Quando conviene l'orchestrazione rispetto alla coreografia in una saga?"
+  options:
+    - "Sempre, la coreografia è obsoleta"
+    - "Quando il flusso ha molti passi: con la coreografia il processo complessivo non è descritto in nessun punto del sistema"
+    - "Quando ci sono solo due servizi"
+    - "Quando serve la massima disponibilità"
+  answer_index: 1
+  explanation: "L'orchestratore rende il flusso esplicito e testabile, al costo di un componente in più."
+
+- id: q-rel-37-a
+  topic_id: rel-37-graceful-degradation
+  difficulty: medium
+  prompt: "Il motore di raccomandazioni è giù in un e-commerce. Qual è il comportamento corretto?"
+  options:
+    - "Restituire 500 sulla home page"
+    - "Mostrare una lista di fallback, ad esempio i best seller, e continuare a servire la pagina"
+    - "Bloccare il checkout per coerenza"
+    - "Ritentare all'infinito finché non risponde"
+  answer_index: 1
+  explanation: "Una dipendenza non critica non deve far fallire la funzione principale: serve un fallback esplicito e testato."
+
+- id: q-rel-38-a
+  topic_id: rel-38-observability
+  difficulty: medium
+  prompt: "Perché la latenza p99 è più informativa della media?"
+  options:
+    - "Perché è più facile da calcolare"
+    - "Perché la media nasconde la coda: con p99 a 10s e media a 200ms, l'1% degli utenti ha un'esperienza pessima"
+    - "Perché la media non si può monitorare"
+    - "Perché p99 è sempre più bassa"
+  answer_index: 1
+  explanation: "Le percentili descrivono la distribuzione; la media è dominata dal caso comune e maschera gli outlier."
+
+- id: q-rel-38-b
+  topic_id: rel-38-observability
+  difficulty: hard
+  prompt: "Perché usare l'user id come label di una metrica Prometheus è un errore?"
+  options:
+    - "Perché viola la privacy"
+    - "Perché l'alta cardinalità genera una serie temporale per utente, facendo esplodere memoria e costi"
+    - "Perché le label devono essere numeriche"
+    - "Perché Prometheus non supporta le stringhe"
+  answer_index: 1
+  explanation: "I dati ad alta cardinalità vanno nei log o nei trace, non nelle metriche aggregate."
+
+- id: q-rel-38-c
+  topic_id: rel-38-observability
+  difficulty: medium
+  prompt: "Su quale segnale è meglio configurare un alert che sveglia qualcuno di notte?"
+  options:
+    - "CPU sopra l'80%"
+    - "Tasso di errore del checkout sopra la soglia, cioè un sintomo percepito dall'utente"
+    - "Numero di container attivi"
+    - "Spazio su disco al 60%"
+  answer_index: 1
+  explanation: "Si allerta sui sintomi, non sulle cause: la CPU alta può essere normale e quella bassa non garantisce che gli utenti stiano bene."
+
+- id: q-rel-39-a
+  topic_id: rel-39-deployments
+  difficulty: hard
+  prompt: "Come rinomini una colonna del database senza downtime con deploy rolling?"
+  options:
+    - "Con un ALTER TABLE RENAME durante la finestra di deploy"
+    - "Expand-migrate-contract: aggiungi la nuova colonna, scrivi su entrambe, migra i dati, sposta le letture e rimuovi la vecchia in un rilascio successivo"
+    - "Fermando il servizio per qualche secondo"
+    - "Non è possibile senza downtime"
+  answer_index: 1
+  explanation: "Durante un rolling deploy convivono due versioni del codice: lo schema deve essere compatibile con entrambe."
+
+- id: q-rel-39-b
+  topic_id: rel-39-deployments
+  difficulty: medium
+  prompt: "Qual è il vantaggio principale del blue-green rispetto al rolling?"
+  options:
+    - "Costa meno in infrastruttura"
+    - "Il rollback è istantaneo: si riporta il traffico sull'ambiente precedente ancora attivo"
+    - "Non richiede health check"
+    - "Permette migrazioni distruttive del database"
+  answer_index: 1
+  explanation: "Si paga con il costo di mantenere due ambienti completi durante la finestra di rilascio."
+
+- id: q-rel-40-a
+  topic_id: rel-40-traffic-spikes
+  difficulty: hard
+  prompt: "Perché l'autoscaling da solo non basta contro un picco virale improvviso?"
+  options:
+    - "Perché ha un costo troppo alto"
+    - "Perché reagisce in minuti mentre il picco arriva in secondi: servono CDN, cache e code che assorbano nel frattempo"
+    - "Perché non funziona con i container"
+    - "Perché richiede intervento manuale"
+  answer_index: 1
+  explanation: "Rilevamento, avvio e warm-up delle istanze richiedono tempo: nel frattempo il carico va assorbito altrove."
+
+- id: q-rel-40-b
+  topic_id: rel-40-traffic-spikes
+  difficulty: medium
+  prompt: "Cosa si intende per load shedding?"
+  options:
+    - "Distribuire il carico su più nodi"
+    - "Rifiutare deliberatamente una quota di traffico per continuare a servire bene il resto"
+    - "Spegnere le istanze inutilizzate"
+    - "Spostare il traffico su una regione diversa"
+  answer_index: 1
+  explanation: "Meglio un 503 onesto a una minoranza che un degrado fino al collasso per tutti."

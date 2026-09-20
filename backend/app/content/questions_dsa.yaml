@@ -1,0 +1,528 @@
+# Domande su DSA e aree trasversali.
+- id: q-dsa-01-a
+  topic_id: dsa-01-complexity
+  difficulty: easy
+  prompt: "Qual è la complessità di spazio di una DFS ricorsiva su un albero binario degenerato in lista?"
+  options:
+    - "O(1)"
+    - "O(log n)"
+    - "O(n) per lo stack delle chiamate"
+    - "O(n log n)"
+  answer_index: 2
+  explanation: "Lo spazio della ricorsione è O(h): con albero bilanciato O(log n), con albero degenerato O(n)."
+
+- id: q-dsa-01-b
+  topic_id: dsa-01-complexity
+  difficulty: medium
+  prompt: "Cosa significa che l'append su un array dinamico è O(1) ammortizzato?"
+  options:
+    - "Che è sempre esattamente O(1)"
+    - "Che il resize occasionale costa O(n), ma distribuito su tutte le operazioni il costo medio resta costante"
+    - "Che dipende dal linguaggio"
+    - "Che è O(1) solo per array piccoli"
+  answer_index: 1
+  explanation: "Raddoppiando la capacità, i resize diventano sempre più rari: la somma del costo su n operazioni è O(n)."
+
+- id: q-dsa-02-a
+  topic_id: dsa-02-arrays-two-pointers
+  difficulty: medium
+  prompt: "Perché la tecnica dei due puntatori opposti funziona su un array ordinato per Two Sum?"
+  options:
+    - "Perché l'array è piccolo"
+    - "Perché la somma è monotona rispetto ai movimenti: se è troppo grande puoi escludere con certezza il puntatore destro"
+    - "Perché usa una hash map internamente"
+    - "Perché l'ordinamento elimina i duplicati"
+  answer_index: 1
+  explanation: "Ogni confronto elimina definitivamente un candidato, quindi ogni indice si muove al massimo una volta: O(n)."
+
+- id: q-dsa-03-a
+  topic_id: dsa-03-hash-maps
+  difficulty: easy
+  prompt: "Qual è la complessità nel caso peggiore di un lookup in una hash map?"
+  options:
+    - "O(1) sempre"
+    - "O(log n)"
+    - "O(n), quando tutte le chiavi collidono nello stesso bucket"
+    - "O(n log n)"
+  answer_index: 2
+  explanation: "Il caso medio è O(1), ma con collisioni patologiche il bucket degenera in una lista lineare."
+
+- id: q-dsa-03-b
+  topic_id: dsa-03-hash-maps
+  difficulty: medium
+  prompt: "Perché in Python una lista non può essere usata come chiave di un dizionario?"
+  options:
+    - "Perché occupa troppa memoria"
+    - "Perché è mutabile: l'hash cambierebbe dopo l'inserimento e la chiave diventerebbe irrecuperabile"
+    - "Perché le liste non hanno un ordine"
+    - "Perché i dizionari accettano solo stringhe"
+  answer_index: 1
+  explanation: "Le chiavi devono essere hashable, cioè immutabili: le tuple vanno bene, le liste no."
+
+- id: q-dsa-04-a
+  topic_id: dsa-04-strings
+  difficulty: medium
+  prompt: "Perché costruire una stringa con s += x dentro un ciclo di n iterazioni è O(n^2)?"
+  options:
+    - "Perché l'operatore += è lento"
+    - "Perché le stringhe sono immutabili: ogni concatenazione crea una nuova stringa copiando tutto il contenuto precedente"
+    - "Perché il garbage collector interviene ogni volta"
+    - "Perché Python non ottimizza i cicli"
+  answer_index: 1
+  explanation: "Si accumula in una lista e si fa join alla fine, ottenendo O(n)."
+
+- id: q-dsa-05-a
+  topic_id: dsa-05-binary-search
+  difficulty: medium
+  prompt: "Cosa significa fare binary search sulla risposta?"
+  options:
+    - "Cercare in un array ordinato di risposte"
+    - "Cercare binariamente nello spazio dei valori candidati, quando esiste un predicato monotono verificabile in tempo ragionevole"
+    - "Ordinare l'array prima di cercare"
+    - "Usare la ricerca binaria in modo ricorsivo"
+  answer_index: 1
+  explanation: "Esempio tipico: trovare la capacità minima che permette di completare un lavoro entro un limite, verificando ogni candidato in O(n)."
+
+- id: q-dsa-05-b
+  topic_id: dsa-05-binary-search
+  difficulty: hard
+  prompt: "Qual è la causa più comune di ciclo infinito in una ricerca binaria?"
+  options:
+    - "Un array troppo grande"
+    - "Un aggiornamento dei limiti che non riduce l'intervallo, spesso per incoerenza fra convenzione chiusa e semiaperta"
+    - "L'uso della divisione intera"
+    - "L'assenza di un valore centrale"
+  answer_index: 1
+  explanation: "Serve fissare un invariante sull'intervallo e mantenerlo coerente in tutti i rami."
+
+- id: q-dsa-06-a
+  topic_id: dsa-06-linked-lists
+  difficulty: medium
+  prompt: "A cosa serve la tecnica fast/slow pointer su una lista concatenata?"
+  options:
+    - "A ordinare la lista"
+    - "A trovare il nodo centrale e a rilevare la presenza di cicli"
+    - "A invertire la lista"
+    - "A contare i nodi in O(1)"
+  answer_index: 1
+  explanation: "Se c'è un ciclo i due puntatori si incontrano necessariamente (algoritmo di Floyd); altrimenti il lento è a metà quando il veloce finisce."
+
+- id: q-dsa-06-b
+  topic_id: dsa-06-linked-lists
+  difficulty: medium
+  prompt: "Perché si usa un nodo dummy davanti alla testa di una lista?"
+  options:
+    - "Per risparmiare memoria"
+    - "Per eliminare i casi speciali di inserimento e rimozione in testa"
+    - "Per velocizzare l'accesso per indice"
+    - "Perché è richiesto dall'algoritmo di Floyd"
+  answer_index: 1
+  explanation: "Con il dummy ogni nodo ha un predecessore, quindi il codice di modifica è uniforme."
+
+- id: q-dsa-07-a
+  topic_id: dsa-07-stacks-queues
+  difficulty: medium
+  prompt: "Perché usare list.pop(0) come coda in Python è inefficiente?"
+  options:
+    - "Perché pop non è supportato sulle liste"
+    - "Perché rimuovere dalla testa richiede di spostare tutti gli altri elementi: O(n) per estrazione"
+    - "Perché crea una copia della lista"
+    - "Perché le liste non mantengono l'ordine"
+  answer_index: 1
+  explanation: "collections.deque offre popleft in O(1) ed è la struttura corretta per una coda."
+
+- id: q-dsa-07-b
+  topic_id: dsa-07-stacks-queues
+  difficulty: hard
+  prompt: "Quale problema risolve tipicamente uno stack monotono in O(n)?"
+  options:
+    - "L'ordinamento di un array"
+    - "Trovare per ogni elemento il prossimo elemento maggiore"
+    - "La ricerca binaria"
+    - "Il calcolo della mediana"
+  answer_index: 1
+  explanation: "Ogni elemento entra ed esce dallo stack al massimo una volta, quindi il totale resta lineare."
+
+- id: q-dsa-08-a
+  topic_id: dsa-08-trees
+  difficulty: hard
+  prompt: "Come si valida correttamente un BST?"
+  options:
+    - "Confrontando ogni nodo con i suoi figli diretti"
+    - "Propagando un intervallo (min, max) lungo la discesa e verificando che ogni nodo vi rientri"
+    - "Contando i nodi di ogni sottoalbero"
+    - "Verificando che l'altezza sia logaritmica"
+  answer_index: 1
+  explanation: "Il confronto coi soli figli lascia passare violazioni rispetto a un antenato più in alto. In alternativa si verifica che l'inorder sia strettamente crescente."
+
+- id: q-dsa-08-b
+  topic_id: dsa-08-trees
+  difficulty: medium
+  prompt: "Quale attraversamento di un BST produce gli elementi in ordine crescente?"
+  options:
+    - "Preorder"
+    - "Inorder"
+    - "Postorder"
+    - "Level order"
+  answer_index: 1
+  explanation: "Inorder visita sinistra, radice, destra: sfruttando la proprietà del BST produce la sequenza ordinata."
+
+- id: q-dsa-09-a
+  topic_id: dsa-09-graphs
+  difficulty: hard
+  prompt: "In una BFS, quando va marcato un nodo come visitato?"
+  options:
+    - "Quando viene estratto dalla coda"
+    - "Quando viene inserito in coda, altrimenti lo stesso nodo può entrare più volte"
+    - "Alla fine dell'algoritmo"
+    - "Solo se ha vicini non visitati"
+  answer_index: 1
+  explanation: "Marcandolo all'estrazione, un nodo raggiungibile da più vicini viene accodato più volte e la complessità si degrada."
+
+- id: q-dsa-09-b
+  topic_id: dsa-09-graphs
+  difficulty: hard
+  prompt: "Perché Dijkstra non funziona con archi di peso negativo?"
+  options:
+    - "Perché le distanze diventano negative"
+    - "Perché assume che una volta estratto un nodo la sua distanza sia definitiva, cosa che un arco negativo successivo può smentire"
+    - "Perché la coda di priorità non accetta valori negativi"
+    - "Perché il grafo diventa ciclico"
+  answer_index: 1
+  explanation: "Con pesi negativi serve Bellman-Ford, che rilassa ripetutamente tutti gli archi."
+
+- id: q-dsa-10-a
+  topic_id: dsa-10-heaps
+  difficulty: medium
+  prompt: "Per trovare i k elementi più grandi di n numeri, quale struttura usi e con quale complessità?"
+  options:
+    - "Un max-heap di dimensione k, O(n log n)"
+    - "Un min-heap di dimensione k, O(n log k)"
+    - "Un array ordinato, O(n)"
+    - "Una hash map, O(n)"
+  answer_index: 1
+  explanation: "Si tiene un min-heap di k elementi e si scarta la radice quando si supera k: la radice è sempre il più piccolo dei k migliori."
+
+- id: q-dsa-10-b
+  topic_id: dsa-10-heaps
+  difficulty: medium
+  prompt: "Come si ottiene un max-heap con il modulo heapq di Python?"
+  options:
+    - "Passando reverse=True"
+    - "Inserendo i valori negati e negandoli in uscita"
+    - "Usando heapq.maxheapify"
+    - "Non è possibile"
+  answer_index: 1
+  explanation: "heapq implementa solo un min-heap: negare i valori inverte l'ordinamento."
+
+- id: q-dsa-11-a
+  topic_id: dsa-11-dynamic-programming
+  difficulty: hard
+  prompt: "Quali due condizioni deve avere un problema per essere risolvibile con la programmazione dinamica?"
+  options:
+    - "Input ordinato e dimensione nota"
+    - "Sottostruttura ottima e sovrapposizione dei sottoproblemi"
+    - "Assenza di ricorsione e input piccoli"
+    - "Complessità polinomiale e dati interi"
+  answer_index: 1
+  explanation: "Senza sovrapposizione la memoizzazione non porta guadagno; senza sottostruttura ottima la ricorrenza non è valida."
+
+- id: q-dsa-11-b
+  topic_id: dsa-11-dynamic-programming
+  difficulty: medium
+  prompt: "Qual è il vantaggio principale dell'approccio bottom-up rispetto alla memoizzazione top-down?"
+  options:
+    - "È sempre più veloce"
+    - "Evita lo stack di ricorsione e permette spesso di ridurre lo spazio a poche righe della tabella"
+    - "Richiede meno codice"
+    - "Non necessita di casi base"
+  answer_index: 1
+  explanation: "Il top-down è più vicino al ragionamento; il bottom-up è più efficiente in spazio e non rischia stack overflow."
+
+- id: q-dsa-12-a
+  topic_id: dsa-12-sliding-window
+  difficulty: hard
+  prompt: "Perché la sliding window non si applica a un problema di sottoarray con somma target se ci sono numeri negativi?"
+  options:
+    - "Perché la somma può essere negativa"
+    - "Perché la somma non è più monotona rispetto all'espansione della finestra: allargare potrebbe far diminuire la somma"
+    - "Perché servono troppi puntatori"
+    - "Perché l'array va ordinato prima"
+  answer_index: 1
+  explanation: "Senza monotonia non si può decidere se contrarre o espandere: si passa ai prefix sum con hash map."
+
+- id: q-dsa-13-a
+  topic_id: dsa-13-recursion-backtracking
+  difficulty: medium
+  prompt: "Nel backtracking, perché bisogna copiare la soluzione parziale quando la si salva?"
+  options:
+    - "Per risparmiare memoria"
+    - "Perché altrimenti si salva un riferimento alla stessa lista, che continua a essere modificata dalla ricorsione"
+    - "Perché il garbage collector la eliminerebbe"
+    - "Perché le liste non sono ordinabili"
+  answer_index: 1
+  explanation: "Senza copia il risultato finale contiene N riferimenti alla stessa struttura, tipicamente vuota."
+
+- id: q-dsa-14-a
+  topic_id: dsa-14-sorting
+  difficulty: medium
+  prompt: "Cosa significa che un algoritmo di ordinamento è stabile?"
+  options:
+    - "Che ha sempre la stessa complessità"
+    - "Che elementi con chiave uguale mantengono il loro ordine relativo originario"
+    - "Che non usa memoria aggiuntiva"
+    - "Che non va mai in errore"
+  answer_index: 1
+  explanation: "Serve quando si ordina per criteri successivi: il secondo ordinamento non deve distruggere il primo."
+
+- id: q-dsa-14-b
+  topic_id: dsa-14-sorting
+  difficulty: medium
+  prompt: "Qual è il caso peggiore del quick sort e perché si usa comunque?"
+  options:
+    - "O(n log n), e si usa perché è stabile"
+    - "O(n^2) con pivot sfortunato, ma con pivot casuale il caso peggiore è improbabile e in media è molto veloce e in place"
+    - "O(n), e si usa per la semplicità"
+    - "O(n log n) garantito come merge sort"
+  answer_index: 1
+  explanation: "Merge sort garantisce O(n log n) ma richiede O(n) di spazio extra; quick sort è in place con ottime costanti."
+
+- id: q-sd-01-a
+  topic_id: sd-01-interview-framework
+  difficulty: medium
+  prompt: "Qual è il primo passo in un colloquio di system design?"
+  options:
+    - "Disegnare l'architettura ad alto livello"
+    - "Chiarire requisiti funzionali, non funzionali e scala attesa"
+    - "Scegliere il database"
+    - "Stimare i costi"
+  answer_index: 1
+  explanation: "Senza conoscere la scala e i vincoli si progetta a caso: mille utenti e cento milioni portano a sistemi completamente diversi."
+
+- id: q-sd-02-a
+  topic_id: sd-02-classic-designs
+  difficulty: hard
+  prompt: "Qual è il limite del fan-out on write per un feed social?"
+  options:
+    - "La lettura diventa lenta"
+    - "Un account con milioni di follower genera milioni di scritture per ogni post"
+    - "Non permette di ordinare i post"
+    - "Richiede troppa banda in lettura"
+  answer_index: 1
+  explanation: "La soluzione reale è ibrida: fan-out on write per la maggioranza, composizione in lettura per i pochi account enormi."
+
+- id: q-sd-02-b
+  topic_id: sd-02-classic-designs
+  difficulty: medium
+  prompt: "Perché gli upload di file grandi non dovrebbero passare dal backend?"
+  options:
+    - "Perché i backend non supportano il multipart"
+    - "Perché occupano connessioni e memoria del servizio: meglio un presigned URL verso l'object storage"
+    - "Perché i file non possono essere validati"
+    - "Perché violerebbe il protocollo HTTP"
+  answer_index: 1
+  explanation: "Con un presigned URL il client carica direttamente sullo storage e il backend resta libero."
+
+- id: q-beh-01-a
+  topic_id: beh-01-star-method
+  difficulty: easy
+  prompt: "Nel metodo STAR, a quale parte va dedicato più tempo?"
+  options:
+    - "Situation, per dare tutto il contesto"
+    - "Action, cioè cosa hai fatto tu concretamente"
+    - "Task, per spiegare l'obiettivo"
+    - "Result, per elencare i risultati"
+  answer_index: 1
+  explanation: "L'intervistatore valuta il tuo comportamento: contesto breve, azioni dettagliate, risultato misurabile."
+
+- id: q-beh-01-b
+  topic_id: beh-01-star-method
+  difficulty: medium
+  prompt: "Alla domanda sul tuo più grande fallimento, quale risposta funziona meglio?"
+  options:
+    - "Sono troppo perfezionista e mi impegno troppo"
+    - "Un errore reale, con cosa lo ha causato e cosa hai cambiato nel tuo modo di lavorare dopo"
+    - "Non mi vengono in mente fallimenti significativi"
+    - "Un fallimento causato interamente da colleghi o dal management"
+  answer_index: 1
+  explanation: "La domanda verifica autoconsapevolezza e capacità di imparare: il finto difetto e la colpa scaricata sugli altri sono entrambi segnali negativi."
+
+- id: q-beh-02-a
+  topic_id: beh-02-company-research
+  difficulty: easy
+  prompt: "Qual è la risposta più debole alla domanda perché vuoi lavorare da noi?"
+  options:
+    - "Ho usato il vostro prodotto e ho notato una cosa specifica che mi ha colpito"
+    - "Siete un'azienda innovativa con un ottimo ambiente di lavoro"
+    - "Il vostro stack coincide con quello su cui voglio crescere, e mi interessa il problema X che affrontate"
+    - "Ho letto il vostro engineering blog e mi interessa l'approccio che avete descritto su Y"
+  answer_index: 1
+  explanation: "È una frase che vale per qualunque azienda: non dimostra alcuna preparazione specifica."
+
+- id: q-beh-03-a
+  topic_id: beh-03-negotiation
+  difficulty: medium
+  prompt: "Quando ti chiedono le aspettative economiche molto presto nel processo, qual è la strategia migliore?"
+  options:
+    - "Dare subito il numero minimo che accetteresti"
+    - "Provare a farsi indicare la fascia prevista per il ruolo e, se serve un numero, dare una fascia basata su dati di mercato"
+    - "Rifiutare di rispondere"
+    - "Dare un numero molto alto per ancorare la trattativa"
+  answer_index: 1
+  explanation: "Chi parla per primo si ancora: rimandare o rispondere con una fascia documentata lascia margine di negoziazione."
+
+- id: q-eng-01-a
+  topic_id: eng-01-testing
+  difficulty: medium
+  prompt: "Qual è la differenza fra un mock e uno stub?"
+  options:
+    - "Sono sinonimi"
+    - "Lo stub fornisce risposte predefinite; il mock verifica anche che certe interazioni siano avvenute"
+    - "Il mock è più veloce"
+    - "Lo stub funziona solo per i database"
+  answer_index: 1
+  explanation: "Il mock introduce un'asserzione sul comportamento, quindi lega il test all'implementazione più di uno stub."
+
+- id: q-eng-01-b
+  topic_id: eng-01-testing
+  difficulty: medium
+  prompt: "Perché testare l'implementazione invece del comportamento pubblico è problematico?"
+  options:
+    - "Perché i test diventano più lenti"
+    - "Perché ogni refactor interno rompe i test anche quando il comportamento non è cambiato"
+    - "Perché non si può misurare la coverage"
+    - "Perché richiede più mock"
+  answer_index: 1
+  explanation: "I test dovrebbero dare libertà di cambiare l'interno: se la ostacolano, diventano un costo invece che una rete di sicurezza."
+
+- id: q-eng-02-a
+  topic_id: eng-02-git
+  difficulty: medium
+  prompt: "Qual è la regola d'oro del rebase?"
+  options:
+    - "Fare rebase solo il venerdì"
+    - "Non fare mai rebase di commit già pushati e condivisi con altri"
+    - "Fare sempre rebase invece di merge"
+    - "Fare rebase solo sul branch main"
+  answer_index: 1
+  explanation: "Il rebase riscrive gli hash: chi aveva già quei commit si ritrova una storia divergente."
+
+- id: q-eng-02-b
+  topic_id: eng-02-git
+  difficulty: medium
+  prompt: "Hai pushato per errore un commit sbagliato su un branch condiviso. Cosa usi?"
+  options:
+    - "git reset --hard e force push"
+    - "git revert, che crea un commit inverso senza riscrivere la storia"
+    - "git checkout del commit precedente"
+    - "git stash"
+  answer_index: 1
+  explanation: "Su un branch condiviso riscrivere la storia rompe i checkout altrui: revert è l'operazione sicura."
+
+- id: q-eng-03-a
+  topic_id: eng-03-cloud-basics
+  difficulty: medium
+  prompt: "Qual è la differenza fondamentale fra un container e una macchina virtuale?"
+  options:
+    - "Il container è più lento"
+    - "Il container condivide il kernel dell'host, la VM ha un sistema operativo completo: più leggero ma meno isolato"
+    - "La VM non può eseguire Linux"
+    - "Il container non può accedere alla rete"
+  answer_index: 1
+  explanation: "L'isolamento del container è a livello di namespace e cgroup, non di hypervisor."
+
+- id: q-eng-03-b
+  topic_id: eng-03-cloud-basics
+  difficulty: medium
+  prompt: "A cosa serve un multi-stage build in Docker?"
+  options:
+    - "A eseguire più container insieme"
+    - "A compilare in uno stage e copiare nell'immagine finale solo gli artefatti, escludendo toolchain e sorgenti"
+    - "A creare immagini per architetture diverse"
+    - "A velocizzare il download dei layer"
+  answer_index: 1
+  explanation: "Riduce drasticamente la dimensione e la superficie di attacco dell'immagine di produzione."
+
+- id: q-eng-04-a
+  topic_id: eng-04-security
+  difficulty: medium
+  prompt: "Come vanno memorizzate le password degli utenti?"
+  options:
+    - "Cifrate con AES, per poterle recuperare"
+    - "Con una funzione di hashing lenta e salata come bcrypt, scrypt o argon2"
+    - "Con SHA-256"
+    - "In chiaro ma su un database separato"
+  answer_index: 1
+  explanation: "Serve un hash lento e salato: SHA-256 è progettato per essere veloce, quindi facilita gli attacchi a forza bruta."
+
+- id: q-eng-04-b
+  topic_id: eng-04-security
+  difficulty: medium
+  prompt: "Hai committato una API key e te ne accorgi dopo il push. Qual è la prima cosa da fare?"
+  options:
+    - "Rimuoverla con un nuovo commit"
+    - "Revocare e ruotare la chiave, perché resta nella storia di git ed è già potenzialmente compromessa"
+    - "Rendere il repository privato"
+    - "Aggiungere il file al .gitignore"
+  answer_index: 1
+  explanation: "Togliere il file non basta: la chiave è recuperabile dalla storia e potrebbe essere già stata raccolta da uno scanner."
+
+- id: q-eng-05-a
+  topic_id: eng-05-code-quality
+  difficulty: medium
+  prompt: "Quale principio SOLID è alla base della testabilità del codice?"
+  options:
+    - "Single Responsibility"
+    - "Dependency Inversion: dipendere da astrazioni permette di sostituire le dipendenze in test"
+    - "Liskov Substitution"
+    - "Interface Segregation"
+  answer_index: 1
+  explanation: "Se la logica dipende da un'interfaccia, in test si passa un'implementazione finta senza toccare database o rete."
+
+- id: q-eng-06-a
+  topic_id: eng-06-python
+  difficulty: hard
+  prompt: "Cosa c'è di sbagliato in def aggiungi(x, lista=[]) in Python?"
+  options:
+    - "Niente, è il modo corretto"
+    - "La lista di default viene creata una sola volta alla definizione della funzione ed è condivisa fra tutte le chiamate"
+    - "Le liste non possono essere argomenti"
+    - "Serve dichiarare il tipo"
+  answer_index: 1
+  explanation: "Si usa None come sentinella e si crea la lista dentro la funzione."
+
+- id: q-eng-06-b
+  topic_id: eng-06-python
+  difficulty: medium
+  prompt: "Perché i thread in Python non accelerano un calcolo CPU-bound?"
+  options:
+    - "Perché i thread non sono supportati"
+    - "Per il GIL: un solo thread esegue bytecode Python alla volta. Per la CPU serve multiprocessing"
+    - "Perché il calcolo viene eseguito in C"
+    - "Perché i thread hanno priorità bassa"
+  answer_index: 1
+  explanation: "Sull'I/O il GIL viene rilasciato durante l'attesa, quindi lì i thread aiutano."
+
+- id: q-eng-07-a
+  topic_id: eng-07-javascript
+  difficulty: hard
+  prompt: "Cosa viene eseguito prima: il callback di una Promise già risolta o quello di setTimeout(fn, 0)?"
+  options:
+    - "setTimeout, perché ha 0 millisecondi"
+    - "La Promise: le microtask vengono svuotate prima delle macrotask"
+    - "Dipende dal browser"
+    - "Vengono eseguiti contemporaneamente"
+  answer_index: 1
+  explanation: "La coda delle microtask viene esaurita completamente dopo ogni task, prima di passare alla macrotask successiva."
+
+- id: q-eng-07-b
+  topic_id: eng-07-javascript
+  difficulty: medium
+  prompt: "Perché TypeScript non ti protegge da una risposta API con una forma inattesa?"
+  options:
+    - "Perché i tipi sono opzionali"
+    - "Perché i tipi sono cancellati alla compilazione: a runtime non esiste alcun controllo, serve una validazione esplicita"
+    - "Perché le API non sono tipizzate"
+    - "Perché JSON non supporta i tipi"
+  answer_index: 1
+  explanation: "Un cast su un JSON non validato è una promessa al compilatore, non una verifica: ai confini serve un validatore runtime."

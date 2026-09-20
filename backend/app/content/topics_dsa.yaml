@@ -1,0 +1,445 @@
+# Algoritmi e strutture dati: la parte "tecnica" del colloquio, quella con la lavagna.
+- id: dsa-01-complexity
+  title: Analisi di complessità (Big-O)
+  category: dsa
+  track: technical
+  level: easy
+  tags: [dsa, complessita, fondamentali]
+  estimated_minutes: 25
+  summary: >-
+    Big-O descrive come cresce il costo al crescere dell'input, ignorando costanti e
+    termini minori. Serve a confrontare approcci prima di scriverli, non a misurare
+    performance reali.
+  key_points:
+    - "Scala mentale: O(1) < O(log n) < O(n) < O(n log n) < O(n^2) < O(2^n) < O(n!)"
+    - "Dichiara sempre anche la complessità di spazio: è metà della risposta attesa"
+    - "Ammortizzato: il push su array dinamico è O(1) ammortizzato anche se il resize singolo è O(n)"
+    - "Il caso medio di una hash map è O(1), il peggiore O(n) con collisioni patologiche"
+    - "Cicli annidati non sono automaticamente O(n^2): conta quante volte gira davvero l'interno"
+    - "Le costanti contano nella realtà: O(n) con accesso sequenziale batte spesso O(log n) con salti casuali per n piccoli"
+  interview_answer: >-
+    Analizzo contando le operazioni in funzione della dimensione dell'input e tenendo solo
+    il termine dominante. In colloquio dico sempre sia tempo che spazio, perché la domanda
+    successiva è quasi sempre se posso scendere in spazio. E aggiungo il caso in cui l'analisi
+    asintotica mente: una hash map è O(1) in media ma O(n) nel peggiore, e su input piccoli la
+    località di memoria di un array batte strutture asintoticamente migliori.
+  pitfalls:
+    - "Dimenticare la complessità di spazio, inclusa quella dello stack nella ricorsione"
+    - "Dire O(n^2) per ogni doppio ciclo senza guardare i limiti reali"
+    - "Ignorare il costo di slicing e concatenazione di stringhe dentro un ciclo"
+  follow_up_questions:
+    - "Qual è la complessità di spazio di una DFS ricorsiva su un albero sbilanciato?"
+
+- id: dsa-02-arrays-two-pointers
+  title: Array e tecnica dei due puntatori
+  category: dsa
+  track: technical
+  level: easy
+  tags: [dsa, array, due-puntatori]
+  estimated_minutes: 30
+  summary: >-
+    I due puntatori trasformano molti problemi da O(n^2) a O(n) sfruttando l'ordinamento o
+    una relazione monotona. È il primo pattern da provare su array ordinati.
+  key_points:
+    - "Puntatori opposti: partono dagli estremi e convergono. Two Sum su array ordinato, palindromi, container with most water"
+    - "Puntatori nella stessa direzione (fast/slow): rimozione di duplicati in place, spostamento degli zeri"
+    - "Se l'array è ordinato, i due puntatori sono quasi sempre la risposta attesa"
+    - "Se non lo è, valuta se ordinare (O(n log n)) abilita una soluzione lineare successiva"
+    - "In place significa O(1) di spazio extra: spesso è proprio ciò che l'intervistatore vuole"
+  interview_answer: >-
+    Quando vedo un array ordinato e una condizione che cresce o cala in modo monotono, provo
+    subito i due puntatori. Il ragionamento è che a ogni passo posso escludere con certezza un
+    candidato: se la somma è troppo grande so che il puntatore destro non può far parte della
+    soluzione con nessun elemento a sinistra, quindi lo muovo. Ogni indice si muove al massimo
+    una volta, da cui O(n) di tempo e O(1) di spazio.
+  pitfalls:
+    - "Modificare l'array mentre lo si scorre, invalidando gli indici"
+    - "Sbagliare le condizioni di confine con <= invece di <"
+    - "Non gestire array vuoto o con un solo elemento"
+  follow_up_questions:
+    - "Come estendi Two Sum a Three Sum mantenendo O(n^2)?"
+
+- id: dsa-03-hash-maps
+  title: Hash map e insiemi
+  category: dsa
+  track: technical
+  level: easy
+  tags: [dsa, hash, strutture-dati]
+  estimated_minutes: 30
+  summary: >-
+    Le hash map scambiano spazio per tempo: trasformano una ricerca lineare in un accesso
+    costante. Sono la struttura che risolve il maggior numero di problemi da colloquio.
+  key_points:
+    - "Insert, lookup e delete in O(1) medio, O(n) nel caso peggiore"
+    - "Pattern del complemento: scorri una volta e cerca ciò che manca. Two Sum in O(n)"
+    - "Mappa di frequenze: conteggi, anagrammi, primo carattere non ripetuto"
+    - "Set per l'appartenenza e la deduplicazione"
+    - "Chiavi immutabili: in Python tuple sì, liste no"
+    - "Non c'è ordine garantito (in Python dalla 3.7 c'è l'ordine di inserimento, ma non è ordinamento)"
+  interview_answer: >-
+    Appena un problema chiede di sapere se qualcosa è già stato visto, penso a una hash map.
+    Il pattern che uso più spesso è quello del complemento: invece di confrontare ogni coppia,
+    scorro una volta e per ogni elemento cerco nella mappa il valore che mi completerebbe la
+    soluzione, passando da O(n^2) a O(n) con O(n) di spazio. In colloquio esplicito sempre che
+    sto comprando tempo con la memoria, perché la domanda successiva spesso è di farlo in
+    spazio costante.
+  pitfalls:
+    - "Usare una lista come chiave (non hashable)"
+    - "Assumere un ordine nell'iterazione"
+    - "Dimenticare il caso in cui l'elemento cercato è l'elemento stesso"
+  follow_up_questions:
+    - "Come gestisce le collisioni una hash table?"
+
+- id: dsa-04-strings
+  title: Manipolazione di stringhe
+  category: dsa
+  track: technical
+  level: easy
+  tags: [dsa, stringhe]
+  estimated_minutes: 25
+  summary: >-
+    Le stringhe sono array di caratteri con un'insidia: in quasi tutti i linguaggi moderni
+    sono immutabili, quindi concatenare dentro un ciclo costa O(n^2).
+  key_points:
+    - "Concatenazione in ciclo: O(n^2). Accumula in una lista e fai join alla fine"
+    - "Anagrammi: confronto delle mappe di frequenza, O(n), meglio del sort O(n log n)"
+    - "Palindromi: due puntatori dagli estremi, O(1) di spazio"
+    - "Sliding window per sottostringhe con vincoli"
+    - "Unicode: len() conta i code point, non i caratteri percepiti. Emoji e accenti compositi rompono le assunzioni"
+    - "In Python le slice creano copie: s[1:] in un ciclo è O(n^2) nascosto"
+  interview_answer: >-
+    La prima cosa che verifico è se sto costruendo una stringa dentro un ciclo, perché con
+    stringhe immutabili ogni concatenazione copia tutto e il costo diventa quadratico senza
+    che si veda. Accumulo in lista e faccio join. Per i confronti tipo anagramma uso mappe di
+    frequenza invece di ordinare, perché passo da O(n log n) a O(n). E se il problema parla di
+    caratteri reali chiedo se devo considerare l'Unicode, perché la lunghezza in code point non
+    corrisponde a quella percepita.
+  pitfalls:
+    - "Concatenazione in ciclo"
+    - "Confondere byte e caratteri su input non ASCII"
+    - "Non chiedere se il confronto è case sensitive"
+  follow_up_questions:
+    - "Perché s += x in un ciclo è O(n^2) in Python?"
+
+- id: dsa-05-binary-search
+  title: Ricerca binaria
+  category: dsa
+  track: technical
+  level: medium
+  tags: [dsa, ricerca, divide-et-impera]
+  estimated_minutes: 30
+  summary: >-
+    La ricerca binaria dimezza lo spazio di ricerca a ogni passo. Vale su qualunque dominio
+    monotono, non solo sugli array ordinati: è questa generalizzazione che la rende potente.
+  key_points:
+    - "O(log n) tempo, O(1) spazio nella versione iterativa"
+    - "Usa mid = lo + (hi - lo) // 2 per evitare overflow nei linguaggi a interi fissi"
+    - "Decidi l'invariante e mantienilo: [lo, hi] chiuso o [lo, hi) semiaperto, senza mescolarli"
+    - "Varianti fondamentali: primo elemento >= x (lower_bound), primo > x (upper_bound)"
+    - "Binary search sulla risposta: se puoi verificare in O(n) se un valore candidato è fattibile, cerchi binariamente sul valore"
+    - "Applicazioni: array ruotato, matrice ordinata, minimizzare il massimo carico"
+  interview_answer: >-
+    La uso ogni volta che riesco a definire un predicato monotono, cioè una condizione che una
+    volta diventata vera resta vera. Non serve un array ordinato: se il problema chiede il
+    minimo valore che soddisfa un vincolo e so verificare un candidato in tempo lineare, cerco
+    binariamente sullo spazio delle risposte e ottengo O(n log range). Sull'implementazione
+    fisso l'invariante prima di scrivere, perché quasi tutti i bug della ricerca binaria sono
+    condizioni di confine incoerenti fra il calcolo di mid e l'aggiornamento dei limiti.
+  pitfalls:
+    - "Ciclo infinito quando lo e hi non si riducono"
+    - "Mescolare convenzioni di intervallo chiuso e semiaperto"
+    - "Dimenticare che l'array deve essere ordinato rispetto al criterio che si usa"
+  follow_up_questions:
+    - "Come cerchi in un array ordinato ma ruotato?"
+    - "Cosa significa fare binary search sulla risposta?"
+
+- id: dsa-06-linked-lists
+  title: Liste concatenate
+  category: dsa
+  track: technical
+  level: medium
+  tags: [dsa, liste, puntatori]
+  estimated_minutes: 30
+  summary: >-
+    Le liste concatenate valutano la capacità di manipolare puntatori senza perdere
+    riferimenti. Raramente utili in produzione, sono frequentissime in colloquio.
+  key_points:
+    - "Inserimento e rimozione O(1) dato il nodo, accesso per indice O(n)"
+    - "Dummy head: elimina i casi particolari sull'inserimento in testa"
+    - "Fast/slow (tortoise and hare): trova il nodo centrale e rileva i cicli"
+    - "Algoritmo di Floyd: se i due puntatori si incontrano c'è un ciclo; ripartendo dalla testa si trova l'inizio del ciclo"
+    - "Inversione iterativa con tre puntatori: prev, curr, next"
+    - "Disegnare i puntatori prima di scrivere il codice evita quasi tutti gli errori"
+  interview_answer: >-
+    La tecnica che uso più spesso è fast e slow: un puntatore avanza di due e uno di uno. Se
+    c'è un ciclo si incontrano necessariamente, e se non c'è, quando il veloce arriva in fondo
+    il lento è a metà. Per le modifiche strutturali uso sempre un nodo dummy davanti alla
+    testa, perché così inserimento e cancellazione in testa non sono più casi speciali e il
+    codice si accorcia. Prima di scrivere disegno i puntatori: quasi tutti i bug su liste sono
+    riferimenti persi durante il riaggancio.
+  pitfalls:
+    - "Perdere il riferimento al resto della lista durante l'inversione"
+    - "Non controllare fast e fast.next prima di avanzare di due"
+    - "Dimenticare i casi lista vuota o con un solo nodo"
+  follow_up_questions:
+    - "Come trovi il punto di inizio di un ciclo, non solo la sua esistenza?"
+
+- id: dsa-07-stacks-queues
+  title: Stack e code
+  category: dsa
+  track: technical
+  level: easy
+  tags: [dsa, stack, coda]
+  estimated_minutes: 25
+  summary: >-
+    Stack (LIFO) e coda (FIFO) sono semplici ma riconoscere quando servono è metà del
+    lavoro. Lo stack monotono in particolare risolve in O(n) problemi che sembrano O(n^2).
+  key_points:
+    - "Stack: parentesi bilanciate, undo, valutazione di espressioni, simulazione della ricorsione"
+    - "Coda: BFS, buffering, scheduling. In Python usa collections.deque, non list.pop(0) che è O(n)"
+    - "Stack monotono: mantiene gli elementi in ordine crescente o decrescente. Risolve 'prossimo elemento maggiore' in O(n)"
+    - "Deque a doppia estremità: sliding window maximum in O(n)"
+    - "Priority queue (heap) è un'altra cosa: l'ordine è per priorità, non di arrivo"
+  interview_answer: >-
+    Lo stack lo tiro fuori quando il problema ha una struttura annidata o quando devo
+    ricordare qualcosa a cui tornerò in ordine inverso: parentesi, undo, attraversamenti
+    iterativi. Il caso che vale la pena conoscere bene è lo stack monotono: se devo trovare
+    per ogni elemento il prossimo più grande, mantenere uno stack decrescente mi dà O(n),
+    perché ogni elemento entra ed esce al massimo una volta, contro l'O(n^2) della soluzione
+    ingenua.
+  pitfalls:
+    - "Usare list.pop(0) come coda in Python: è O(n) per estrazione"
+    - "Non gestire lo stack vuoto al pop"
+  follow_up_questions:
+    - "Come implementeresti una coda usando due stack?"
+
+- id: dsa-08-trees
+  title: Alberi binari e BST
+  category: dsa
+  track: technical
+  level: medium
+  tags: [dsa, alberi, ricorsione]
+  estimated_minutes: 35
+  summary: >-
+    Gli alberi sono il terreno naturale della ricorsione. In un BST la proprietà di
+    ordinamento permette di scartare metà dell'albero a ogni confronto, ma solo se l'albero
+    è bilanciato.
+  key_points:
+    - "Attraversamenti: preorder (radice, sx, dx), inorder (sx, radice, dx), postorder (sx, dx, radice), level order (BFS con coda)"
+    - "L'inorder di un BST produce la sequenza ordinata: è il test di validità"
+    - "Validare un BST richiede di propagare i limiti min/max, non solo confrontare padre e figli"
+    - "Ricerca, inserimento e cancellazione: O(log n) se bilanciato, O(n) se degenerato in lista"
+    - "Alberi auto-bilancianti: AVL (più rigido, letture veloci), Red-Black (più permissivo, scritture veloci)"
+    - "Complessità di spazio della ricorsione: O(h), cioè O(log n) bilanciato e O(n) nel caso peggiore"
+  interview_answer: >-
+    Sugli alberi ragiono ricorsivamente: definisco cosa deve restituire la funzione per un
+    sottoalbero e compongo i risultati dei figli. L'errore classico che evito è validare un BST
+    confrontando solo padre e figli: serve propagare un intervallo di valori ammessi lungo la
+    discesa, altrimenti un nodo profondo che viola la proprietà rispetto a un antenato passa il
+    controllo. E ricordo sempre che le complessità O(log n) valgono solo se l'albero è
+    bilanciato: un BST costruito inserendo dati già ordinati degenera in una lista.
+  pitfalls:
+    - "Validare un BST guardando solo i figli diretti"
+    - "Dimenticare che la ricorsione costa O(h) di stack"
+    - "Non gestire il caso albero vuoto"
+  follow_up_questions:
+    - "Come validi un BST correttamente?"
+    - "Perché un BST può degenerare e come si previene?"
+
+- id: dsa-09-graphs
+  title: Grafi, BFS e DFS
+  category: dsa
+  track: technical
+  level: medium
+  tags: [dsa, grafi, bfs, dfs]
+  estimated_minutes: 40
+  summary: >-
+    Moltissimi problemi sono grafi travestiti: matrici, dipendenze, relazioni. BFS trova il
+    cammino minimo in archi non pesati, DFS esplora in profondità ed è la base per cicli e
+    ordinamento topologico.
+  key_points:
+    - "Rappresentazione: lista di adiacenza O(V+E) di spazio, quasi sempre la scelta giusta"
+    - "BFS con coda: cammino minimo su grafo non pesato, esplorazione per livelli"
+    - "DFS con stack o ricorsione: rilevamento cicli, componenti connesse, ordinamento topologico"
+    - "Il set dei visitati va aggiornato all'inserimento in coda, non all'estrazione, altrimenti si duplicano i nodi"
+    - "Ordinamento topologico: algoritmo di Kahn (gradi entranti) o DFS con post-order invertito. Solo su DAG"
+    - "Dijkstra per pesi non negativi, Bellman-Ford se ci sono pesi negativi"
+    - "Union-Find per le componenti connesse e per Kruskal"
+    - "Complessità: O(V+E) per BFS e DFS con lista di adiacenza"
+  interview_answer: >-
+    La prima domanda che mi faccio è se il problema è un grafo mascherato: una matrice con
+    spostamenti fra celle adiacenti, un insieme di dipendenze fra task, una rete di relazioni.
+    Se sì, scelgo BFS quando serve il cammino minimo in numero di passi e DFS quando devo
+    esplorare esaustivamente o rilevare cicli. Il dettaglio implementativo su cui si sbaglia più
+    spesso è marcare i nodi come visitati al momento dell'accodamento e non dell'estrazione:
+    altrimenti lo stesso nodo entra più volte in coda e la complessità si degrada.
+  pitfalls:
+    - "Marcare i visitati all'estrazione invece che all'inserimento in BFS"
+    - "Applicare Dijkstra con pesi negativi"
+    - "Non gestire grafi disconnessi: serve un ciclo esterno su tutti i nodi"
+    - "DFS ricorsiva su grafi profondi: stack overflow"
+  follow_up_questions:
+    - "Come rilevi un ciclo in un grafo diretto? E in uno non diretto?"
+    - "Perché Dijkstra non funziona con pesi negativi?"
+
+- id: dsa-10-heaps
+  title: Heap e code di priorità
+  category: dsa
+  track: technical
+  level: medium
+  tags: [dsa, heap, priorita]
+  estimated_minutes: 30
+  summary: >-
+    Un heap mantiene il minimo (o il massimo) accessibile in O(1) con inserimenti ed
+    estrazioni in O(log n). È la struttura per i problemi di tipo "i k migliori".
+  key_points:
+    - "Min-heap: la radice è il minimo. In Python heapq è un min-heap; per il max si inseriscono i valori negati"
+    - "push e pop O(log n), peek O(1), costruzione da lista O(n) con heapify"
+    - "Top-k elementi: min-heap di dimensione k, O(n log k) invece di O(n log n) del sort completo"
+    - "Mediana in streaming: due heap, un max-heap per la metà bassa e un min-heap per quella alta"
+    - "Merge di k liste ordinate: heap con un elemento per lista, O(N log k)"
+    - "Un heap non è ordinato: solo la radice ha una garanzia"
+  interview_answer: >-
+    Quando il problema chiede i k elementi più grandi non ordino tutto: tengo un min-heap di
+    dimensione k e scarto la radice ogni volta che supero k, ottenendo O(n log k) e O(k) di
+    spazio. È la differenza che conta quando n è enorme e k piccolo, o quando i dati arrivano in
+    streaming e non posso tenerli tutti. L'altro uso che cito volentieri è la mediana su flusso
+    con due heap bilanciati, perché mostra che l'heap serve a mantenere un invariante, non solo a
+    ordinare.
+  pitfalls:
+    - "Dimenticare che heapq in Python è solo min-heap"
+    - "Iterare sull'heap aspettandosi un ordinamento"
+    - "Usare un max-heap di dimensione k per i top-k: serve il min-heap"
+  follow_up_questions:
+    - "Come mantieni la mediana di un flusso di numeri?"
+
+- id: dsa-11-dynamic-programming
+  title: Programmazione dinamica
+  category: dsa
+  track: technical
+  level: hard
+  tags: [dsa, dp, ottimizzazione]
+  estimated_minutes: 45
+  summary: >-
+    La programmazione dinamica si applica quando il problema ha sottostruttura ottima e
+    sottoproblemi ripetuti. Si riconosce dalla ricorsione che ricalcola gli stessi stati.
+  key_points:
+    - "Due condizioni: sottostruttura ottima e sovrapposizione dei sottoproblemi"
+    - "Top-down (memoizzazione): ricorsione + cache. Più vicino al ragionamento, stack O(n)"
+    - "Bottom-up (tabulazione): iterativo, nessuno stack, spesso ottimizzabile in spazio"
+    - "Metodo: definisci lo stato, scrivi la ricorrenza, fissa i casi base, scegli l'ordine di calcolo"
+    - "Ottimizzazione di spazio: se dp[i] dipende solo da dp[i-1] bastano due variabili"
+    - "Classici: Fibonacci, scale, zaino 0/1, LCS, LIS, coin change, edit distance"
+    - "In colloquio parti dalla ricorsione brute force, poi aggiungi la memoizzazione: mostra il ragionamento"
+  interview_answer: >-
+    Il mio metodo è sempre lo stesso: scrivo prima la soluzione ricorsiva ingenua, anche se
+    esponenziale, perché mi costringe a definire lo stato e la ricorrenza. A quel punto guardo
+    se gli stessi stati tornano più volte e, se sì, aggiungo la memoizzazione, che di fatto è
+    già la DP. Solo dopo, se serve, la converto in bottom-up e valuto se posso ridurre lo spazio
+    tenendo solo le ultime righe. Partire direttamente dalla tabella è il modo migliore per
+    sbagliare la definizione dello stato e non accorgersene.
+  pitfalls:
+    - "Definire lo stato in modo incompleto, così che due situazioni diverse collidano"
+    - "Casi base sbagliati o mancanti"
+    - "Usare la DP dove basta un greedy, o viceversa"
+  follow_up_questions:
+    - "Come riduci lo spazio di una DP bidimensionale?"
+    - "Come riconosci che un problema è DP e non greedy?"
+
+- id: dsa-12-sliding-window
+  title: Sliding window
+  category: dsa
+  track: technical
+  level: medium
+  tags: [dsa, finestra-scorrevole, array]
+  estimated_minutes: 30
+  summary: >-
+    La finestra scorrevole mantiene un intervallo contiguo che si espande e si contrae in
+    base a un vincolo. Trasforma in O(n) i problemi su sottoarray o sottostringhe che
+    l'approccio ingenuo risolverebbe in O(n^2).
+  key_points:
+    - "Finestra fissa: media mobile, massimo su k elementi"
+    - "Finestra variabile: espandi a destra finché il vincolo regge, contrai da sinistra quando si rompe"
+    - "Ogni indice entra ed esce al massimo una volta: O(n) anche con due cicli annidati"
+    - "Funziona se il vincolo è monotono rispetto alla dimensione della finestra"
+    - "Con valori negativi la monotonia salta: lì serve prefix sum più hash map"
+    - "Classici: sottostringa più lunga senza ripetizioni, sottoarray minimo con somma >= target, anagrammi in una stringa"
+  interview_answer: >-
+    La riconosco quando il problema parla di sottoarray o sottostringhe contigue con un vincolo.
+    Lo schema è espandere il bordo destro finché il vincolo regge e contrarre il sinistro quando
+    si rompe, aggiornando la risposta a ogni passo. Sembra un doppio ciclo ma è lineare, perché
+    ogni indice viene attraversato al massimo una volta da ciascun bordo. Il caso in cui non si
+    applica e lo dico subito è quando ci sono numeri negativi: lì la somma non è monotona
+    rispetto alla dimensione della finestra e devo passare ai prefix sum con una hash map.
+  pitfalls:
+    - "Applicarla con valori negativi dove la monotonia non vale"
+    - "Aggiornare la risposta nel punto sbagliato del ciclo"
+    - "Dimenticare di rimuovere l'elemento uscente dalle strutture ausiliarie"
+  follow_up_questions:
+    - "Perché la sliding window non funziona con numeri negativi?"
+
+- id: dsa-13-recursion-backtracking
+  title: Ricorsione e backtracking
+  category: dsa
+  track: technical
+  level: hard
+  tags: [dsa, ricorsione, backtracking]
+  estimated_minutes: 35
+  summary: >-
+    Il backtracking esplora sistematicamente uno spazio di soluzioni costruendo un
+    candidato e tornando indietro quando diventa invalido. È DFS su un albero di decisioni,
+    con il potatura come unica difesa contro l'esplosione combinatoria.
+  key_points:
+    - "Schema: scegli, ricorri, annulla la scelta (choose, explore, unchoose)"
+    - "Il pruning è ciò che rende praticabile l'esplorazione: taglia il ramo appena è certo che non porta a soluzione"
+    - "Complessità tipicamente esponenziale: O(2^n) per i sottoinsiemi, O(n!) per le permutazioni"
+    - "Per i duplicati: ordina l'input e salta gli elementi uguali al precedente allo stesso livello"
+    - "Ricorda di copiare la soluzione parziale quando la salvi, altrimenti salvi un riferimento che poi muta"
+    - "Classici: permutazioni, sottoinsiemi, N-regine, sudoku, combinazioni con somma target"
+  interview_answer: >-
+    Il backtracking è una DFS sull'albero delle decisioni con la possibilità di tornare
+    indietro. Lo schema è sempre scegli, esplora, disfai: aggiungo un elemento alla soluzione
+    parziale, ricorro, e al ritorno lo tolgo per provare l'alternativa. La parte che distingue
+    una soluzione accettabile da una che va in timeout è il pruning: appena posso dimostrare che
+    un ramo non porterà a nulla lo taglio. Un dettaglio implementativo che causa bug silenziosi è
+    salvare la soluzione parziale senza copiarla, perché poi continuo a modificarla e alla fine
+    mi ritrovo N riferimenti alla stessa lista vuota.
+  pitfalls:
+    - "Salvare la soluzione parziale senza copiarla"
+    - "Dimenticare di annullare la scelta al ritorno"
+    - "Nessun pruning: esplorazione completa e timeout"
+  follow_up_questions:
+    - "Come eviti permutazioni duplicate con elementi ripetuti?"
+
+- id: dsa-14-sorting
+  title: Algoritmi di ordinamento
+  category: dsa
+  track: technical
+  level: medium
+  tags: [dsa, ordinamento]
+  estimated_minutes: 30
+  summary: >-
+    Raramente si implementa un sort in produzione, ma conoscerne le proprietà serve a
+    scegliere e a rispondere alle domande di follow-up. Le proprietà che contano sono
+    complessità, stabilità e spazio.
+  key_points:
+    - "Merge sort: O(n log n) garantito, stabile, O(n) di spazio extra"
+    - "Quick sort: O(n log n) medio ma O(n^2) nel caso peggiore, in place, non stabile. Il pivot casuale rende raro il caso peggiore"
+    - "Heap sort: O(n log n) garantito, in place, non stabile"
+    - "Counting e radix sort: O(n + k) lineare, ma solo su interi in un range limitato"
+    - "Stabile significa che elementi uguali mantengono l'ordine relativo: conta quando si ordina per chiavi successive"
+    - "In pratica: Timsort in Python e Java per gli oggetti, introsort in C++"
+    - "Il limite inferiore O(n log n) vale solo per gli ordinamenti basati su confronti"
+  interview_answer: >-
+    In produzione uso quello della libreria standard, che è Timsort in Python: è stabile,
+    O(n log n) nel caso peggiore e sfrutta le porzioni già ordinate, che nei dati reali sono
+    frequenti. Quando la domanda è di scegliere l'algoritmo, guardo tre cose: se mi serve la
+    stabilità, se posso permettermi O(n) di spazio extra e se ho garanzie da rispettare nel caso
+    peggiore. Quick sort è il più veloce in media ma il suo caso peggiore quadratico lo rende
+    inadatto dove serve una garanzia; merge sort me la dà ma paga in memoria.
+  pitfalls:
+    - "Dire che quick sort è O(n log n) senza menzionare il caso peggiore"
+    - "Ignorare la stabilità quando si ordina per più criteri in sequenza"
+  follow_up_questions:
+    - "Perché Python usa Timsort e non quicksort?"
+    - "Quando un ordinamento può essere lineare?"

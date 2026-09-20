@@ -1,0 +1,358 @@
+# Categoria "Reliability & Real-World Problems" - concetti 31-40 della checklist.
+- id: rel-31-delivery-semantics
+  title: Exactly-once vs at-least-once
+  category: reliability
+  track: knowledge
+  level: hard
+  tags: [affidabilita, messaggistica, distribuito]
+  estimated_minutes: 30
+  summary: >-
+    Le semantiche di consegna sono tre: at-most-once (puoi perdere), at-least-once (puoi
+    duplicare), exactly-once (nessuna delle due). L'exactly-once end-to-end sulla rete non
+    è realizzabile: quello che si ottiene è at-least-once più idempotenza, che produce un
+    effetto exactly-once.
+  key_points:
+    - "At-most-once: ack prima di elaborare. Veloce, perde messaggi se il consumer muore"
+    - "At-least-once: ack dopo aver elaborato. Non perde nulla, può rielaborare. È il default quasi ovunque"
+    - "Exactly-once processing esiste dentro un singolo sistema (Kafka transactions, read-process-write atomico), non verso l'esterno"
+    - "Il problema dei due generali dimostra che con canali inaffidabili l'accordo certo è impossibile"
+    - "La soluzione pratica: at-least-once + deduplicazione tramite chiave idempotente persistita"
+    - "Effetti collaterali esterni (email, pagamenti) vanno resi idempotenti a parte"
+  interview_answer: >-
+    Nella pratica scelgo at-least-once e rendo idempotente il consumer, perché è l'unica
+    combinazione che regge sul serio. At-most-once perde messaggi e non è accettabile per
+    nulla di importante, mentre exactly-once vero end-to-end non esiste: appena c'è una
+    rete di mezzo, un ack perso è indistinguibile da un'elaborazione non avvenuta. Quello
+    che Kafka chiama exactly-once è una transazione interna che copre leggi-elabora-scrivi
+    dentro Kafka, ma se nel mezzo mando una mail quella garanzia non la copre. Quindi
+    salvo un id del messaggio già elaborato in modo transazionale insieme all'effetto, e
+    ottengo un comportamento osservabile exactly-once.
+  pitfalls:
+    - "Promettere exactly-once dove c'è un effetto esterno non idempotente"
+    - "Deduplicare in memoria: il riavvio azzera la memoria"
+    - "Salvare il marker di deduplicazione in una transazione diversa da quella dell'effetto"
+  follow_up_questions:
+    - "Perché l'exactly-once end-to-end è impossibile?"
+    - "Come rendi idempotente un consumer che invia email?"
+
+- id: rel-32-retries-timeouts-breakers
+  title: Retry, timeout e circuit breaker
+  category: reliability
+  track: knowledge
+  level: medium
+  tags: [affidabilita, resilienza, distribuito]
+  estimated_minutes: 30
+  summary: >-
+    Sono le tre difese di base contro le dipendenze lente o rotte. Usate male, i retry
+    amplificano un guasto invece di assorbirlo: il retry storm è una delle cause più
+    comuni di incidente.
+  key_points:
+    - "Ogni chiamata di rete deve avere un timeout esplicito: il default di molte librerie è infinito"
+    - "Il timeout del chiamante deve essere minore di quello del chiamante a monte, altrimenti si accumulano"
+    - "Retry solo su errori transitori (5xx, timeout, connection reset), mai su 4xx"
+    - "Exponential backoff + jitter: senza jitter tutti i client ritentano nello stesso istante"
+    - "Budget di retry: limita il numero totale, non solo per richiesta"
+    - "Circuit breaker: closed -> open dopo N fallimenti -> half-open per sondare -> closed. Fa fallire subito invece di accodare"
+    - "Bulkhead: pool di connessioni separati per dipendenza, così una lenta non esaurisce tutti i thread"
+  interview_answer: >-
+    Il timeout viene prima di tutto: senza, una dipendenza lenta esaurisce i thread e il
+    guasto si propaga a monte. Poi i retry, ma solo sugli errori che ha senso ritentare e
+    sempre con backoff esponenziale e jitter, altrimenti mille client ritentano
+    sincronizzati e finiscono il lavoro che il guasto aveva iniziato. Il circuit breaker è
+    il livello sopra: se una dipendenza sta chiaramente fallendo, smetto di provarci e
+    fallisco subito, dando al servizio a valle la possibilità di riprendersi invece di
+    tenerlo sotto carico. La gerarchia dei timeout è il dettaglio che si dimentica: se il
+    mio timeout è più lungo di quello di chi mi chiama, sto lavorando per nessuno.
+  pitfalls:
+    - "Retry senza jitter: tempesta sincronizzata"
+    - "Retry annidati a più livelli: tre livelli con tre tentativi fanno ventisette chiamate"
+    - "Nessun timeout, o timeout più lunghi di quelli del chiamante"
+  follow_up_questions:
+    - "Perché il jitter è indispensabile nel backoff?"
+    - "In quali stati può essere un circuit breaker e cosa li fa cambiare?"
+
+- id: rel-33-race-conditions
+  title: Gestire le race condition
+  category: reliability
+  track: knowledge
+  level: hard
+  tags: [concorrenza, affidabilita, database]
+  estimated_minutes: 30
+  summary: >-
+    Una race condition c'è quando il risultato dipende dall'ordine con cui si intrecciano
+    operazioni concorrenti. Il pattern colpevole è quasi sempre lo stesso: controlla
+    poi agisci, con una finestra fra i due momenti.
+  key_points:
+    - "Check-then-act: SELECT per verificare, poi INSERT/UPDATE. Fra i due un'altra transazione può intervenire"
+    - "Read-modify-write: leggi 10, aggiungi 1, scrivi 11. Due processi in parallelo scrivono entrambi 11 invece di 12"
+    - "Soluzione database-first: vincoli UNIQUE, UPDATE atomici (SET n = n + 1), SELECT FOR UPDATE, upsert"
+    - "Soluzione ottimistica: colonna di versione e retry sul conflitto"
+    - "Le operazioni atomiche del datastore (INCR di Redis, update atomici) eliminano la finestra per costruzione"
+    - "Riprodurre una race richiede carico concorrente: un test seriale non la vede mai"
+  interview_answer: >-
+    Cerco il pattern controlla-poi-agisci, perché è lì che si annidano quasi tutte. Il
+    rimedio che preferisco è spostare l'atomicità nel database invece di tenerla nel
+    codice: invece di leggere il contatore, incrementarlo in memoria e riscriverlo, faccio
+    un UPDATE SET n = n + 1 che è atomico per costruzione. Dove serve davvero coordinare
+    più righe uso SELECT FOR UPDATE o un vincolo unique che lasci vincere una sola
+    transazione. La parte difficile non è risolverle ma accorgersene: un test unitario
+    seriale non le vede, quindi quando sospetto una race scrivo un test che lancia N
+    operazioni in parallelo e verifica l'invariante.
+  pitfalls:
+    - "Correggere una race con uno sleep"
+    - "Lock applicativo in memoria con più istanze del servizio"
+    - "Test solo sequenziali su codice concorrente"
+  follow_up_questions:
+    - "Come testeresti una race condition in modo riproducibile?"
+
+- id: rel-34-distributed-locking
+  title: Lock distribuito
+  category: reliability
+  track: knowledge
+  level: hard
+  tags: [distribuito, concorrenza, redis]
+  estimated_minutes: 30
+  summary: >-
+    Un lock distribuito serializza un'operazione fra processi diversi. È utile ma
+    intrinsecamente fragile: nessun lock distribuito può garantire mutua esclusione
+    perfetta in presenza di pause GC e clock sfasati.
+  key_points:
+    - "Implementazione base su Redis: SET chiave valore_univoco NX PX ttl"
+    - "Il TTL è obbligatorio: senza, un client che muore lascia il lock per sempre"
+    - "Il rilascio deve verificare il proprietario (script Lua con GET+DEL atomico), o rischi di rilasciare il lock di un altro"
+    - "Il TTL crea il problema opposto: se il lavoro dura più del TTL, due processi lavorano insieme credendosi soli"
+    - "Fencing token: un contatore monotono passato alla risorsa, che rifiuta token vecchi. È l'unica difesa solida"
+    - "Redlock è discusso: Martin Kleppmann ne ha criticato le garanzie sotto pause e clock drift"
+    - "Spesso l'alternativa è migliore: rendere l'operazione idempotente, o usare un vincolo unique sul database"
+  interview_answer: >-
+    Li uso con parsimonia, perché sono più fragili di quanto sembrino. Un lock su Redis con
+    SET NX PX e rilascio via script Lua che controlla il proprietario copre il caso normale,
+    ma resta il problema che il TTL deve essere più lungo del lavoro, e se il processo va in
+    pausa GC oltre il TTL due esecuzioni si sovrappongono credendosi entrambe titolari del
+    lock. L'unica difesa reale è il fencing token, cioè passare alla risorsa un contatore
+    crescente che le permette di rifiutare le scritture provenienti da un titolare scaduto.
+    Per questo, quando posso, preferisco evitare il lock del tutto: un vincolo unique sul
+    database o un'operazione idempotente risolvono lo stesso problema senza queste
+    complicazioni.
+  pitfalls:
+    - "Lock senza TTL: deadlock permanente al crash del titolare"
+    - "DEL senza verifica del proprietario: rilasci il lock di qualcun altro"
+    - "Assumere mutua esclusione perfetta senza fencing token"
+  follow_up_questions:
+    - "Perché serve un fencing token se il lock ha già un TTL?"
+    - "Che alternativa proporresti a un lock distribuito?"
+
+- id: rel-35-event-driven
+  title: Architettura event-driven
+  category: reliability
+  track: knowledge
+  level: medium
+  tags: [architettura, distribuito, eventi]
+  estimated_minutes: 30
+  summary: >-
+    In un'architettura a eventi i servizi pubblicano fatti accaduti e chi è interessato
+    reagisce. Il produttore non sa chi lo ascolta: questo è il disaccoppiamento che si
+    cerca, ed è anche ciò che rende difficile capire cosa succede davvero.
+  key_points:
+    - "Evento = fatto al passato (OrderPlaced), comando = richiesta all'imperativo (PlaceOrder). Non confonderli"
+    - "Event notification (evento magro, il consumer richiama) vs event-carried state transfer (evento grasso, autosufficiente)"
+    - "Event sourcing: lo stato è la riduzione del log degli eventi. Potente ma impegnativo, non è sinonimo di event-driven"
+    - "Outbox pattern: scrivi evento e dato nella stessa transazione DB, un relay li pubblica. Risolve la doppia scrittura"
+    - "Gli eventi sono un contratto pubblico: vanno versionati e resi retrocompatibili"
+    - "Debug: senza correlation id e tracing distribuito ricostruire un flusso è quasi impossibile"
+  interview_answer: >-
+    Il vantaggio è che posso aggiungere un consumatore nuovo senza toccare il produttore:
+    se domani serve mandare gli ordini a un sistema di analytics, mi iscrivo all'evento e
+    basta. Il problema che risolvo per primo è la doppia scrittura: salvare sul database e
+    pubblicare sulla coda non è atomico, quindi un crash nel mezzo lascia il sistema
+    incoerente. Uso l'outbox pattern, scrivendo l'evento in una tabella nella stessa
+    transazione del dato e lasciando che un relay lo pubblichi. Il costo principale è
+    l'osservabilità: senza correlation id propagato e tracing distribuito, capire perché
+    un ordine non è arrivato in fondo diventa archeologia.
+  pitfalls:
+    - "Doppia scrittura DB + broker senza outbox"
+    - "Eventi che sono comandi travestiti, ricreando accoppiamento"
+    - "Nessuna strategia di versioning degli eventi"
+  follow_up_questions:
+    - "Cos'è l'outbox pattern e quale problema risolve?"
+    - "Differenza tra event sourcing ed event-driven?"
+
+- id: rel-36-saga
+  title: Saga pattern (transazioni distribuite)
+  category: reliability
+  track: knowledge
+  level: hard
+  tags: [distribuito, architettura, transazioni]
+  estimated_minutes: 35
+  summary: >-
+    Una saga sostituisce la transazione distribuita con una sequenza di transazioni locali,
+    ciascuna con la propria operazione di compensazione da eseguire se un passo successivo
+    fallisce. Non c'è rollback atomico: c'è un annullamento esplicito.
+  key_points:
+    - "Coreografia: ogni servizio reagisce agli eventi altrui. Niente coordinatore, ma il flusso complessivo non è scritto da nessuna parte"
+    - "Orchestrazione: un orchestratore dirige i passi. Flusso esplicito e testabile, ma il coordinatore è un componente in più"
+    - "Ogni passo ha una compensazione: addebita -> rimborsa, prenota -> rilascia"
+    - "Le compensazioni sono semantiche, non tecniche: una mail inviata non si annulla, si manda una mail di scuse"
+    - "Durante la saga il sistema è in uno stato intermedio visibile: niente isolamento"
+    - "2PC dà atomicità ma blocca le risorse e richiede un coordinatore affidabile: raramente praticabile fra servizi"
+  interview_answer: >-
+    Quando un'operazione attraversa più servizi con database separati non posso usare una
+    transazione, quindi la spezzo in transazioni locali e per ognuna definisco la
+    compensazione. Per un ordine: riservo lo stock, addebito, spedisco; se l'addebito
+    fallisce eseguo la compensazione del passo precedente rilasciando lo stock. Scelgo
+    l'orchestrazione quando il flusso ha più di tre o quattro passi, perché con la
+    coreografia il processo complessivo non è scritto da nessuna parte e diventa
+    impossibile ragionarci. La cosa che dico sempre è che le compensazioni sono semantiche:
+    non sto tornando indietro nel tempo, sto eseguendo un'azione di business che rimedia, e
+    nel frattempo lo stato intermedio è visibile agli utenti.
+  pitfalls:
+    - "Progettare la saga senza definire le compensazioni per ogni passo"
+    - "Compensazioni non idempotenti"
+    - "Usare la coreografia per flussi complessi e perdere la visione d'insieme"
+  follow_up_questions:
+    - "Come compensi un passo che ha già inviato una email al cliente?"
+    - "Coreografia o orchestrazione per un checkout a sei passi?"
+
+- id: rel-37-graceful-degradation
+  title: Degrado graduale (graceful degradation)
+  category: reliability
+  track: knowledge
+  level: medium
+  tags: [affidabilita, resilienza, architettura]
+  estimated_minutes: 25
+  summary: >-
+    Degradare con grazia significa continuare a servire la funzione principale anche
+    quando una dipendenza secondaria è rotta. Richiede di aver deciso in anticipo cosa è
+    essenziale e cosa è accessorio.
+  key_points:
+    - "Classifica le dipendenze: critiche (senza, il servizio non ha senso) e non critiche (accessorie)"
+    - "Una dipendenza non critica che fa fallire la richiesta è un errore di design"
+    - "Tecniche: valori di fallback, cache stantia servita consapevolmente, feature flag per spegnere funzioni, risposte parziali"
+    - "Load shedding: rifiutare una quota di traffico per salvare il resto, invece di degradare per tutti"
+    - "Il degrado va reso visibile: un banner è meglio di dati sbagliati mostrati come buoni"
+    - "Va testato: senza game day o fault injection, il percorso di fallback è codice mai eseguito"
+  interview_answer: >-
+    Parto classificando le dipendenze. In un e-commerce il catalogo e il checkout sono
+    critici, il motore di raccomandazioni no: se quest'ultimo è giù devo mostrare una lista
+    statica di best seller, non una pagina di errore. In pratica significa timeout aggressivi
+    sulle dipendenze non critiche e un fallback esplicito per ognuna. La parte che fa la
+    differenza è testarlo: il codice di fallback è codice che non gira mai in condizioni
+    normali, quindi se non lo esercito con fault injection scoprirò che era rotto proprio
+    nel momento in cui serviva.
+  pitfalls:
+    - "Fallback mai testati che falliscono proprio durante l'incidente"
+    - "Degradare in silenzio mostrando dati incompleti come se fossero completi"
+    - "Trattare ogni dipendenza come critica"
+  follow_up_questions:
+    - "Cos'è il load shedding e quando lo preferisci al degrado per tutti?"
+
+- id: rel-38-observability
+  title: Observability (log, metriche, tracing)
+  category: reliability
+  track: knowledge
+  level: medium
+  tags: [affidabilita, osservabilita, operazioni]
+  estimated_minutes: 30
+  summary: >-
+    Monitoring risponde a domande che sapevi di dover fare; observability ti permette di
+    farne di nuove su un sistema già in produzione. I tre pilastri sono log, metriche e
+    trace, e servono a scopi diversi.
+  key_points:
+    - "Metriche: aggregate, economiche, ottime per allarmi e trend. Cardinalità alta = costo esplosivo"
+    - "Log: dettaglio per singolo evento. Strutturati in JSON, con correlation id, altrimenti sono inutilizzabili"
+    - "Trace: il percorso di una richiesta fra i servizi, con la latenza di ogni salto. Indispensabile nel distribuito"
+    - "Usa le percentili, non le medie: la media nasconde la coda. p50, p95, p99"
+    - "Quattro golden signal: latenza, traffico, errori, saturazione"
+    - "RED per i servizi (Rate, Errors, Duration), USE per le risorse (Utilization, Saturation, Errors)"
+    - "Gli alert vanno sui sintomi percepiti dall'utente, non sulle cause: 'il checkout fallisce' e non 'la CPU è all'80%'"
+    - "OpenTelemetry è lo standard di fatto per strumentare senza legarsi a un vendor"
+  interview_answer: >-
+    Le tre cose servono a momenti diversi dell'incidente. Le metriche mi dicono che c'è un
+    problema e mi svegliano, i trace mi dicono dove nella catena di servizi, i log mi dicono
+    perché su quella specifica richiesta. Il punto che curo di più è il correlation id
+    propagato ovunque, perché senza quello non riesco a collegare i tre livelli. Sugli alert
+    ho una regola: allerto sui sintomi visibili all'utente, come il tasso di errore del
+    checkout o la p99 della latenza, non sulle cause come la CPU, perché la CPU alta a volte
+    è normale e la CPU bassa non garantisce che gli utenti stiano bene. E guardo le
+    percentili, perché una media di 200ms può nascondere un 1% di utenti a dieci secondi.
+  pitfalls:
+    - "Monitorare la latenza media e non accorgersi della coda"
+    - "Log non strutturati e senza correlation id"
+    - "Alert rumorosi che generano assuefazione"
+    - "Metriche ad alta cardinalità (user id come label) che fanno esplodere i costi"
+  follow_up_questions:
+    - "Perché la p99 conta più della media?"
+    - "Su quali segnali metteresti un alert paging?"
+
+- id: rel-39-deployments
+  title: Strategie di deploy (blue-green, rolling, canary)
+  category: reliability
+  track: knowledge
+  level: medium
+  tags: [deploy, devops, affidabilita]
+  estimated_minutes: 30
+  summary: >-
+    L'obiettivo di una strategia di deploy è ridurre il raggio d'impatto di una versione
+    difettosa e rendere il ritorno indietro rapido. Le strategie differiscono per quanti
+    utenti vedono la nuova versione e per quanto velocemente si torna indietro.
+  key_points:
+    - "Rolling: sostituisci le istanze poche per volta. Nessun costo extra, ma due versioni convivono e il rollback è lento"
+    - "Blue-green: due ambienti completi, si scambia il traffico. Rollback istantaneo, costo doppio durante la finestra"
+    - "Canary: la nuova versione riceve l'1-5% del traffico, si osservano le metriche, si procede o si torna indietro"
+    - "Feature flag: separano il deploy dal rilascio. Il codice va in produzione spento e si accende quando serve"
+    - "Le migrazioni di schema devono essere retrocompatibili: expand-migrate-contract, mai una colonna rinominata in un colpo solo"
+    - "Serve sempre un criterio automatico di rollback basato su metriche, non sull'occhio di chi guarda"
+  interview_answer: >-
+    Il default per me è rolling con health check seri, perché non costa nulla in
+    infrastruttura. Passo al canary quando il cambiamento è rischioso e ho metriche
+    abbastanza buone da accorgermi di una regressione sull'1% del traffico. Il blue-green lo
+    uso quando il rollback istantaneo vale il costo di tenere due ambienti. Il vincolo che
+    condiziona tutto però è il database: con rolling e canary due versioni del codice girano
+    insieme sullo stesso schema, quindi le migrazioni devono essere retrocompatibili in
+    entrambe le direzioni. Per rinominare una colonna faccio expand-migrate-contract: aggiungo
+    la nuova, scrivo su entrambe, migro i dati, sposto le letture e solo in un rilascio
+    successivo tolgo la vecchia.
+  pitfalls:
+    - "Migrazione distruttiva rilasciata insieme al codice: il rollback diventa impossibile"
+    - "Canary senza metriche sufficienti a distinguere il rumore dalla regressione"
+    - "Health check che non verificano le dipendenze reali"
+  follow_up_questions:
+    - "Come rinomini una colonna senza downtime?"
+    - "Perché i feature flag cambiano il discorso sul rollback?"
+
+- id: rel-40-traffic-spikes
+  title: Picchi di traffico e carico virale
+  category: reliability
+  track: knowledge
+  level: hard
+  tags: [scalabilita, affidabilita, performance]
+  estimated_minutes: 30
+  summary: >-
+    Un picco improvviso mette sotto stress il componente meno elastico, che di solito è il
+    database. L'autoscaling da solo non basta: impiega minuti, mentre il picco arriva in
+    secondi.
+  key_points:
+    - "Difese a strati: CDN davanti, cache applicativa, code per assorbire le scritture, rate limiting, load shedding"
+    - "Prescaling per i picchi noti (lancio, Black Friday): l'autoscaling reattivo arriva sempre tardi"
+    - "Il database è il vincolo: il pool di connessioni satura molto prima della CPU. PgBouncer o equivalente"
+    - "Hot key: un singolo contenuto virale concentra il carico su una chiave. Serve replica della chiave o cache locale"
+    - "Load shedding: meglio servire bene il 70% che fallire per tutti"
+    - "Le code trasformano un picco di traffico in una coda più lunga, che è un problema molto più gestibile"
+    - "Il thundering herd al riavvio: tutte le cache fredde insieme sono un secondo picco"
+  interview_answer: >-
+    Parto dal presupposto che l'autoscaling reagisce in minuti e il picco arriva in secondi,
+    quindi serve qualcosa che assorba nel frattempo. Il primo strato è la CDN, perché la
+    maggior parte del traffico virale chiede la stessa identica risorsa e può essere servita
+    senza toccare l'origine. Il secondo è la cache applicativa con protezione dallo
+    stampede. Il terzo è spostare le scritture su una coda, così il picco diventa una coda
+    più lunga invece di un database in ginocchio. Se nonostante tutto la capacità non basta
+    faccio load shedding, perché rifiutare una quota di traffico con un 503 onesto è meglio
+    che degradare per tutti fino al collasso. E se il picco è previsto, prescalo: è l'unica
+    cosa che funziona davvero sul momento zero.
+  pitfalls:
+    - "Contare solo sull'autoscaling per picchi istantanei"
+    - "Scalare le istanze applicative e saturare le connessioni al database"
+    - "Non gestire le hot key, e vedere un nodo in fiamme mentre gli altri sono scarichi"
+  follow_up_questions:
+    - "Come gestiresti un singolo contenuto virale che concentra il traffico su una chiave?"
+    - "Perché l'autoscaling non basta per un picco improvviso?"
