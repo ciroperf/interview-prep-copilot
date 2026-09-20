@@ -344,6 +344,15 @@ campo per il codice.
 > l'organizzazione lo vieta, l'apply fallisce con un errore di autorizzazione:
 > chiedi a un amministratore o resta sul codice di accesso.
 
+> `Blocks of type "cors" are not expected here` all'apply? Il provider azurerm
+> è più vecchio di 4.44: `terraform -chdir=terraform init -upgrade`.
+
+Con il login attivo cambia anche chi risponde alla CORS: non più
+l'applicazione ma l'ingress di Container Apps, perché l'autenticazione
+integrata rifiuterebbe i preflight (vedi [sicurezza.md](sicurezza.md)). È
+gestito dal Terraform, ma vuol dire che **API e infrastruttura vanno
+aggiornate insieme**: prima l'immagine, poi `terraform apply`.
+
 > Il login avviene **nella stessa scheda**: la pagina va su
 > `login.microsoftonline.com` e torna indietro autenticata. Nessuna finestra
 > separata, quindi niente da sbloccare nel browser.

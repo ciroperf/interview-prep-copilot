@@ -53,6 +53,15 @@ Apps prenderebbero 401 e la revisione non partirebbe mai, e `/api/meta`, che il
 frontend interroga prima del login per sapere come autenticarsi. Nessuno dei due
 espone dati riservati.
 
+Con il login attivo la **CORS si sposta sull'ingress** di Container Apps e
+l'applicazione smette di occuparsene (`CORS_ORIGINS` vuota). Il motivo:
+l'autenticazione integrata gira *prima* dell'applicazione e risponde 401 al
+preflight, che per specifica non porta mai credenziali — nessuna chiamata
+autenticata partirebbe dal browser. L'ingress risponde prima ancora
+dell'autenticazione. Devono farla in uno solo dei due punti: se la facessero
+entrambi, `Access-Control-Allow-Origin` arriverebbe doppio e il browser
+scarterebbe la risposta lo stesso.
+
 `entra_allow_azure_cli = true` (default) pre-autorizza anche la Azure CLI, così
 `az account get-access-token` ottiene un token per l'API senza schermata di
 consenso: è quello che usano gli script per verificare l'AI dopo un deploy. Non

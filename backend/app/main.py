@@ -60,13 +60,23 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins or ["*"],
-        allow_credentials=False,
-        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "X-Access-Code"],
-    )
+    # La CORS la fa l'applicazione solo se le si dice quali origin ammettere.
+    # Con il login Microsoft in Azure la gestisce l'ingress di Container Apps e
+    # CORS_ORIGINS arriva vuota: l'autenticazione integrata gira prima
+    # dell'applicazione e risponderebbe 401 al preflight, che per specifica non
+    # porta mai credenziali. Se la facessero tutte e due, Access-Control-Allow-
+    # Origin arriverebbe doppio e il browser scarterebbe la risposta lo stesso.
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+            # Authorization e' il Bearer di Entra ID: senza, il preflight del
+            # browser riceve 400 "Disallowed CORS headers" e la chiamata vera
+            # non parte nemmeno.
+            allow_headers=["Authorization", "Content-Type", "X-Access-Code"],
+        )
 
     @app.exception_handler(ValueError)
     async def value_error_handler(_request: Request, exc: ValueError) -> JSONResponse:

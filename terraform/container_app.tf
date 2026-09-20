@@ -12,17 +12,31 @@ resource "azurerm_container_app_environment" "this" {
 
 locals {
   # La Static Web App deve poter chiamare l'API: il suo hostname entra nella CORS.
-  cors_origins = join(",", concat(
+  cors_origins = concat(
     ["https://${azurerm_static_web_app.this.default_host_name}"],
     var.allowed_origins,
-  ))
+  )
+
+  cors_headers = ["Authorization", "Content-Type", "X-Access-Code"]
+  cors_methods = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
+
+  # Chi risponde al preflight cambia a seconda dell'autenticazione.
+  #
+  # Con il codice di accesso la CORS la fa l'applicazione, dove sta anche in
+  # sviluppo locale. Con il login Microsoft non puo': l'autenticazione
+  # integrata gira prima dell'applicazione e risponde 401 al preflight, che
+  # per specifica non porta credenziali. Cosi' nessuna chiamata autenticata
+  # partirebbe dal browser. La CORS passa quindi all'ingress, che risponde
+  # prima ancora dell'autenticazione, e all'applicazione si passa CORS_ORIGINS
+  # vuota perche' non aggiunga un secondo Access-Control-Allow-Origin.
+  cors_on_ingress = local.entra_enabled
 
   ai_endpoint = var.enable_ai ? azurerm_cognitive_account.ai[0].endpoint : ""
 
   app_env = merge(
     {
       ENVIRONMENT                = var.environment
-      CORS_ORIGINS               = local.cors_origins
+      CORS_ORIGINS               = local.cors_on_ingress ? "" : join(",", local.cors_origins)
       STORAGE_BACKEND            = "azure_tables"
       AZURE_STORAGE_ACCOUNT_NAME = azurerm_storage_account.this.name
       AZURE_BLOB_CONTAINER       = azurerm_storage_container.cv.name
@@ -81,6 +95,16 @@ resource "azurerm_container_app" "api" {
     external_enabled = true
     target_port      = 8000
     transport        = "auto"
+
+    dynamic "cors" {
+      for_each = local.cors_on_ingress ? [1] : []
+      content {
+        allowed_origins    = local.cors_origins
+        allowed_methods    = local.cors_methods
+        allowed_headers    = local.cors_headers
+        max_age_in_seconds = 600
+      }
+    }
 
     traffic_weight {
       latest_revision = true

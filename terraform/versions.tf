@@ -3,8 +3,11 @@ terraform {
 
   required_providers {
     azurerm = {
+      # 4.44 e' la prima versione verificata che conosce il blocco cors
+      # dell'ingress di Container Apps: con una precedente l'apply si ferma su
+      # "Blocks of type cors are not expected here".
       source  = "hashicorp/azurerm"
-      version = "~> 4.20"
+      version = "~> 4.44"
     }
     azuread = {
       source  = "hashicorp/azuread"
