@@ -22,11 +22,28 @@ monthly_budget_eur = 15
 budget_alert_email = "tu@esempio.it"
 
 # --- AI --------------------------------------------------------------------
+# Per sapere cosa e' davvero deployabile nella tua regione:
+#   .\scripts\list-models.ps1 -Location swedencentral     (Windows)
+#   ./scripts/list-models.sh swedencentral                  (macOS/Linux)
+# Guida alla scelta: docs/modelli.md
 enable_ai        = true
 ai_location      = "swedencentral"
 ai_model_name    = "gpt-4o-mini"
 ai_model_version = "2024-07-18"
 ai_capacity      = 10
+
+# Versione dell'API. 2024-10-21 e' GA e copre gpt-4o e gpt-4.1.
+# I modelli reasoning (o3, o4-mini, gpt-5) richiedono una preview piu' recente,
+# per esempio "2025-01-01-preview".
+ai_api_version = "2024-10-21"
+
+# auto deduce la famiglia dal nome del deployment e si corregge da sola al primo
+# errore dell'API. Forzala solo se il deployment ha un nome che non lo rivela.
+ai_model_family = "auto"
+
+# Solo per i modelli reasoning: low | medium | high. Vuoto = default del modello.
+# Alzarlo migliora la qualita' e alza il costo (i token di ragionamento si pagano).
+ai_reasoning_effort = ""
 
 # --- Immagine dell'API -----------------------------------------------------
 # Lascia il default al primo apply: il workflow di deploy pubblica l'immagine

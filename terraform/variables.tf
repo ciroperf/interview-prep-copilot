@@ -180,6 +180,50 @@ variable "ai_model_version" {
   default     = "2024-07-18"
 }
 
+variable "ai_api_version" {
+  description = <<-EOT
+    Versione dell'API Azure OpenAI. 2024-10-21 è GA e copre la famiglia gpt-4o
+    e gpt-4.1. I modelli reasoning (o3, o4-mini, gpt-5) richiedono i parametri
+    max_completion_tokens e reasoning_effort, introdotti in una preview più
+    recente: per loro serve una versione tipo 2025-01-01-preview o successiva.
+    Verifica quella corrente nella documentazione Azure OpenAI; se sbagli, l'app
+    lo dice chiaramente nei log invece di fallire in silenzio.
+  EOT
+  type        = string
+  default     = "2024-10-21"
+}
+
+variable "ai_model_family" {
+  description = <<-EOT
+    auto: la famiglia si deduce dal nome del deployment e si corregge da sola al
+    primo errore dell'API. standard o reasoning la forzano, utile se hai dato al
+    deployment un nome che non rivela il modello sottostante.
+  EOT
+  type        = string
+  default     = "auto"
+
+  validation {
+    condition     = contains(["auto", "standard", "reasoning"], var.ai_model_family)
+    error_message = "Valori ammessi: auto, standard, reasoning."
+  }
+}
+
+variable "ai_reasoning_effort" {
+  description = <<-EOT
+    Quanto deve ragionare un modello reasoning: low, medium, high. Vuoto lascia
+    il default del modello. Alzarlo migliora la qualità e alza il costo, perché
+    i token di ragionamento si pagano come output.
+    Ignorato dai modelli non reasoning.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = contains(["", "low", "medium", "high"], var.ai_reasoning_effort)
+    error_message = "Valori ammessi: vuoto, low, medium, high."
+  }
+}
+
 variable "ai_deployment_sku" {
   description = "GlobalStandard costa meno di Standard e non richiede capacità riservata."
   type        = string

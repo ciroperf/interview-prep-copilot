@@ -47,6 +47,16 @@ class Settings(BaseSettings):
     ai_request_timeout_seconds: float = 90.0
     ai_max_output_tokens: int = 4096
 
+    # I modelli reasoning (o3, o4-mini, gpt-5) contano i token di ragionamento
+    # dentro il budget di output: con 4096 il ragionamento si mangia la risposta
+    # e torna una stringa vuota. Per loro si usa questo tetto, più alto.
+    ai_reasoning_max_output_tokens: int = 16000
+    # low | medium | high. Vuoto = non inviarlo, lascia il default del modello.
+    ai_reasoning_effort: str = ""
+    # auto | standard | reasoning. Con auto la famiglia si deduce dal nome del
+    # deployment e si corregge da sola al primo errore dell'API.
+    ai_model_family: Literal["auto", "standard", "reasoning"] = "auto"
+
     # --- Upload CV ----------------------------------------------------------
     max_upload_bytes: int = 5 * 1024 * 1024
     store_cv_files: bool = False

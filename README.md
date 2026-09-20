@@ -77,16 +77,30 @@ Senza Docker, oppure per i dettagli su test e AI in locale, vedi
 
 ## Deploy su Azure
 
-```bash
-cd terraform
-cp terraform.tfvars.example terraform.tfvars && $EDITOR terraform.tfvars
-terraform init && terraform apply
-terraform output next_steps
+Un comando solo, che fa infrastruttura, API e frontend:
+
+```powershell
+az login
+.\scripts\deploy.ps1          # su macOS/Linux: ./scripts/deploy.sh
 ```
 
-Poi si pubblicano immagine dell'API e bundle del frontend; dalla seconda volta
-ci pensano le GitHub Actions. Procedura completa, login federato OIDC e secret
-da configurare: [docs/deploy.md](docs/deploy.md).
+Al primo avvio ti fa compilare `terraform/terraform.tfvars` e si ferma; al
+secondo va fino in fondo e stampa URL e codice di accesso. Dalla volta
+successiva puoi anche lasciar fare alle GitHub Actions.
+
+Procedura passo per passo, login federato OIDC e secret da configurare:
+[docs/deploy.md](docs/deploy.md).
+
+### Cambiare modello
+
+Il default è `gpt-4o-mini`. Per salire basta cambiare due righe in
+`terraform.tfvars` e rilanciare `terraform apply`: il deployment arriva
+all'app come variabile d'ambiente, quindi **non serve ricostruire niente**.
+
+Il client si adatta da solo alla famiglia del modello — i reasoning (o3,
+o4-mini, gpt-5) rifiutano `temperature` e vogliono `max_completion_tokens`, e
+se l'ipotesi iniziale è sbagliata il client legge l'errore dell'API e si
+corregge. Guida alla scelta: [docs/modelli.md](docs/modelli.md).
 
 ### Costo
 
@@ -136,6 +150,7 @@ Il ragionamento dietro le scelte, e il funzionamento del generatore di piani:
 | [deploy.md](docs/deploy.md) | Terraform, immagine, frontend, GitHub Actions, OIDC |
 | [costi.md](docs/costi.md) | Ogni voce di spesa e le leve per ridurla |
 | [sicurezza.md](docs/sicurezza.md) | Accesso, segreti, esecuzione del codice utente, dati personali |
+| [modelli.md](docs/modelli.md) | Scegliere il modello: famiglie, costi, dove fa differenza |
 | [api.md](docs/api.md) | Le 23 rotte con esempi `curl` |
 | [contenuti.md](docs/contenuti.md) | Formato della knowledge base e come estenderla |
 | [sviluppo-locale.md](docs/sviluppo-locale.md) | Setup, test, problemi ricorrenti |
@@ -143,7 +158,7 @@ Il ragionamento dietro le scelte, e il funzionamento del generatore di piani:
 ## Test
 
 ```bash
-cd backend && pytest        # 125 test
+cd backend && pytest        # 149 test
 ```
 
 Girano senza AI e senza rete: le fixture forzano il client non configurato, il

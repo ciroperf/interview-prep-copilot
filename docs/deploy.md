@@ -3,6 +3,44 @@
 Il deploy si fa in tre fasi: infrastruttura con Terraform, immagine dell'API,
 bundle del frontend. Dalla seconda volta in poi ci pensano le GitHub Actions.
 
+## Percorso rapido: uno script solo
+
+Se non vuoi eseguire i passi a mano, `scripts/deploy.ps1` (Windows) e
+`scripts/deploy.sh` (macOS/Linux) li fanno tutti in sequenza, verificando i
+prerequisiti e aspettando che l'API risponda prima di dichiarare fatto.
+
+```powershell
+# Windows, dalla radice del repository
+az login
+.\scripts\deploy.ps1
+```
+
+Al primo avvio lo script crea `terraform/terraform.tfvars` dal template, lo apre
+nel Notepad e si ferma: compila almeno `budget_alert_email`, salva e rilancia.
+
+Per ripubblicare solo il codice, senza toccare l'infrastruttura:
+
+```powershell
+.\scripts\deploy.ps1 -SkipInfra
+.\scripts\deploy.ps1 -SkipInfra -SkipWeb   # solo l'API
+```
+
+Lo script ha bisogno di:
+
+| Strumento | Quando serve | Installazione su Windows |
+|---|---|---|
+| Azure CLI | sempre | `winget install Microsoft.AzureCLI` |
+| Terraform | se non usi `-SkipInfra` | `winget install HashiCorp.Terraform` |
+| Node.js 22 | se non usi `-SkipWeb` | `winget install OpenJS.NodeJS.LTS` |
+| Docker Desktop | per costruire l'immagine in locale | `winget install Docker.DockerDesktop` |
+| `$env:GITHUB_TOKEN` | per il push su GHCR | token con scope `write:packages` |
+
+Senza Docker lo script salta il passo dell'immagine e te lo dice: in quel caso
+la costruisce il workflow `deploy-backend.yml` al primo push su `main`.
+
+Il resto di questa pagina spiega gli stessi passi uno per uno, utile quando
+qualcosa non va o vuoi capire cosa sta succedendo.
+
 ## Prerequisiti
 
 * Una sottoscrizione Azure e la Azure CLI (`az login`)
@@ -159,12 +197,22 @@ l'API, e uno che tocca `frontend/` ripubblica il sito.
 
 ## Aggiornare il modello AI
 
-```bash
-terraform apply -var ai_model_name=gpt-4.1-mini -var ai_model_version=2025-04-14
+Prima guarda cosa è davvero disponibile nella tua regione:
+
+```powershell
+cd terraform
+.\scripts\list-models.ps1 -Location swedencentral
 ```
 
-Verifica prima nel portale AI Foundry che il modello sia disponibile nella tua
-regione: il catalogo varia, e un modello inesistente fa fallire l'apply.
+Poi cambia `ai_model_name`, `ai_model_version` e, per i modelli reasoning,
+`ai_api_version` in `terraform.tfvars` e lancia `terraform apply`.
+
+**Non serve ricostruire l'immagine né ripubblicare il frontend**: il deployment
+arriva alla Container App come variabile d'ambiente.
+
+La guida completa, con il confronto fra famiglie, dove il modello fa davvero la
+differenza e cosa fare quando qualcosa non va, è in
+[modelli.md](modelli.md).
 
 ## Smontare tutto
 

@@ -134,6 +134,27 @@ quello di una dipendenza in più.
 L'URL dell'API è una variabile di **build** (`VITE_API_BASE_URL`), compilata nel
 bundle: cambiarla richiede una nuova build, non un riavvio.
 
+### Il client AI si adatta al modello
+
+`ai/client.py` non contiene una tabella di modelli da aggiornare a ogni
+release. Parte da un'ipotesi ricavata dal nome del deployment — i prefissi `o1`,
+`o3`, `o4`, `gpt-5` indicano la famiglia reasoning — e costruisce la chiamata di
+conseguenza: `max_completion_tokens` invece di `max_tokens`, niente
+`temperature`, ruolo `developer` al posto di `system`, più `reasoning_effort` se
+configurato.
+
+Se l'ipotesi è sbagliata, la correzione arriva dall'errore: `adapt_style` legge
+il messaggio dell'API, capisce quale parametro è stato rifiutato e propone uno
+stile corretto. Il ciclo in `_create` riprova fino a quattro volte, una per
+parametro negoziabile, e poi **ricorda** lo stile: le chiamate successive
+costano una richiesta sola.
+
+Gli errori non negoziabili — quota esaurita, autenticazione, rete — vengono
+propagati immediatamente, senza tentativi inutili.
+
+Il vantaggio pratico: un modello uscito dopo questo repository funziona senza
+modifiche al codice, e cambiarlo è solo un `terraform apply`.
+
 ## Funzionamento senza AI
 
 Ogni funzione ha un percorso deterministico che non richiede un modello:

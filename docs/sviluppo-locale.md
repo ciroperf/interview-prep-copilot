@@ -58,7 +58,7 @@ il ruolo Cognitive Services OpenAI User sulla risorsa.
 
 ```bash
 cd backend
-pytest                     # 125 test
+pytest                     # 149 test
 pytest -q --tb=short       # output compatto
 pytest tests/test_planner.py -v
 pytest -k idempotency      # per nome
@@ -76,6 +76,7 @@ Cosa coprono:
 | `test_quiz.py` | Selezione, mescolamento delle opzioni, correzione |
 | `test_curator.py` | Lacune, creazione, persistenza, export |
 | `test_cv.py` | Estrazione testo, gap keyword, revisione euristica |
+| `test_ai_client.py` | Adattamento ai parametri accettati dal deployment |
 | `test_storage.py` | Repository su file |
 | `test_sandbox.py` | Esecuzione del codice utente e casi di fallimento |
 | `test_api.py` | Percorsi end-to-end attraverso l'API |
@@ -83,8 +84,10 @@ Cosa coprono:
 
 I test girano **senza AI**: le fixture forzano il client non configurato, così
 si verifica il comportamento deterministico e la suite resta veloce e gratuita.
-Per il percorso AI si usa un finto client con risposta fissa (`_FakeAI` in
-`test_curator.py`).
+Per il percorso AI si usano finti client: `_FakeAI` in `test_curator.py` per la
+generazione di contenuti, e `FakeCompletions` in `test_ai_client.py`, che
+simula un deployment reasoning che rifiuta `temperature` e `max_tokens` con i
+messaggi d'errore veri di Azure OpenAI.
 
 ## Frontend
 

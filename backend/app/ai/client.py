@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import re
+from dataclasses import dataclass, replace
 from typing import Any
 
 from ..config import Settings, get_settings
@@ -21,6 +22,96 @@ from ..config import Settings, get_settings
 logger = logging.getLogger(__name__)
 
 _TOKEN_SCOPE = "https://cognitiveservices.azure.com/.default"
+
+# Prefissi dei deployment che appartengono alla famiglia "reasoning". Sono solo
+# un'ipotesi iniziale per evitare una chiamata sprecata: se è sbagliata, la
+# correzione avviene al primo errore dell'API (vedi adapt_style).
+REASONING_PREFIXES = ("o1", "o3", "o4", "o5", "gpt-5")
+
+
+@dataclass(frozen=True)
+class CallStyle:
+    """Come parlare con un deployment.
+
+    I modelli cambiano i parametri accettati da una generazione all'altra:
+    quelli reasoning vogliono `max_completion_tokens` invece di `max_tokens`,
+    rifiutano `temperature` e preferiscono il ruolo `developer` a `system`.
+    Invece di inseguire il catalogo con una tabella da aggiornare a ogni
+    release, partiamo da un'ipotesi e la correggiamo leggendo l'errore dell'API.
+    """
+
+    token_param: str = "max_tokens"
+    supports_temperature: bool = True
+    system_role: str = "system"  # system | developer | merged
+    send_reasoning_effort: bool = False
+
+    @property
+    def is_reasoning(self) -> bool:
+        return self.token_param == "max_completion_tokens"
+
+
+STANDARD_STYLE = CallStyle()
+REASONING_STYLE = CallStyle(
+    token_param="max_completion_tokens",
+    supports_temperature=False,
+    system_role="developer",
+    send_reasoning_effort=True,
+)
+
+
+def guess_style(deployment: str, family: str = "auto") -> CallStyle:
+    """Ipotesi iniziale sullo stile, dedotta dal nome del deployment."""
+    if family == "reasoning":
+        return REASONING_STYLE
+    if family == "standard":
+        return STANDARD_STYLE
+    name = deployment.lower().strip()
+    return REASONING_STYLE if name.startswith(REASONING_PREFIXES) else STANDARD_STYLE
+
+
+def adapt_style(style: CallStyle, error: str) -> CallStyle | None:
+    """Legge l'errore dell'API e propone uno stile corretto, o None se non c'entra.
+
+    È la parte che rende il client indipendente dal catalogo dei modelli: un
+    deployment che rifiuta un parametro lo dice nel messaggio d'errore, e noi ci
+    adeguiamo senza bisogno di una nuova release.
+    """
+    message = error.lower()
+
+    if style.token_param == "max_tokens" and "max_completion_tokens" in message:
+        return replace(style, token_param="max_completion_tokens")
+    if (
+        style.token_param == "max_completion_tokens"
+        and "max_completion_tokens" in message
+        and ("unsupported" in message or "unrecognized" in message)
+    ):
+        return replace(style, token_param="max_tokens")
+
+    if style.supports_temperature and "temperature" in message:
+        return replace(style, supports_temperature=False)
+
+    if style.send_reasoning_effort and "reasoning_effort" in message:
+        return replace(style, send_reasoning_effort=False)
+
+    if style.system_role == "system" and "developer" in message:
+        return replace(style, system_role="developer")
+    if style.system_role == "developer" and (
+        "developer" in message or "system" in message
+    ):
+        # Il modello non conosce nemmeno il ruolo developer: il testo di sistema
+        # finirà dentro il messaggio utente (vedi build_messages).
+        return replace(style, system_role="merged")
+
+    return None
+
+
+def build_messages(style: CallStyle, system: str, user: str) -> list[dict[str, str]]:
+    if style.system_role == "merged":
+        return [{"role": "user", "content": f"{system}\n\n---\n\n{user}"}]
+    return [
+        {"role": style.system_role, "content": system},
+        {"role": "user", "content": user},
+    ]
 
 
 class AIUnavailableError(RuntimeError):
@@ -32,6 +123,11 @@ class AIClient:
         self.settings = settings or get_settings()
         self._client: Any = None
         self._init_error: str = ""
+        # Lo stile si impara una volta sola e resta: le chiamate successive non
+        # ripagano il costo delle richieste rifiutate.
+        self._style: CallStyle = guess_style(
+            self.settings.azure_openai_deployment, self.settings.ai_model_family
+        )
 
     # --- ciclo di vita ------------------------------------------------------
 
@@ -74,6 +170,73 @@ class AIClient:
 
     # --- chiamate -----------------------------------------------------------
 
+    @property
+    def style(self) -> CallStyle:
+        """Stile attualmente in uso. Esposto per diagnostica e test."""
+        return self._style
+
+    def _kwargs(
+        self,
+        style: CallStyle,
+        system: str,
+        user: str,
+        temperature: float,
+        max_tokens: int | None,
+    ) -> dict[str, Any]:
+        budget = max_tokens or (
+            self.settings.ai_reasoning_max_output_tokens
+            if style.is_reasoning
+            else self.settings.ai_max_output_tokens
+        )
+        kwargs: dict[str, Any] = {
+            "model": self.settings.azure_openai_deployment,
+            "messages": build_messages(style, system, user),
+            style.token_param: budget,
+        }
+        if style.supports_temperature:
+            kwargs["temperature"] = temperature
+        if style.send_reasoning_effort and self.settings.ai_reasoning_effort:
+            kwargs["reasoning_effort"] = self.settings.ai_reasoning_effort
+        return kwargs
+
+    async def _create(
+        self,
+        system: str,
+        user: str,
+        temperature: float,
+        max_tokens: int | None,
+        extra: dict[str, Any],
+    ) -> Any:
+        """Esegue la chiamata, correggendo lo stile se l'API rifiuta un parametro.
+
+        Solleva l'errore originale se non è riconducibile a un parametro che
+        sappiamo negoziare: non ha senso ritentare su una quota esaurita.
+        """
+        client = self._ensure_client()
+        style = self._style
+        # Al massimo quattro correzioni: token, temperature, reasoning_effort, ruolo.
+        for _ in range(4):
+            try:
+                response = await client.chat.completions.create(
+                    **self._kwargs(style, system, user, temperature, max_tokens), **extra
+                )
+            except Exception as exc:
+                adapted = adapt_style(style, str(exc))
+                if adapted is None or adapted == style:
+                    raise
+                logger.info(
+                    "Il deployment ha rifiutato un parametro, adatto lo stile: %s -> %s",
+                    style,
+                    adapted,
+                )
+                style = adapted
+                continue
+            if style != self._style:
+                logger.info("Stile di chiamata appreso per questo deployment: %s", style)
+                self._style = style
+            return response
+        raise RuntimeError("Impossibile trovare uno stile di chiamata accettato dal deployment")
+
     async def complete_text(
         self,
         system: str,
@@ -82,16 +245,7 @@ class AIClient:
         temperature: float = 0.4,
         max_tokens: int | None = None,
     ) -> str:
-        client = self._ensure_client()
-        response = await client.chat.completions.create(
-            model=self.settings.azure_openai_deployment,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens or self.settings.ai_max_output_tokens,
-        )
+        response = await self._create(system, user, temperature, max_tokens, {})
         return (response.choices[0].message.content or "").strip()
 
     async def complete_json(
@@ -110,18 +264,6 @@ class AIClient:
         supporta ripiega su json_object e, in ultima istanza, sull'estrazione
         del primo oggetto JSON presente nel testo.
         """
-        client = self._ensure_client()
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ]
-        base: dict[str, Any] = {
-            "model": self.settings.azure_openai_deployment,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens or self.settings.ai_max_output_tokens,
-        }
-
         attempts: list[dict[str, Any]] = []
         if schema:
             attempts.append(
@@ -142,17 +284,27 @@ class AIClient:
         last_error: Exception | None = None
         for extra in attempts:
             try:
-                response = await client.chat.completions.create(**base, **extra)
+                response = await self._create(system, user, temperature, max_tokens, extra)
                 content = response.choices[0].message.content or ""
                 parsed = extract_json(content)
                 if parsed is not None:
                     return parsed
-                last_error = ValueError("La risposta del modello non conteneva JSON valido")
+                # Un modello reasoning che restituisce vuoto ha quasi sempre
+                # consumato tutto il budget in ragionamento: dirlo aiuta.
+                last_error = ValueError(
+                    "La risposta del modello non conteneva JSON valido"
+                    + (
+                        " (risposta vuota: prova ad alzare AI_REASONING_MAX_OUTPUT_TOKENS"
+                        " o ad abbassare AI_REASONING_EFFORT)"
+                        if not content.strip() and self._style.is_reasoning
+                        else ""
+                    )
+                )
             except Exception as exc:
                 last_error = exc
                 message = str(exc).lower()
-                # Un errore di formato significa "questo deployment non lo supporta":
-                # passiamo al tentativo successivo. Gli altri errori sono fatali.
+                # Un errore sul formato significa "questo deployment non lo
+                # supporta": passiamo al tentativo successivo. Gli altri sono fatali.
                 if "response_format" not in message and "json_schema" not in message:
                     raise
                 logger.info("response_format non supportato, ripiego sul tentativo successivo")
