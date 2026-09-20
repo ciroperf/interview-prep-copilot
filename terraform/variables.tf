@@ -115,12 +115,33 @@ variable "max_replicas" {
 
 variable "enable_code_execution" {
   description = <<-EOT
-    Esecuzione sul server del codice inviato dall'utente. Lasciare false:
-    l'isolamento di Container Apps non è una sandbox di sicurezza.
-    Vedi docs/security.md.
+    Esecuzione sul server del codice inviato dall'utente.
+
+    Il runner isola il processo e limita CPU e memoria, ma NON isola la rete né
+    il filesystem: chi può chiamare quell'endpoint esegue codice arbitrario
+    dentro il container. Su un'app raggiungibile da internet significa
+    consegnarla a chiunque riesca a entrare.
+
+    Per questo è ammessa solo insieme a enable_entra_auth: dietro il login
+    Microsoft, con entra_restrict_to_owner, l'unico che può eseguire codice sei
+    tu. Vedi docs/sicurezza.md.
   EOT
   type        = bool
   default     = false
+
+  validation {
+    # Il codice utente gira solo dietro un'autenticazione vera. Il codice di
+    # accesso condiviso non basta: è un singolo segreto, senza scadenza né
+    # revoca, e se gira diventa una shell remota aperta a chi lo possiede.
+    condition     = !var.enable_code_execution || var.enable_entra_auth
+    error_message = <<-EOT
+      enable_code_execution richiede enable_entra_auth = true.
+      Eseguire codice arbitrario dietro il solo codice di accesso condiviso
+      espone il container a chiunque venga in possesso di quel codice.
+      In locale non serve nulla di tutto questo: basta ENABLE_CODE_EXECUTION=true
+      nel file .env.
+    EOT
+  }
 }
 
 variable "store_cv_files" {

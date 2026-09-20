@@ -44,12 +44,21 @@
 # max_replicas = 1
 # monthly_budget_eur = 15
 
+# --- Autenticazione ---------------------------------------------------------
+# Login Microsoft (Entra ID) al posto del codice di accesso condiviso.
+# Richiede il permesso di creare app registration nel tenant.
+# enable_entra_auth       = true
+# entra_restrict_to_owner = true    # entra solo tu, non tutto il tenant
+
 # --- Funzionalita' opzionali ------------------------------------------------
 # Conserva i CV caricati su Blob Storage. Di default vengono letti e scartati.
 # store_cv_files = true
 
 # Esecuzione sul server del codice inviato dall'utente.
-# NON attivarla su un'app raggiungibile da internet: vedi docs/sicurezza.md.
+# Il runner limita CPU e memoria ma NON isola rete e filesystem: chi puo'
+# chiamare quell'endpoint esegue codice arbitrario dentro il container.
+# Terraform la accetta solo con enable_entra_auth = true, cioe' dietro il login
+# Microsoft. In locale basta ENABLE_CODE_EXECUTION=true nel .env, senza rischi.
 # enable_code_execution = false
 
 # Dominio personalizzato per il frontend, oltre a quello della Static Web App.

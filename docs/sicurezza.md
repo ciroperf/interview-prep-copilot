@@ -111,11 +111,18 @@ dimensione dei file (`resource.setrlimit`) e un timeout esterno.
 isola il filesystem: il codice eseguito può aprire connessioni in uscita e
 leggere i file leggibili dall'utente del container.
 
-Attivala solo se: l'app gira in locale, oppure gira in Azure ma è protetta da
-autenticazione vera e sei tu l'unico a usarla, e accetti che un errore nel
-codice che scrivi possa toccare l'ambiente del container. Per un'esecuzione
-sicura servirebbe gVisor, una VM dedicata, o l'esecuzione nel browser con
-Pyodide.
+Per questo il Terraform **rifiuta** `enable_code_execution = true` senza
+`enable_entra_auth = true`: il codice di accesso condiviso non basta, perché è
+un singolo segreto senza scadenza né revoca, e se gira diventa una shell remota
+per chiunque lo possieda. Dietro il login Microsoft con
+`entra_restrict_to_owner`, invece, l'unico che può eseguire codice sei tu, e il
+rischio residuo è solo verso te stesso.
+
+In locale la questione non si pone: basta `ENABLE_CODE_EXECUTION=true` nel
+`.env`, perché l'app non è raggiungibile da fuori.
+
+Per un'esecuzione sicura anche in scenari aperti servirebbe gVisor, una VM
+dedicata, o l'esecuzione nel browser con Pyodide.
 
 Con l'esecuzione disattivata il flusso resta utile: la soluzione viene valutata
 dal modello rispetto alla consegna e ai casi limite, e senza AI si ricade sugli
