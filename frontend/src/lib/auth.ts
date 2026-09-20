@@ -32,7 +32,12 @@ async function getInstance(): Promise<PublicClientApplication> {
         auth: {
           clientId: CLIENT_ID,
           authority: `https://login.microsoftonline.com/${TENANT_ID}`,
-          redirectUri: window.location.origin,
+          // La slash finale non è un dettaglio: Entra ID pretende che un
+          // redirect URI senza path finisca con "/" al momento della
+          // registrazione, e poi confronta le due stringhe esattamente. Il
+          // default di MSAL è window.location.origin, che la slash non ce
+          // l'ha, e il login fallirebbe con AADSTS50011.
+          redirectUri: `${window.location.origin}/`,
         },
         cache: {
           // sessionStorage e non localStorage: il token non sopravvive alla

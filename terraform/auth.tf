@@ -14,11 +14,21 @@ locals {
 
   # Gli URI di reindirizzamento ammessi dopo il login. Localhost serve per
   # sviluppare contro l'API vera senza dover ripubblicare il frontend.
-  redirect_uris = concat(
-    [local.frontend_url, "${local.frontend_url}/"],
+  raw_redirect_uris = concat(
+    [local.frontend_url],
     var.entra_extra_redirect_uris,
-    var.entra_allow_localhost ? ["http://localhost:5173", "http://localhost:5173/"] : [],
+    var.entra_allow_localhost ? ["http://localhost:5173"] : [],
   )
+
+  # Entra ID rifiuta un redirect URI privo di path che non finisca con "/":
+  # "https://esempio.it" non e' valido, "https://esempio.it/" si'. Normalizziamo
+  # qui invece di pretenderlo da chi compila le variabili. MSAL e' configurato
+  # per usare la stessa forma (vedi frontend/src/lib/auth.ts): il confronto che
+  # fa Entra e' esatto, quindi le due devono coincidere.
+  redirect_uris = [
+    for uri in local.raw_redirect_uris :
+    can(regex("^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]+$", uri)) ? "${uri}/" : uri
+  ]
 }
 
 data "azuread_client_config" "current" {

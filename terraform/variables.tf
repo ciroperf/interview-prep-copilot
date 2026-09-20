@@ -187,7 +187,11 @@ variable "entra_allow_localhost" {
 }
 
 variable "entra_extra_redirect_uris" {
-  description = "Altri URI di reindirizzamento, es. un dominio personalizzato."
+  description = <<-EOT
+    Altri URI di reindirizzamento, es. un dominio personalizzato.
+    La slash finale la aggiunge il Terraform se manca: "https://x.it" diventa
+    "https://x.it/", che è la forma che Entra ID pretende.
+  EOT
   type        = list(string)
   default     = []
 }
