@@ -41,11 +41,31 @@ function Ok($text)   { Write-Host "  OK  $text" -ForegroundColor Green }
 function Warn($text) { Write-Host "  !   $text" -ForegroundColor Yellow }
 function Fail($text) { Write-Host "  X   $text" -ForegroundColor Red; exit 1 }
 
+function Update-SessionPath {
+    # winget scrive il PATH nel registro, ma la sessione gia' aperta continua a
+    # usare quello che aveva all'avvio. Ricaricarlo evita di dover riaprire il
+    # terminale, che e' la causa piu' comune di "comando non trovato" subito
+    # dopo un'installazione.
+    $machine = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $user = [System.Environment]::GetEnvironmentVariable('Path', 'User')
+    $env:Path = @($machine, $user | Where-Object { $_ }) -join ';'
+}
+
 function Require($cmd, $hint) {
-    if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
-        Fail "$cmd non trovato. $hint"
+    if (Get-Command $cmd -ErrorAction SilentlyContinue) {
+        Ok "$cmd presente"
+        return
     }
-    Ok "$cmd presente"
+    Update-SessionPath
+    if (Get-Command $cmd -ErrorAction SilentlyContinue) {
+        Ok "$cmd presente (PATH ricaricato)"
+        return
+    }
+    Write-Host "  X   $cmd non trovato." -ForegroundColor Red
+    Write-Host "      $hint" -ForegroundColor Red
+    Write-Host "      Se l'hai appena installato, chiudi e riapri PowerShell." -ForegroundColor Yellow
+    Write-Host "      Per controllare se c'e': winget list --id <id-pacchetto>" -ForegroundColor Yellow
+    exit 1
 }
 
 # ---------------------------------------------------------------------------

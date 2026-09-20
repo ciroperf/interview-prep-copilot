@@ -32,6 +32,15 @@ Lo script ha bisogno di:
 | Azure CLI | sempre | `winget install Microsoft.AzureCLI` |
 | Terraform | se non usi `-SkipInfra` | `winget install HashiCorp.Terraform` |
 | Node.js 22 | se non usi `-SkipWeb` | `winget install OpenJS.NodeJS.LTS` |
+
+> **"comando non trovato" subito dopo l'installazione?** winget scrive il PATH
+> nel registro, ma la sessione di PowerShell già aperta continua a usare quello
+> che aveva all'avvio. Lo script prova a ricaricarlo da solo; se non basta,
+> chiudi e riapri PowerShell. Per ricaricarlo a mano:
+> ```powershell
+> $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' +
+>             [Environment]::GetEnvironmentVariable('Path','User')
+> ```
 | Docker Desktop | **solo** se vuoi costruire l'immagine in locale | `winget install Docker.DockerDesktop` |
 
 ## Senza Docker in locale

@@ -39,7 +39,13 @@ function Fail($t) { Write-Host "  X   $t" -ForegroundColor Red; exit 1 }
 
 Step "Prerequisiti"
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-    Fail "Azure CLI non trovata. winget install Microsoft.AzureCLI"
+    # winget scrive il PATH nel registro ma la sessione aperta ha quello vecchio.
+    $machine = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $user = [System.Environment]::GetEnvironmentVariable('Path', 'User')
+    $env:Path = @($machine, $user | Where-Object { $_ }) -join ';'
+}
+if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
+    Fail "Azure CLI non trovata. winget install Microsoft.AzureCLI, poi riapri PowerShell."
 }
 if (-not (az account show --output json 2>$null)) { Fail "Esegui prima: az login" }
 Ok "Azure CLI pronta"
