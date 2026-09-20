@@ -61,7 +61,9 @@
 # Microsoft. In locale basta ENABLE_CODE_EXECUTION=true nel .env, senza rischi.
 # enable_code_execution = false
 
-# Dominio personalizzato per il frontend, oltre a quello della Static Web App.
+# SERVE SOLO SE HAI UN DOMINIO TUO, a pagamento. Il dominio gratuito
+# *.azurestaticapps.net e' gia' incluso automaticamente: non va elencato qui.
+# Lascia questa riga commentata se non hai un dominio personalizzato.
 # allowed_origins = ["https://prep.miodominio.it"]
 
 # --- Immagine dell'API -----------------------------------------------------

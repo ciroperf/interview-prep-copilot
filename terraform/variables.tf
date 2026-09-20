@@ -205,8 +205,11 @@ variable "storage_shared_access_key_enabled" {
 
 variable "allowed_origins" {
   description = <<-EOT
-    Origin ammessi dalla CORS, oltre a quello della Static Web App che viene
-    aggiunto automaticamente. Aggiungi qui un eventuale dominio personalizzato.
+    Origin aggiuntivi ammessi dalla CORS.
+
+    L'indirizzo gratuito della Static Web App (*.azurestaticapps.net) è già
+    incluso automaticamente: non va elencato qui. Questa variabile serve solo
+    se colleghi un dominio tuo, che è a pagamento. Senza, lasciala vuota.
   EOT
   type        = list(string)
   default     = []
