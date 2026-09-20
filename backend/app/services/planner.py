@@ -435,7 +435,7 @@ class StudyPlanBuilder:
         rest = [i for i in items if i.kind != "review"]
         # Priorità alta nei primi giorni: se l'utente si ferma prima, ha fatto il grosso.
         rest.sort(key=lambda i: (-i.priority, i.track != "knowledge", i.title))
-        rest = StudyPlanBuilder._interleave_tracks(rest)
+        rest = StudyPlanBuilder._break_runs(StudyPlanBuilder._interleave_tracks(rest))
 
         day = 1
         used = 0
@@ -464,6 +464,34 @@ class StudyPlanBuilder:
                     out.append(knowledge.pop(0))
                 if technical:
                     out.append(technical.pop(0))
+        return out
+
+    MAX_RUN = 4
+
+    @staticmethod
+    def _break_runs(items: list[PlanItem], max_run: int = MAX_RUN) -> list[PlanItem]:
+        """Spezza le sequenze troppo lunghe dello stesso tipo.
+
+        L'alternanza dentro la fascia di priorità non basta: se in una fascia
+        finiscono solo argomenti teorici, la sequenza lunga ricompare comunque.
+        Qui, quando una sequenza supera il limite, si tira avanti l'attività più
+        vicina dell'altro tipo, spostandola di poco rispetto alla priorità. Se
+        l'altro tipo non c'è proprio, la sequenza resta: non si inventa varietà
+        che il piano non ha.
+        """
+        out: list[PlanItem] = []
+        rimasti = list(items)
+        corsa = 0
+        while rimasti:
+            scelto = 0
+            if out and corsa >= max_run and rimasti[0].track == out[-1].track:
+                for indice, candidato in enumerate(rimasti):
+                    if candidato.track != out[-1].track:
+                        scelto = indice
+                        break
+            item = rimasti.pop(scelto)
+            corsa = corsa + 1 if out and out[-1].track == item.track else 1
+            out.append(item)
         return out
 
     # --- testi di fallback --------------------------------------------------

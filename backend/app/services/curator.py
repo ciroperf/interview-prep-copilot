@@ -166,6 +166,7 @@ class KnowledgeCurator:
             level=level if level in {"easy", "medium", "hard"} else "medium",  # type: ignore
             tags=[str(t)[:40] for t in (data.get("tags") or [])][:8] or [request.term.lower()],
             summary=str(data.get("summary", ""))[:2000],
+            deep_dive=str(data.get("deep_dive", ""))[:8000],
             key_points=strings("key_points", 10),
             interview_answer=str(data.get("interview_answer", ""))[:3000],
             pitfalls=strings("pitfalls", 6),

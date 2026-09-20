@@ -366,3 +366,46 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.55; }
   .brand span:not(.brand-mark) { display: none; }
   h1 { font-size: 1.4rem; }
 }
+
+/* ---------- Scheda argomento: materiale di studio ---------- */
+
+.example { margin: 0 0 18px; }
+.example:last-child { margin-bottom: 0; }
+.example figcaption {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600; font-size: 0.9rem; margin-bottom: 8px;
+}
+.example pre { margin-bottom: 6px; }
+/* Il codice si legge meglio senza rimpicciolimento: qui è contenuto, non contorno. */
+.example pre code { font-size: 0.9rem; line-height: 1.55; }
+
+.table-scroll { overflow-x: auto; }
+table.grid { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+table.grid th, table.grid td {
+  text-align: left; vertical-align: top;
+  padding: 9px 12px; border-bottom: 1px solid var(--border);
+}
+table.grid thead th {
+  font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-muted); border-bottom-width: 2px;
+}
+table.grid tbody th { font-weight: 600; white-space: nowrap; }
+table.grid tbody tr:last-child th, table.grid tbody tr:last-child td { border-bottom: none; }
+
+/* Chiuse di default: prima si prova a rispondere, poi si apre. */
+.followups details { border-bottom: 1px solid var(--border); }
+.followups details:last-child { border-bottom: none; }
+.followups summary {
+  cursor: pointer; padding: 11px 0; font-weight: 500; list-style: none;
+  display: flex; align-items: baseline; gap: 10px;
+}
+.followups summary::-webkit-details-marker { display: none; }
+.followups summary::before { content: '?'; color: var(--accent); font-weight: 700; }
+.followups summary:hover { color: var(--accent); }
+.followups details[open] summary { color: var(--accent); }
+.followups .prose { padding: 0 0 12px 22px; color: var(--text-muted); }
+
+@media (max-width: 680px) {
+  table.grid { font-size: 0.86rem; }
+  table.grid th, table.grid td { padding: 8px; }
+}

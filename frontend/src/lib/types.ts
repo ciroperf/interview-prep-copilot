@@ -49,13 +49,41 @@ export interface TopicSummary {
   custom?: boolean
 }
 
+export interface Example {
+  title: string
+  code: string
+  language: string
+  note: string
+}
+
+export interface TradeOff {
+  option: string
+  pros: string
+  cons: string
+  when: string
+}
+
+export interface FollowUp {
+  question: string
+  answer: string
+}
+
 export interface Topic extends Omit<TopicSummary, 'question_count' | 'problem_count'> {
   custom: boolean
   source_term: string
+  /** La spiegazione lunga: è la parte da studiare, non da ripassare. */
+  deep_dive: string
   key_points: string[]
+  examples: Example[]
+  trade_offs: TradeOff[]
+  numbers: string[]
   interview_answer: string
+  senior_signals: string[]
   pitfalls: string[]
+  follow_ups: FollowUp[]
+  /** Forma storica, senza risposta: la usano gli argomenti generati dall'AI. */
   follow_up_questions: string[]
+  related: string[]
   resources: Resource[]
 }
 

@@ -34,6 +34,39 @@ class Resource(BaseModel):
     kind: Literal["article", "video", "book", "doc", "practice"] = "article"
 
 
+class Example(BaseModel):
+    """Un esempio concreto: codice, query, configurazione o traccia di richiesta.
+
+    Serve a rendere verificabile la spiegazione: si legge, si prova, si capisce
+    se si era capito.
+    """
+
+    title: str
+    code: str
+    language: str = "text"
+    note: str = ""
+
+
+class TradeOff(BaseModel):
+    """Un'alternativa progettuale con il suo prezzo.
+
+    Ai colloqui la domanda vera non è mai "cos'è X" ma "perché X e non Y": senza
+    il prezzo di ogni opzione non c'è una scelta, c'è una preferenza.
+    """
+
+    option: str
+    pros: str
+    cons: str
+    when: str = ""
+
+
+class FollowUp(BaseModel):
+    """Una domanda di approfondimento con la traccia della risposta."""
+
+    question: str
+    answer: str = ""
+
+
 class Topic(BaseModel):
     """Un argomento della base di conoscenza, con la risposta modello da colloquio."""
 
@@ -44,10 +77,25 @@ class Topic(BaseModel):
     level: Difficulty = "medium"
     tags: list[str] = Field(default_factory=list)
     summary: str = ""
+    # La spiegazione lunga: è la parte da studiare, non da ripassare. Vuota
+    # sugli argomenti generati al volo da un annuncio, dove conta arrivare
+    # subito al sodo.
+    deep_dive: str = ""
     key_points: list[str] = Field(default_factory=list)
+    examples: list[Example] = Field(default_factory=list)
+    trade_offs: list[TradeOff] = Field(default_factory=list)
+    # Ordini di grandezza da avere in testa: al colloquio un numero detto con
+    # sicurezza vale più di tre frasi di contorno.
+    numbers: list[str] = Field(default_factory=list)
     interview_answer: str = ""
+    # Cosa distingue la risposta di chi ha visto il problema in produzione.
+    senior_signals: list[str] = Field(default_factory=list)
     pitfalls: list[str] = Field(default_factory=list)
+    follow_ups: list[FollowUp] = Field(default_factory=list)
+    # Forma storica, senza risposta: la usano ancora gli argomenti generati
+    # dall'AI a partire da un annuncio.
     follow_up_questions: list[str] = Field(default_factory=list)
+    related: list[str] = Field(default_factory=list)
     resources: list[Resource] = Field(default_factory=list)
     estimated_minutes: int = 25
     # True per gli argomenti aggiunti a runtime partendo da un annuncio:

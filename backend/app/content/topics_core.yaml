@@ -1,5 +1,10 @@
 # Categoria "Core Concepts" - i fondamentali su API e HTTP che aprono quasi ogni
 # colloquio backend. Numerazione allineata alla checklist dei 40 concetti.
+#
+# Ogni scheda ha tre livelli di lettura: summary per sapere di cosa si parla,
+# deep_dive per studiare davvero, interview_answer per l'orale. Gli esempi sono
+# pensati per essere provati, non guardati.
+
 - id: core-01-what-is-an-api
   title: Che cos'è una API
   category: core-concepts
@@ -12,11 +17,101 @@
     input, quali output e quali garanzie. Il contratto conta più dell'implementazione,
     perché è ciò su cui i client fanno affidamento e ciò che non puoi cambiare senza
     rompere qualcuno.
+  deep_dive: |-
+    Il modo più utile di pensare a un'API è: una promessa fatta a qualcuno che non
+    puoi chiamare al telefono. Una volta che un client la usa, ogni dettaglio
+    osservabile diventa un vincolo, anche quelli che non avevi previsto di
+    promettere: l'ordine dei risultati, il fatto che un campo non sia mai nullo, il
+    codice di errore restituito su input invalido. Questo fenomeno ha un nome,
+    legge di Hyrum: con abbastanza utenti, ogni comportamento osservabile del
+    sistema diventa una dipendenza di qualcuno.
+
+    Da qui discende la disciplina pratica: decidere esplicitamente cosa fa parte
+    del contratto e cosa no, e scriverlo. Un contratto completo comprende gli
+    endpoint, lo schema di richiesta e risposta, i codici di errore, le garanzie
+    non funzionali (idempotenza, consistenza, latenza attesa, limiti di rate) e la
+    politica di evoluzione. Uno schema OpenAPI serve proprio a questo: rendere
+    meccanicamente verificabile ciò che altrimenti resta nella testa di chi ha
+    scritto l'endpoint.
+
+    L'evoluzione si governa distinguendo le modifiche retrocompatibili da quelle
+    che rompono. Aggiungere un campo opzionale in risposta, aggiungere un endpoint,
+    accettare un nuovo valore opzionale in input: sono additive, si rilasciano
+    normalmente. Rimuovere un campo, rinominarlo, cambiarne il tipo, rendere
+    obbligatorio un input prima facoltativo, restringere un intervallo accettato,
+    cambiare il significato di un valore esistente: sono breaking, e il costo non lo
+    paghi tu, lo pagano i client. Il test decisivo è: un client scritto ieri, valido
+    ieri, continua a funzionare domani?
+
+    Quando una modifica breaking è inevitabile, la si pianifica: nuova versione
+    affiancata alla vecchia, annuncio, finestra di deprecazione misurata in mesi,
+    metriche per sapere chi sta ancora usando la versione vecchia, e solo alla fine
+    la rimozione. Senza le metriche non hai idea di chi romperai, e la data di
+    spegnimento diventa una scommessa.
+
+    C'è infine una ragione architetturale per cui l'API non deve rispecchiare il
+    database: se lo fa, ogni refactor interno diventa un evento pubblico. Il
+    disaccoppiamento fra rappresentazione esterna e modello interno — un DTO al
+    confine — costa poche righe e compra la libertà di cambiare idea.
   key_points:
     - "Contratto = endpoint + schema di richiesta/risposta + codici di errore + garanzie (idempotenza, consistenza, latenza)"
     - "L'interfaccia è pubblica e stabile, l'implementazione è privata e sostituibile"
+    - "Legge di Hyrum: con abbastanza utenti, ogni comportamento osservabile diventa una dipendenza di qualcuno"
     - "Versionare l'API serve a poter evolvere senza rompere i client esistenti (URL /v2, header Accept, campi opzionali)"
     - "Una modifica è breaking se un client valido prima smette di funzionare dopo: campo rimosso, tipo cambiato, vincolo aggiunto"
+    - "Additive = si rilascia; breaking = si pianifica, con deprecation, finestra di migrazione e metriche su chi usa ancora la vecchia versione"
+    - "OpenAPI/JSON Schema rendono il contratto verificabile da una macchina invece che da una riunione"
+  examples:
+    - title: Stessa risorsa, contratto esplicito
+      language: http
+      code: |-
+        GET /v1/orders/8f2a HTTP/1.1
+        Accept: application/json
+
+        HTTP/1.1 200 OK
+        Content-Type: application/json
+        ETag: "rev-17"
+        Cache-Control: private, max-age=30
+
+        {
+          "id": "8f2a",
+          "status": "shipped",          // enum documentato: pending|shipped|cancelled
+          "total_cents": 4990,          // interi, mai float sui soldi
+          "currency": "EUR",
+          "created_at": "2026-02-11T09:14:03Z",
+          "items": [ { "sku": "ABC-1", "qty": 2 } ]
+        }
+      note: >-
+        Tre scelte da difendere al colloquio: importi in centesimi interi, date in
+        ISO 8601 UTC, enum documentati invece di stringhe libere.
+    - title: Additiva oppure breaking?
+      language: text
+      code: |-
+        + aggiungo "discount_cents" opzionale in risposta      -> additiva
+        + accetto un nuovo valore di "status" in input          -> additiva
+        - rinomino "total_cents" in "amount"                    -> BREAKING
+        - "items" ora può essere null invece di []              -> BREAKING
+        - "qty" diventa obbligatorio in creazione               -> BREAKING
+        - ordino i risultati per data invece che per id         -> BREAKING di fatto
+      note: >-
+        L'ultima riga è quella che spiazza: nessuno schema cambia, eppure un client
+        che si fidava dell'ordine si rompe. È la legge di Hyrum in pratica.
+  trade_offs:
+    - option: Versione nell'URL (/v1/, /v2/)
+      pros: Visibile, semplice da instradare, facile da cacheare e da loggare
+      cons: Duplicazione delle rotte, i client devono cambiare URL per migrare
+      when: API pubbliche, dove la chiarezza vale più dell'eleganza
+    - option: Versione nell'header (Accept, X-API-Version)
+      pros: URL stabili, negoziazione fine, più elegante in teoria
+      cons: Invisibile nei log e nei browser, cache più delicata, test più scomodi
+      when: API interne con client sotto il tuo controllo
+    - option: Nessuna versione, solo modifiche additive
+      pros: Nessuna duplicazione, un solo codice da mantenere
+      cons: Richiede disciplina ferrea, i campi morti si accumulano per sempre
+      when: Il default sensato finché non serve davvero rompere qualcosa
+  numbers:
+    - "Finestra di deprecazione tipica per una API pubblica: 6-12 mesi, annunciata"
+    - "Un'API interna con meno di 5 consumatori nota spesso non ha bisogno di versioning: basta coordinarsi"
   interview_answer: >-
     Un'API è l'insieme delle operazioni che un sistema espone ad altri sistemi, con un
     contratto esplicito su formato e comportamento. La parte interessante non è la
@@ -24,18 +119,51 @@
     Per questo progetto le API pensando prima a cosa NON prometto, così da lasciarmi
     spazio di evoluzione. Le aggiunte retrocompatibili (campi opzionali nuovi) le tratto
     come normali release, le rimozioni come eventi da pianificare con deprecation e
-    finestra di migrazione.
+    finestra di migrazione. E tengo il modello del database fuori dall'API, con un DTO
+    al confine, perché altrimenti ogni refactor interno diventa un problema dei client.
+  senior_signals:
+    - "Parla di evoluzione e deprecazione, non solo di come si scrive un endpoint"
+    - "Cita la legge di Hyrum o comunque l'idea che l'ordinamento e i default diventano contratto"
+    - "Chiede chi sono i consumatori prima di proporre uno schema di versioning"
+    - "Distingue il contratto dalla sua implementazione anche nel codice, non solo a parole"
   pitfalls:
     - "Confondere API con REST: REST è uno stile architetturale, non un sinonimo di API"
     - "Esporre il modello del database come fosse l'API: ogni refactor interno diventa breaking"
     - "Dimenticarsi che anche i codici di errore fanno parte del contratto"
-  follow_up_questions:
-    - "Come gestiresti la deprecazione di un campo usato da un client che non controlli?"
-    - "Che differenza c'è tra versionare in URL e versionare via header?"
+    - "Versionare tutto dal primo giorno per un'API con due consumatori interni: cerimonia senza beneficio"
+  follow_ups:
+    - question: Come gestiresti la deprecazione di un campo usato da un client che non controlli?
+      answer: >-
+        Prima misuro: aggiungo una metrica sull'uso di quel campo per capire chi e quanto
+        lo usa. Poi annuncio, con una data, e intanto marco il campo come deprecato nello
+        schema e nell'header Deprecation/Sunset. Nel frattempo affianco l'alternativa,
+        così la migrazione è possibile senza fretta. Rimuovo solo quando la metrica è a
+        zero o quando i pochi rimasti sono contattabili uno a uno.
+    - question: Che differenza c'è tra versionare in URL e versionare via header?
+      answer: >-
+        L'URL rende la versione visibile ovunque - log, cache, browser, curl - al prezzo
+        di duplicare le rotte. L'header tiene gli URL stabili ed è più elegante, ma la
+        versione sparisce dai log e la cache va configurata con Vary, quindi è più facile
+        sbagliare. Su API pubbliche preferisco l'URL proprio perché è difficile da
+        fraintendere.
+    - question: Che cos'è un contratto "non funzionale" e perché conta?
+      answer: >-
+        Sono le garanzie che non appaiono nello schema: idempotenza, latenza attesa,
+        limiti di rate, consistenza (leggo subito ciò che ho appena scritto?). Contano
+        perché i client ci costruiscono sopra logica di retry e timeout: se cambio
+        silenziosamente una di queste, rompo integrazioni pur mantenendo lo schema
+        identico.
+  related: [core-02-rest-vs-graphql, core-03-http-methods, pat-04-dto-entity-model]
   resources:
     - title: "MDN - Introduzione alle API web"
       url: "https://developer.mozilla.org/en-US/docs/Learn/JavaScript/Client-side_web_APIs/Introduction"
       kind: doc
+    - title: "OpenAPI Specification"
+      url: "https://spec.openapis.org/oas/latest.html"
+      kind: doc
+    - title: "Hyrum's Law"
+      url: "https://www.hyrumslaw.com/"
+      kind: article
 
 - id: core-02-rest-vs-graphql
   title: REST vs GraphQL
@@ -50,12 +178,110 @@
     migliore" ma chi paga il costo della flessibilità: in REST lo paga il backend che
     aggiunge endpoint, in GraphQL lo paga il backend che deve difendersi da query
     arbitrarie.
+  deep_dive: |-
+    REST parte dalle risorse: ogni cosa ha un URL, i metodi HTTP dicono cosa farne, e
+    la risposta ha una forma decisa dal server. Questo rende gratuiti un mucchio di
+    meccanismi che l'infrastruttura già conosce: una GET si cachea in CDN, un ETag
+    abilita il 304, il rate limiting si applica per endpoint, e le metriche per rotta
+    ti dicono subito cosa è lento. Il prezzo è la rigidità della risposta: se una
+    schermata ha bisogno di tre risorse fai tre chiamate (under-fetching), e se ha
+    bisogno di due campi su trenta li ricevi tutti e trenta (over-fetching).
+
+    GraphQL ribalta il controllo: un solo endpoint, e il client descrive l'albero di
+    dati che vuole. Sparisce l'over-fetching, spariscono le chiamate multiple, e i
+    team frontend smettono di aspettare che il backend aggiunga l'endpoint "per la
+    schermata X". Il prezzo è che ogni protezione che in REST era implicita va
+    ricostruita a mano.
+
+    Il problema tecnico più citato è l'N+1 sui resolver: la query chiede 50 post e
+    l'autore di ciascuno, e il resolver dell'autore viene invocato 50 volte, una per
+    post. La soluzione standard è il batching con DataLoader, che accumula le
+    richieste dentro lo stesso tick e le trasforma in una sola query "WHERE id IN
+    (...)". Senza, uno schema innocuo mette in ginocchio il database.
+
+    Il secondo problema è il costo variabile: due query sullo stesso endpoint possono
+    costare un millisecondo o dieci secondi, quindi "100 richieste al minuto" non
+    significa niente. Servono limiti di profondità, un budget di complessità calcolato
+    prima dell'esecuzione, e in produzione le persisted queries: il client manda un
+    hash di una query già approvata invece del testo libero, e l'API torna a essere
+    un insieme finito di operazioni note.
+
+    Il terzo è il caching. In REST GET+URL sono una chiave naturale per CDN e proxy;
+    in GraphQL tutto è POST su /graphql, quindi il caching HTTP non funziona e si
+    sposta a livello applicativo (per entità, con un client tipo Apollo, oppure
+    server-side per resolver). Non è impossibile, è lavoro in più.
+
+    Regola pratica: molti client eterogenei con esigenze di dati diverse - mobile,
+    web, partner - spingono verso GraphQL; un'API pubblica stabile, con consumatori
+    che si aspettano curl e cache HTTP, spinge verso REST. E in mezzo c'è
+    l'alternativa spesso giusta: REST con parametri di espansione (?include=author)
+    che coprono l'80% dei casi con il 10% della complessità.
   key_points:
     - "REST: over-fetching (ricevi campi inutili) e under-fetching (servono N chiamate) sono i problemi tipici"
     - "GraphQL risolve entrambi ma introduce query costose, il problema N+1 sui resolver e caching HTTP più difficile"
     - "Il caching REST è gratis: GET + URL + ETag funzionano con CDN e proxy. In GraphQL tutto è POST su un unico URL"
     - "GraphQL brilla con molti client eterogenei (mobile, web, partner); REST brilla su API pubbliche e stabili"
     - "Difese GraphQL obbligatorie: depth limit, complexity budget, persisted queries, DataLoader per il batching"
+    - "In GraphQL gli errori arrivano con HTTP 200 e un array errors: monitoraggio e retry vanno riscritti di conseguenza"
+    - "Terza via spesso migliore: REST con ?include= o sparse fieldsets, che copre l'80% dei casi senza cambiare paradigma"
+  examples:
+    - title: La stessa schermata, due paradigmi
+      language: text
+      code: |-
+        REST (3 round trip, campi fissi)
+          GET /v1/posts/42
+          GET /v1/posts/42/comments?limit=5
+          GET /v1/users/7
+
+        GraphQL (1 round trip, campi scelti dal client)
+          POST /graphql
+          query {
+            post(id: 42) {
+              title
+              author { name }
+              comments(first: 5) { text }
+            }
+          }
+      note: >-
+        Il guadagno è reale su mobile, dove ogni round trip costa latenza. Su una rete
+        veloce con HTTP/2 la differenza si assottiglia parecchio.
+    - title: N+1 e come lo si spegne
+      language: python
+      code: |-
+        # Senza batching: 1 query per i post + N query per gli autori.
+        async def resolve_author(post, _info):
+            return await db.fetch_one("SELECT * FROM users WHERE id = :id", id=post.author_id)
+
+        # Con DataLoader: le chiamate dello stesso tick diventano una query sola.
+        async def load_users(ids: list[int]) -> list[User]:
+            rows = await db.fetch_all("SELECT * FROM users WHERE id = ANY(:ids)", ids=ids)
+            by_id = {r["id"]: r for r in rows}
+            return [by_id.get(i) for i in ids]   # stesso ordine degli id richiesti
+
+        user_loader = DataLoader(load_users)
+
+        async def resolve_author(post, _info):
+            return await user_loader.load(post.author_id)
+      note: >-
+        Il contratto di un DataLoader è severo: deve restituire un elemento per ogni id
+        richiesto, nello stesso ordine. Sbagliarlo produce dati incrociati fra utenti.
+  trade_offs:
+    - option: REST
+      pros: Caching HTTP gratis, osservabilità per rotta, rate limiting semplice, curl-abile
+      cons: Over/under-fetching, proliferazione di endpoint "per schermata"
+      when: API pubbliche, consumatori esterni, risorse ben definite
+    - option: GraphQL
+      pros: Il client sceglie i dati, un round trip, evoluzione per campi invece che per versioni
+      cons: N+1, costo per query variabile, caching e rate limiting da costruire
+      when: Molti client eterogenei, frontend che itera velocemente
+    - option: gRPC
+      pros: Contratto tipizzato, binario, streaming bidirezionale, latenza bassa
+      cons: Non è amichevole per browser e curl, serve tooling
+      when: Comunicazione interna fra servizi
+  numbers:
+    - "Depth limit tipico in produzione: 7-10 livelli"
+    - "Budget di complessità: si assegna un costo a ogni campo e si rifiuta sopra una soglia (es. 1000 punti per query)"
+    - "Un N+1 su una lista di 50 elementi = 51 query: basta questo per saturare un pool di connessioni da 20"
   interview_answer: >-
     Li scelgo in base a chi consuma l'API. Con pochi client e risorse ben definite resto
     su REST, perché ottengo caching HTTP, osservabilità per endpoint e rate limiting
@@ -63,18 +289,52 @@
     di dati diverse e sto accumulando endpoint "ad hoc per la schermata X". In quel caso
     però metto subito in conto il lavoro extra: DataLoader per evitare N+1, un budget di
     complessità per query e persisted queries in produzione, altrimenti ho spostato il
-    problema invece di risolverlo.
+    problema invece di risolverlo. E prima di migrare provo sempre la via di mezzo: REST
+    con parametri di espansione, che spesso risolve il problema vero a costo quasi nullo.
+  senior_signals:
+    - "Non risponde 'dipende' e basta: nomina i consumatori e il costo che ciascuno paga"
+    - "Sa che in GraphQL il rate limiting per numero di richieste è privo di senso"
+    - "Menziona le persisted queries come modo per riportare l'API a un insieme finito di operazioni"
+    - "Propone la terza via (?include=) invece di trattarla come una scelta binaria"
   pitfalls:
     - "Adottare GraphQL per moda e ritrovarsi senza caching né rate limiting sensato"
     - "Ignorare il problema N+1: uno schema innocuo può generare migliaia di query"
     - "Pensare che GraphQL elimini il versioning: lo sposta sulla deprecazione dei campi"
-  follow_up_questions:
-    - "Come faresti rate limiting su GraphQL, dove ogni query ha costo diverso?"
-    - "Cos'è il problema N+1 e come lo risolvi?"
+    - "Esporre lo schema introspettivo in produzione senza limiti: è una mappa gratis per chi cerca superficie d'attacco"
+  follow_ups:
+    - question: Come faresti rate limiting su GraphQL, dove ogni query ha costo diverso?
+      answer: >-
+        Non conto le richieste, conto il costo. Assegno un peso statico a ogni campo e
+        moltiplico per gli argomenti di paginazione, calcolo il costo prima di eseguire
+        e rifiuto sopra il budget; poi scalo da un token bucket per utente il costo
+        effettivo. In produzione aggiungo le persisted queries, così i costi li conosco
+        in anticipo perché le query sono un insieme chiuso.
+    - question: Cos'è il problema N+1 e come lo risolvi?
+      answer: >-
+        È quando una query che sembra una diventa 1 + N: una per la lista e una per
+        ciascun elemento, perché il campo annidato viene risolto elemento per elemento.
+        Si risolve con il batching - DataLoader accumula gli id dello stesso tick e fa
+        una sola query con IN - oppure con una join quando la forma dei dati lo permette.
+        In ORM lo stesso problema si chiama lazy loading e si cura con eager loading
+        esplicito.
+    - question: In GraphQL come gestisci gli errori, visto che l'HTTP è sempre 200?
+      answer: >-
+        Gli errori stanno nell'array errors accanto ai dati parziali, quindi il
+        monitoraggio non può basarsi sul codice HTTP: vanno esportate metriche
+        applicative per tipo di errore e per campo. Distinguo anche gli errori attesi di
+        dominio, che modello come tipi nello schema (union result), dagli errori tecnici,
+        che restano nell'array errors.
+  related: [core-01-what-is-an-api, core-03-http-methods, cache-21-what-and-where, db-16-pagination]
   resources:
     - title: "GraphQL - Best practices"
       url: "https://graphql.org/learn/best-practices/"
       kind: doc
+    - title: "Shopify - Rate limiting a complessità"
+      url: "https://shopify.dev/docs/api/usage/rate-limits"
+      kind: doc
+    - title: "Roy Fielding - Architectural Styles (cap. 5, REST)"
+      url: "https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm"
+      kind: article
 
 - id: core-03-http-methods
   title: Metodi HTTP (GET, POST, PUT, PATCH, DELETE)
@@ -88,12 +348,109 @@
     (il metodo non modifica lo stato) e idempotenza (ripeterlo produce lo stesso stato
     finale). Sono queste a determinare cosa può fare un proxy, un retry automatico o un
     crawler.
+  deep_dive: |-
+    RFC 9110 definisce due proprietà ortogonali. Un metodo è *safe* (§9.2.1) se è
+    "essenzialmente in sola lettura": la richiesta non è destinata a cambiare lo stato
+    del server. È *idempotente* (§9.2.2) se l'effetto di N richieste identiche è lo
+    stesso di una sola. Safe implica idempotente; il contrario no. La tabella:
+
+      GET, HEAD, OPTIONS, TRACE -> safe + idempotenti
+      PUT, DELETE               -> idempotenti, non safe
+      POST, PATCH               -> né l'uno né l'altro (in generale)
+
+    Queste non sono etichette accademiche: sono il contratto su cui si comporta
+    l'infrastruttura. I browser fanno prefetch delle GET, i crawler le seguono, le CDN
+    le memorizzano, i proxy e i client HTTP ritentano automaticamente i metodi
+    idempotenti dopo un errore di rete. Per questo il vecchio `GET /deleteUser?id=5`
+    non è "brutto stile": è una bomba a orologeria che esplode il giorno in cui
+    qualcuno indicizza quella pagina.
+
+    L'idempotenza riguarda lo *stato risultante*, non la risposta. `DELETE /orders/7`
+    due volte lascia il sistema nello stesso stato (l'ordine non c'è) anche se la
+    prima risponde 204 e la seconda 404: resta idempotente. Allo stesso modo un PUT
+    che scrive lo stesso corpo è idempotente anche se cambia `updated_at`, mentre un
+    PATCH `{"op":"increment","field":"views"}` non lo è, perché ogni esecuzione
+    aggiunge uno.
+
+    PUT e POST si distinguono per chi decide l'identificatore: PUT indirizza la
+    risorsa finale (`PUT /files/report.pdf`), quindi il client conosce l'URL e può
+    ripetere; POST sottomette al server, che crea la risorsa e restituisce 201 con
+    l'header `Location`. Da qui la regola: se l'id lo genera il server (sequence,
+    UUID lato DB), usa POST.
+
+    PATCH (RFC 5789) è un metodo di modifica parziale il cui corpo è un *documento di
+    modifiche*, non la risorsa: le due forme standard sono JSON Patch (RFC 6902, una
+    lista di operazioni add/remove/replace/test) e JSON Merge Patch (RFC 7386, un
+    oggetto parziale dove `null` significa "cancella il campo"). Usare un oggetto
+    parziale ad hoc funziona finché non serve distinguere "campo assente" da "campo
+    messo a null": è esattamente l'ambiguità che Merge Patch risolve per specifica.
+
+    Infine, il modo pulito per rendere sicure le scritture concorrenti passa dalle
+    richieste condizionali: il server espone un `ETag`, il client rimanda
+    `If-Match: "rev-17"`, e il server risponde 412 Precondition Failed se nel
+    frattempo qualcuno ha scritto. È locking ottimistico a livello di protocollo, e
+    rende un PUT sicuro anche sotto concorrenza.
   key_points:
     - "GET e HEAD: safe e idempotenti, cacheabili. Mai usarli per modificare stato"
     - "PUT e DELETE: non safe ma idempotenti, quindi ritentabili senza danni"
     - "POST: né safe né idempotente, è il metodo per creare o per azioni non modellabili"
     - "PATCH: modifica parziale, non idempotente in generale (es. un incremento)"
     - "PUT sostituisce l'intera risorsa, PATCH ne modifica una parte"
+    - "L'idempotenza riguarda lo STATO finale, non la risposta: DELETE che risponde 404 la seconda volta è comunque idempotente"
+    - "PUT quando l'URL finale lo conosce il client; POST quando l'id lo genera il server (201 + header Location)"
+    - "Formati standard per PATCH: JSON Patch (RFC 6902) e JSON Merge Patch (RFC 7386), dove null = cancella il campo"
+    - "If-Match + ETag + 412 Precondition Failed = locking ottimistico dentro il protocollo"
+  examples:
+    - title: Scrittura concorrente resa sicura con ETag
+      language: http
+      code: |-
+        GET /v1/orders/8f2a            ->  200 OK, ETag: "rev-17"
+
+        PUT /v1/orders/8f2a
+        If-Match: "rev-17"
+        Content-Type: application/json
+        {"status": "shipped"}
+
+        # nessuno ha scritto nel frattempo  ->  200 OK, ETag: "rev-18"
+        # qualcun altro ha già scritto      ->  412 Precondition Failed
+      note: >-
+        Senza If-Match l'ultima scrittura vince in silenzio e il collega non saprà mai
+        di aver perso la sua modifica (lost update).
+    - title: Le tre forme di PATCH
+      language: http
+      code: |-
+        # 1. JSON Merge Patch (RFC 7386) - Content-Type: application/merge-patch+json
+        {"nickname": null, "city": "Napoli"}      # null CANCELLA il campo
+
+        # 2. JSON Patch (RFC 6902) - Content-Type: application/json-patch+json
+        [
+          {"op": "test",    "path": "/version", "value": 17},   # fallisce se cambiato
+          {"op": "replace", "path": "/city",    "value": "Napoli"},
+          {"op": "remove",  "path": "/nickname"}
+        ]
+
+        # 3. Oggetto parziale "fatto in casa" - ambiguo
+        {"city": "Napoli"}   # e per cancellare nickname? null? stringa vuota? assente?
+      note: >-
+        JSON Patch ha l'operazione `test`, che dà idempotenza e controllo di concorrenza
+        senza header aggiuntivi. Merge Patch è più semplice ma non sa esprimere "aggiungi
+        in fondo a una lista".
+  trade_offs:
+    - option: PUT con risorsa completa
+      pros: Idempotente per costruzione, semantica chiarissima, facile da ritentare
+      cons: Il client deve conoscere e rimandare tutta la risorsa, rischio di lost update
+      when: Risorse piccole, client che possiede il dato per intero
+    - option: PATCH con Merge Patch
+      pros: Paghi solo i campi che cambi, ottimo su risorse grandi
+      cons: Non idempotente in generale, semantica di null da documentare
+      when: Aggiornamenti parziali frequenti da una UI
+    - option: POST su un endpoint-azione (/orders/7/refund)
+      pros: Modella azioni che non sono un CRUD, log e permessi espliciti
+      cons: Esce dalla semantica REST pura, va reso idempotente a mano
+      when: Operazioni di dominio con effetti collaterali (rimborso, invio, annullamento)
+  numbers:
+    - "Limite pratico dell'URL: 2.048 caratteri per stare tranquilli su tutti i client e proxy (quindi filtri lunghi via POST)"
+    - "Lo stesso identico PUT ripetuto 5 volte deve lasciare 1 sola risorsa: è il test mentale dell'idempotenza"
   interview_answer: >-
     Al di là della tabella, quello che uso in pratica sono le garanzie. GET deve essere
     safe: se un GET modifica qualcosa, il primo prefetch del browser o un crawler mi
@@ -101,16 +458,47 @@
     timeout senza rischi, ed è per questo che i retry automatici sui load balancer li
     trattano diversamente da POST. Quando ho un POST che deve essere ritentabile, ad
     esempio un pagamento, lo rendo idempotente esplicitamente con una idempotency key.
+    Sulle scritture concorrenti uso ETag e If-Match: mi dà locking ottimistico senza
+    inventare niente, con 412 al posto dell'ultimo-che-scrive-vince.
+  senior_signals:
+    - "Definisce l'idempotenza sullo stato finale e non sulla risposta, e porta l'esempio del DELETE che poi fa 404"
+    - "Collega la proprietà del metodo al comportamento reale di proxy, CDN e retry automatici"
+    - "Conosce JSON Patch / Merge Patch invece di inventarsi un formato parziale"
+    - "Tira fuori If-Match/412 quando gli si chiede delle scritture concorrenti"
   pitfalls:
     - "GET che cancella risorse: il classico /deleteUser?id=5 distrutto dal prefetch del browser"
     - "Confondere idempotente con 'restituisce sempre la stessa risposta': è lo STATO a non cambiare"
     - "Usare PUT per creazioni quando l'id lo genera il server"
-  follow_up_questions:
-    - "DELETE è idempotente anche se la seconda chiamata restituisce 404?"
-    - "Quando PATCH può diventare idempotente?"
+    - "PATCH con oggetto parziale senza documentare cosa significhi null: metà dei bug di aggiornamento nascono qui"
+  follow_ups:
+    - question: DELETE è idempotente anche se la seconda chiamata restituisce 404?
+      answer: >-
+        Sì. L'idempotenza è definita sull'effetto sullo stato del server, non sul codice
+        di risposta: dopo una o cinque DELETE la risorsa non esiste comunque. Se il 404
+        dà fastidio ai client, molte API rispondono 204 anche quando la risorsa era già
+        assente: è una scelta di contratto, non un requisito.
+    - question: Quando PATCH può diventare idempotente?
+      answer: >-
+        Quando il corpo esprime uno stato assoluto e non un delta. `{"status":"shipped"}`
+        è idempotente, `{"op":"increment","views":1}` no. Con JSON Patch puoi renderlo
+        idempotente anche nei casi ambigui usando l'operazione `test`, che fa fallire la
+        seconda applicazione se lo stato non è più quello atteso.
+    - question: Perché un load balancer ritenta le GET ma non le POST?
+      answer: >-
+        Perché su un errore di rete non sa se la richiesta è arrivata: ritentare un
+        metodo idempotente non può fare danni, ritentare una POST può duplicare un
+        ordine. Se voglio che anche le mie POST siano ritentabili devo dichiararlo io,
+        con una idempotency key lato applicazione.
+  related: [core-01-what-is-an-api, core-04-http-status-codes, core-10-idempotency, db-20-locking]
   resources:
-    - title: "RFC 9110 - HTTP Semantics"
-      url: "https://www.rfc-editor.org/rfc/rfc9110.html#name-method-definitions"
+    - title: "RFC 9110 §9.2 - Safe e idempotent methods"
+      url: "https://www.rfc-editor.org/rfc/rfc9110.html#name-common-method-properties"
+      kind: doc
+    - title: "RFC 6902 - JSON Patch"
+      url: "https://www.rfc-editor.org/rfc/rfc6902.html"
+      kind: doc
+    - title: "RFC 7386 - JSON Merge Patch"
+      url: "https://www.rfc-editor.org/rfc/rfc7386.html"
       kind: doc
 
 - id: core-04-http-status-codes
@@ -124,27 +512,156 @@
     Il codice di stato è il modo in cui l'API dice al client di chi è la colpa e cosa
     fare dopo. La distinzione 4xx/5xx non è cosmetica: guida i retry, gli alert e i
     dashboard di errore.
+  deep_dive: |-
+    Il codice di stato è un'istruzione operativa, non una didascalia. La prima cifra
+    risponde a una domanda sola: chi deve agire adesso? Un 4xx dice al client che
+    ripetere la stessa identica richiesta è inutile: deve cambiare qualcosa. Un 5xx
+    dice che il problema è del server e che un retry con backoff ha senso. È su questa
+    distinzione che sono costruiti i retry automatici, gli SLO e gli alert: se
+    rispondi 500 a un errore di validazione, il tuo tasso di errore diventa rumore e
+    prima o poi qualcuno silenzierà l'alert.
+
+    Nella famiglia 2xx vale la pena distinguere 201 Created, che deve portare
+    l'header `Location` della risorsa creata, e 202 Accepted, che significa "ho preso
+    in carico, non ho ancora finito": è la risposta giusta per un'elaborazione
+    asincrona, accompagnata da un URL di stato da interrogare. 204 No Content è per
+    le operazioni che riescono senza nulla da dire, tipicamente DELETE e PUT.
+
+    Nei 3xx la coppia che confonde è 301/308 contro 302/307: le versioni "nuove"
+    (307, 308) garantiscono che il metodo non venga cambiato, mentre storicamente
+    molti client trasformavano un POST in GET seguendo un 301 o un 302. Se stai
+    reindirizzando una POST, 307/308 sono le uniche scelte corrette. 304 Not Modified
+    appartiene invece al caching condizionale e viaggia con ETag/If-None-Match.
+
+    Nei 4xx le distinzioni che vengono chieste al colloquio sono tre. 401 vs 403:
+    401 significa "non so chi sei" e per specifica deve includere `WWW-Authenticate`,
+    403 significa "so chi sei e non puoi". 400 vs 422: 400 è per una richiesta
+    malformata (JSON rotto, header mancante), 422 Unprocessable Content (RFC 9110
+    §15.5.21) per una richiesta sintatticamente valida ma semanticamente sbagliata,
+    tipo una data di fine precedente all'inizio. 409 vs 422: 409 Conflict è per uno
+    scontro con lo stato attuale (email già registrata, versione superata), non per
+    un campo invalido.
+
+    Sui 5xx la distinzione utile è fra 500 (il mio codice è esploso), 502 (ho
+    chiamato qualcuno e mi ha risposto male), 503 (non sono disponibile adesso,
+    tipicamente sovraccarico o manutenzione) e 504 (ho chiamato qualcuno e non ha
+    risposto in tempo). 503 e 429 dovrebbero sempre portare `Retry-After`, in secondi
+    o come data HTTP: senza, i client ritentano subito e trasformano un rallentamento
+    in un collasso.
+
+    Per il corpo dell'errore esiste uno standard che quasi nessuno usa e che fa
+    ottima impressione citare: RFC 9457, Problem Details for HTTP APIs (obsoleta la
+    7807). Definisce `application/problem+json` con i campi `type`, `title`,
+    `status`, `detail`, `instance`, più estensioni libere. Il vantaggio non è
+    estetico: dà ai client un modo uniforme di distinguere gli errori per `type`
+    (un URI stabile) invece che per stringa localizzata.
   key_points:
     - "2xx: 200 OK, 201 Created (con header Location), 202 Accepted (elaborazione asincrona), 204 No Content"
-    - "3xx: 301 permanente, 302/307 temporaneo, 304 Not Modified per il caching condizionale"
+    - "3xx: 301/308 permanente, 302/307 temporaneo, 304 Not Modified per il caching condizionale"
+    - "307 e 308 preservano il metodo; 301 e 302 storicamente trasformano POST in GET: per redirigere una POST usa 307/308"
     - "4xx = colpa del client, non ritentare uguale: 400 malformato, 401 non autenticato, 403 autenticato ma non autorizzato, 404 assente, 409 conflitto, 422 semanticamente invalido, 429 troppe richieste"
     - "5xx = colpa del server, ritentare ha senso: 500 generico, 502 upstream rotto, 503 non disponibile (con Retry-After), 504 timeout upstream"
-    - "401 vs 403 è la domanda trabocchetto più frequente: 401 = non so chi sei, 403 = so chi sei e non puoi"
+    - "401 vs 403 è la domanda trabocchetto più frequente: 401 = non so chi sei (e serve WWW-Authenticate), 403 = so chi sei e non puoi"
+    - "409 è per il conflitto con lo stato (email già presente, versione superata), 422 per il contenuto semanticamente invalido"
+    - "RFC 9457 (obsoleta la 7807) standardizza il corpo dell'errore: application/problem+json con type, title, status, detail, instance"
+  examples:
+    - title: Errore in formato Problem Details (RFC 9457)
+      language: http
+      code: |-
+        HTTP/1.1 422 Unprocessable Content
+        Content-Type: application/problem+json
+        Content-Language: it
+
+        {
+          "type": "https://api.esempio.it/errors/date-range",
+          "title": "Intervallo di date non valido",
+          "status": 422,
+          "detail": "end_date (2026-01-02) precede start_date (2026-03-01)",
+          "instance": "/v1/bookings/8f2a",
+          "errors": [ {"field": "end_date", "code": "before_start"} ]
+        }
+      note: >-
+        Il client smista su `type`, che è un URI stabile e non localizzato; `title` e
+        `detail` sono per gli esseri umani. `errors` è un'estensione: la RFC la permette.
+    - title: Il 429 fatto bene
+      language: http
+      code: |-
+        HTTP/1.1 429 Too Many Requests
+        Retry-After: 30
+        RateLimit-Policy: 100;w=60
+        RateLimit: limit=100, remaining=0, reset=30
+        Content-Type: application/problem+json
+
+        {"type":"https://api.esempio.it/errors/rate-limit","title":"Troppe richieste","status":429}
+      note: >-
+        I campi RateLimit/RateLimit-Policy vengono dal draft IETF httpapi-ratelimit-headers;
+        prima erano X-RateLimit-*, che si trovano ancora ovunque. Retry-After è invece
+        standard da sempre (RFC 9110 §10.2.3).
+  trade_offs:
+    - option: 404 su risorsa esistente ma non autorizzata
+      pros: Non rivela l'esistenza della risorsa, utile contro l'enumerazione
+      cons: Debug più difficile, il client legittimo non capisce se ha sbagliato id o permessi
+      when: Dati sensibili o multi-tenant, dove l'esistenza stessa è informazione
+    - option: 403 esplicito
+      pros: Messaggio chiaro, supporto e debug immediati
+      cons: Conferma che quella risorsa esiste
+      when: API interne o quando l'esistenza non è un segreto
+    - option: 200 con esito nel body
+      pros: Un solo percorso di parsing per il client, comodo in RPC e GraphQL
+      cons: Rompe retry automatici, cache, alert e ogni dashboard basata sui codici
+      when: Praticamente mai su REST; in GraphQL è la norma e si compensa con metriche applicative
+  numbers:
+    - "Soglia d'allarme tipica: 5xx sopra lo 0,1-1% delle richieste, a seconda dello SLO"
+    - "Retry-After si esprime in secondi (`Retry-After: 30`) oppure come data HTTP"
+    - "3 retry con backoff esponenziale e jitter coprono la stragrande maggioranza degli errori transitori: oltre, stai solo aggiungendo carico"
   interview_answer: >-
     Uso i codici per comunicare al client un'azione, non solo un esito. Un 4xx significa
     che ritentare la stessa identica richiesta non servirà a nulla, quindi il client deve
     correggere qualcosa; un 5xx significa che il problema è mio e un retry con backoff è
     sensato. È anche la ragione per cui tengo separati i due gruppi nelle metriche: il
     tasso di 5xx è un segnale di salute del servizio, il tasso di 4xx è un segnale su
-    client mal integrati o su un contratto poco chiaro.
+    client mal integrati o su un contratto poco chiaro. Per il corpo uso il formato
+    Problem Details della RFC 9457, così i client smistano sugli URI di `type` invece che
+    su stringhe che un giorno tradurrò.
+  senior_signals:
+    - "Lega i codici a retry, alert e SLO invece di recitare la lista"
+    - "Sa che 401 richiede WWW-Authenticate e sa distinguere 409 da 422"
+    - "Cita Problem Details (RFC 9457) e il perché del campo `type`"
+    - "Sul 404-invece-di-403 discute il trade-off sicurezza/diagnosi invece di dare una regola secca"
   pitfalls:
     - "Rispondere 200 con {\"error\": ...} nel body: rompe retry, alert e monitoraggio"
     - "Usare 500 per errori di validazione, gonfiando il tasso di errore del servizio"
-    - "429 senza header Retry-After: il client non sa quanto aspettare"
-  follow_up_questions:
-    - "Che codice restituisci se la risorsa esiste ma l'utente non deve sapere che esiste?"
-    - "Differenza pratica tra 400 e 422?"
+    - "429 senza header Retry-After: il client ritenta subito e peggiora il carico"
+    - "Redirigere una POST con 302 e ritrovarsi una GET dall'altra parte"
+  follow_ups:
+    - question: Che codice restituisci se la risorsa esiste ma l'utente non deve sapere che esiste?
+      answer: >-
+        404, deliberatamente. È la scelta standard quando l'esistenza stessa è
+        informazione riservata - tipico nel multi-tenant, dove un 403 confermerebbe che
+        quell'id appartiene a qualcun altro. Lo documento nel contratto, altrimenti chi
+        integra impazzisce a caccia di un bug che non c'è.
+    - question: Differenza pratica tra 400 e 422?
+      answer: >-
+        400 è per una richiesta che non riesco nemmeno a interpretare: JSON malformato,
+        content-type sbagliato, parametro obbligatorio assente. 422 è per una richiesta
+        perfettamente interpretabile ma che non ha senso nel dominio: data di fine prima
+        dell'inizio, quantità negativa. Praticamente: 400 si ferma al parser, 422 arriva
+        alla validazione di dominio.
+    - question: "Un gateway restituisce 502 e 504: cosa cambia per chi indaga?"
+      answer: >-
+        502 significa che l'upstream ha risposto qualcosa di invalido o ha chiuso la
+        connessione: guardo i log dell'upstream, spesso è un crash o un processo che
+        muore. 504 significa che non ha risposto entro il timeout: guardo latenza,
+        saturazione e query lente. Sono due indagini diverse, ed è la ragione per cui
+        conviene non collassarli entrambi in un generico 500.
+  related: [core-03-http-methods, core-09-rate-limiting-throttling, rel-32-retries-timeouts-breakers, pat-12-error-handling]
   resources:
+    - title: "RFC 9110 §15 - Status codes"
+      url: "https://www.rfc-editor.org/rfc/rfc9110.html#name-status-codes"
+      kind: doc
+    - title: "RFC 9457 - Problem Details for HTTP APIs"
+      url: "https://www.rfc-editor.org/rfc/rfc9457.html"
+      kind: doc
     - title: "MDN - HTTP response status codes"
       url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status"
       kind: doc
@@ -160,25 +677,159 @@
     Un servizio stateless non conserva nulla tra una richiesta e l'altra: ogni richiesta
     porta con sé tutto il contesto necessario. È la proprietà che rende possibile lo
     scaling orizzontale, perché qualunque istanza può servire qualunque richiesta.
+  deep_dive: |-
+    "Stateless" non significa che lo stato non esista: significa che non vive nella
+    memoria del processo che serve la richiesta. Lo stato c'è sempre - sessioni,
+    carrelli, file caricati, contatori - ma sta in un posto condiviso e durevole:
+    database, Redis, object storage. La differenza pratica è che così qualunque
+    istanza può servire qualunque richiesta, e questa singola proprietà è ciò che
+    rende possibili autoscaling, rolling deploy, istanze spot e recupero immediato
+    dalla morte di un processo.
+
+    Il contrario è la sticky session (session affinity): il load balancer lega un
+    client a un'istanza, di solito con un cookie o l'hash dell'IP. Funziona, e per
+    questo è una trappola comoda: nasconde il problema finché non fai un deploy. Con
+    le sticky session ogni rilascio butta via le sessioni ospitate dall'istanza che
+    si spegne, lo scaling in giù fa lo stesso, e il carico si sbilancia perché le
+    connessioni vecchie restano dove sono. Il fix è quasi sempre banale - spostare la
+    sessione su Redis - e va fatto prima che il sistema cresca.
+
+    Le tre forme di stato nascosto che si vedono più spesso in code review: cache in
+    memoria di processo usata come fonte di verità (con N istanze hai N verità
+    diverse e bug che si riproducono "solo qualche volta"); file caricati salvati sul
+    disco locale del container, che sparisce al primo restart; e scheduler o job
+    periodici avviati dentro il processo applicativo, che con tre repliche eseguono
+    tre volte. Per i primi due la cura è uno store condiviso; per il terzo serve un
+    lock distribuito o uno scheduler esterno.
+
+    Restano i casi in cui lo stato in memoria è intrinseco: WebSocket, SSE, sessioni
+    di gioco, stream gRPC. Lì la connessione è lo stato, e non la puoi spostare in
+    Redis. La soluzione standard è isolare quel pezzo in un servizio dedicato e
+    metterci dietro un backplane: Redis pub/sub, NATS o Kafka, così un messaggio
+    prodotto dall'istanza A raggiunge il client connesso all'istanza B. Il resto del
+    backend resta stateless, e paghi la complessità solo dove serve davvero.
+
+    Vale la pena notare che "stateless" è anche un vincolo architetturale di REST:
+    ogni richiesta deve contenere tutto il necessario per essere interpretata. Il
+    prezzo, riconosciuto già da Fielding, è che le richieste diventano più verbose -
+    il token viaggia ogni volta - in cambio di visibilità, affidabilità e scalabilità.
   key_points:
     - "Stateless non vuol dire senza stato: lo stato esiste, ma sta in un database o in una cache condivisa, non nella memoria del processo"
     - "Stateful richiede sticky session, e le sticky session rendono deploy e autoscaling dolorosi"
     - "Se un'istanza muore, in stateless perdi zero; in stateful perdi le sessioni che ospitava"
-    - "WebSocket e connessioni long-lived sono intrinsecamente stateful: vanno progettate con un backplane (es. Redis pub/sub)"
+    - "Le tre forme di stato nascosto: cache di processo usata come verità, file sul disco locale, scheduler dentro l'app"
+    - "Un job periodico dentro un'app con 3 repliche gira 3 volte: serve un lock distribuito o uno scheduler esterno"
+    - "WebSocket e connessioni long-lived sono intrinsecamente stateful: vanno progettate con un backplane (Redis pub/sub, NATS, Kafka)"
+    - "Statelessness è un vincolo REST esplicito: più byte per richiesta in cambio di scalabilità e recupero banale dai guasti"
+  examples:
+    - title: Lo stesso endpoint, prima e dopo
+      language: python
+      code: |-
+        # STATEFUL: funziona su una macchina, si rompe su tre.
+        CARRELLI: dict[str, list[str]] = {}          # memoria del processo
+
+        @app.post("/cart/items")
+        def add_item(session_id: str, sku: str):
+            CARRELLI.setdefault(session_id, []).append(sku)   # istanza A
+            return {"ok": True}                                # ...la GET va sull'istanza B
+
+        # STATELESS: lo stato c'è, ma è condiviso e con scadenza.
+        @app.post("/cart/items")
+        async def add_item(session_id: str, sku: str, redis: Redis):
+            await redis.rpush(f"cart:{session_id}", sku)
+            await redis.expire(f"cart:{session_id}", 86_400)
+            return {"ok": True}
+      note: >-
+        Il bug della prima versione non appare in sviluppo (un processo solo) e appare
+        in produzione a intermittenza: è il motivo per cui va evitato per principio.
+    - title: Job periodico con tre repliche
+      language: python
+      code: |-
+        # Senza lock: 3 repliche = 3 invii della stessa email di riepilogo.
+        @scheduler.scheduled_job("cron", hour=6)
+        async def invia_riepilogo():
+            await manda_email_a_tutti()
+
+        # Con lock distribuito: la prima replica che arriva lavora, le altre passano.
+        @scheduler.scheduled_job("cron", hour=6)
+        async def invia_riepilogo(redis: Redis):
+            # NX = solo se non esiste, EX = scadenza di sicurezza se il processo muore
+            preso = await redis.set("lock:riepilogo", INSTANCE_ID, nx=True, ex=600)
+            if not preso:
+                return
+            await manda_email_a_tutti()
+      note: >-
+        La scadenza serve a non restare bloccati per sempre se il processo muore a metà;
+        va tarata più lunga del job. Per garanzie forti servono fencing token - vedi
+        l'argomento sul lock distribuito.
+  trade_offs:
+    - option: Sessione in store condiviso (Redis)
+      pros: Istanze intercambiabili, deploy e autoscaling indolori, revoca immediata
+      cons: Un round trip in più per richiesta, una dipendenza in più da tenere viva
+      when: Il default per qualunque web app con più di un'istanza
+    - option: Sticky session
+      pros: Zero modifiche al codice, nessuno store in più
+      cons: Deploy e scale-in buttano via sessioni, carico sbilanciato, debug difficile
+      when: Migrazioni temporanee di legacy, mai come scelta di progetto
+    - option: Stato nel token (JWT con i claim)
+      pros: Nessun lookup, nessuna dipendenza sul percorso caldo
+      cons: Niente revoca prima della scadenza, dimensione del token, dati stantii
+      when: Service-to-service e sessioni brevissime
+  numbers:
+    - "Un lookup di sessione su Redis nello stesso datacenter costa tipicamente 0,2-1 ms: irrilevante rispetto a una query SQL"
+    - "Un cookie di sessione opaco pesa decine di byte; un JWT con i claim viaggia sui 500-1.500 byte a ogni richiesta"
+    - "Regola pratica: se per fare un deploy devi avvisare gli utenti, hai dello stato nel posto sbagliato"
   interview_answer: >-
     Tengo i servizi stateless perché è ciò che mi permette di aggiungere istanze senza
     pensarci e di sostituirle durante un rolling deploy senza che nessuno se ne accorga.
     Lo stato non sparisce, lo sposto: sessioni in Redis, file su object storage, dati sul
     database. Dove lo stato in memoria è inevitabile, tipicamente le connessioni
     WebSocket, lo isolo in un componente dedicato con un backplane condiviso, invece di
-    rendere stateful l'intero backend.
+    rendere stateful l'intero backend. E sto attento ai tre stati nascosti classici:
+    cache di processo usata come fonte di verità, upload sul disco locale e scheduler
+    dentro l'applicazione, che con tre repliche gira tre volte.
+  senior_signals:
+    - "Dice esplicitamente che lo stato non sparisce, si sposta"
+    - "Riconosce le sticky session come debito e non come soluzione"
+    - "Porta il caso del job periodico moltiplicato per le repliche, che quasi nessuno cita"
+    - "Isola il pezzo intrinsecamente stateful invece di rendere stateful tutto il sistema"
   pitfalls:
     - "Cache in memoria di processo trattata come fonte di verità: con N istanze hai N verità diverse"
     - "Sticky session usate per nascondere un problema di design"
     - "Salvare file caricati sul disco locale del container: spariscono al primo restart"
-  follow_up_questions:
-    - "Come gestisci le sessioni utente in un servizio stateless?"
-    - "Come scali un servizio WebSocket su più istanze?"
+    - "Contatori o rate limiter in memoria: il limite effettivo diventa N volte quello previsto"
+  follow_ups:
+    - question: Come gestisci le sessioni utente in un servizio stateless?
+      answer: >-
+        Cookie opaco HttpOnly+Secure+SameSite con dentro solo un identificatore, e i dati
+        di sessione in Redis con TTL. Così ogni istanza può servire la richiesta, la
+        revoca è immediata (cancello la chiave) e il cookie non contiene niente di
+        sensibile. L'alternativa a token firmati la considero solo per sessioni molto
+        brevi o per traffico service-to-service.
+    - question: Come scali un servizio WebSocket su più istanze?
+      answer: >-
+        Isolo il gateway di connessione e gli metto sotto un backplane: ogni istanza
+        pubblica su Redis/NATS/Kafka e sottoscrive i canali dei client che ospita, così
+        un evento prodotto altrove raggiunge il client giusto. Tengo la mappa
+        connessione-utente in memoria locale (è lo stato intrinseco) ma tutto il resto
+        fuori, e progetto il client per riconnettersi e riallinearsi, perché le
+        connessioni cadranno comunque a ogni deploy.
+    - question: "Un'applicazione è stateless ma il database è uno solo: hai davvero scalato?"
+      answer: >-
+        Ho scalato il livello applicativo, che è la parte facile; il collo di bottiglia
+        si è spostato sul database. Da lì le mosse sono altre: read replica per le
+        letture, connection pooling per non esaurire le connessioni, cache per togliere
+        query ripetute e, solo se serve davvero, partizionamento. Dire "sono stateless
+        quindi scalo" senza guardare il database è la risposta che tradisce poca
+        esperienza operativa.
+  related: [core-07-sessions-vs-jwt, dist-27-horizontal-vertical, rel-34-distributed-locking, cache-21-what-and-where]
+  resources:
+    - title: "The Twelve-Factor App - VI. Processes"
+      url: "https://12factor.net/processes"
+      kind: article
+    - title: "Fielding - REST, vincolo stateless (cap. 5.1.3)"
+      url: "https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm#sec_5_1_3"
+      kind: article
 
 - id: core-06-authn-vs-authz
   title: Autenticazione vs autorizzazione
@@ -191,27 +842,153 @@
     L'autenticazione stabilisce chi sei, l'autorizzazione cosa puoi fare. Sono due
     livelli distinti e vanno tenuti separati nel codice, altrimenti finisci per
     controllare i permessi in venti punti diversi e dimenticartene in uno.
+  deep_dive: |-
+    AuthN risponde a "chi sei" e fallisce con 401; AuthZ risponde a "cosa puoi fare"
+    e fallisce con 403. Sembra una distinzione da manuale, ma ha una conseguenza
+    architetturale precisa: l'autenticazione si fa una volta all'ingresso - un
+    middleware valida il token e popola l'identità - mentre l'autorizzazione va fatta
+    vicino alla risorsa, perché dipende da quale riga stai toccando.
+
+    Il bug numero uno del mondo non è l'endpoint lasciato aperto: è l'endpoint
+    autenticato che non verifica la proprietà della singola risorsa. OWASP lo chiama
+    Broken Object Level Authorization e lo mette al primo posto della API Security
+    Top 10; il nome classico è IDOR. `GET /invoices/1042` con un token valido di un
+    altro utente restituisce la fattura di qualcun altro, e nessun test funzionale se
+    ne accorge perché la risposta è 200 e i dati sono corretti - solo, non sono tuoi.
+
+    La difesa efficace è strutturale, non basata sulla memoria di chi scrive
+    l'endpoint. Le due tecniche che funzionano: filtrare sempre per proprietario nel
+    repository (`WHERE id = :id AND tenant_id = :tenant`), così una query scritta male
+    restituisce zero righe invece di dati altrui; e, dove il database lo supporta,
+    attivare la Row Level Security, che sposta il vincolo dentro il motore e rende
+    impossibile dimenticarlo. Aggiungere identificatori non indovinabili (UUID al
+    posto di interi progressivi) aiuta contro l'enumerazione ma non è autorizzazione:
+    è rallentare chi tira a indovinare, non fermare chi conosce l'id.
+
+    Sui modelli: RBAC assegna permessi ai ruoli e ruoli agli utenti - semplice,
+    comprensibile, tende a esplodere in ruoli sempre più specifici. ABAC decide in
+    base ad attributi (dipartimento, orario, proprietà del record), più espressivo e
+    più difficile da verificare. ReBAC, reso popolare dal paper Zanzibar di Google,
+    modella i permessi come relazioni in un grafo ("utente X è editor del documento Y
+    che sta nella cartella Z") ed è ciò che serve alle app tipo Drive con condivisioni
+    a cascata. In pratica, per un'app multi-tenant si parte da RBAC per le funzioni e
+    si aggiunge un controllo di proprietà per riga: è ABAC minimale e copre quasi
+    tutto.
+
+    Due principi che al colloquio valgono più della tassonomia: deny by default - se
+    nessuna regola concede esplicitamente, si nega - e privilegio minimo. Entrambi
+    vanno resi visibili nel codice: una rotta senza dichiarazione di permessi deve
+    essere rifiutata dal framework, non lasciata passare.
   key_points:
-    - "AuthN (chi sei): password, token, certificati, provider esterni. Risponde 401 se fallisce"
-    - "AuthZ (cosa puoi): RBAC per ruoli, ABAC per attributi, ACL per risorsa. Risponde 403 se fallisce"
+    - "AuthN (chi sei): password, token, certificati, provider esterni. Risponde 401 se fallisce, con header WWW-Authenticate"
+    - "AuthZ (cosa puoi): RBAC per ruoli, ABAC per attributi, ReBAC/Zanzibar per relazioni. Risponde 403 se fallisce"
     - "L'autorizzazione va applicata sul server, sempre: nascondere un bottone nella UI non è sicurezza"
-    - "IDOR (Insecure Direct Object Reference) è il bug di autorizzazione più comune: l'utente cambia l'id nell'URL e legge i dati di un altro"
+    - "IDOR / Broken Object Level Authorization è il bug numero 1 delle API secondo OWASP: l'utente cambia l'id nell'URL e legge i dati di un altro"
     - "Il controllo va fatto sulla risorsa specifica, non solo sull'endpoint"
+    - "Difesa strutturale: filtrare per owner/tenant nel repository, o Row Level Security nel database"
+    - "UUID al posto degli id progressivi riduce l'enumerazione ma NON sostituisce il controllo di autorizzazione"
+    - "Deny by default: una rotta senza permessi dichiarati deve essere rifiutata dal framework"
+  examples:
+    - title: IDOR e le due difese
+      language: python
+      code: |-
+        # VULNERABILE: autenticato ma non autorizzato sulla riga.
+        @router.get("/invoices/{invoice_id}")
+        async def get_invoice(invoice_id: str, user: User = Depends(current_user)):
+            return await db.fetch_one("SELECT * FROM invoices WHERE id = :id", id=invoice_id)
+
+        # DIFESA 1: il filtro per proprietario sta nel repository, non nell'endpoint.
+        async def invoice_for(user: User, invoice_id: str) -> Invoice | None:
+            return await db.fetch_one(
+                "SELECT * FROM invoices WHERE id = :id AND tenant_id = :tenant",
+                id=invoice_id, tenant=user.tenant_id,
+            )
+      note: >-
+        Con la difesa 1 un endpoint scritto distrattamente restituisce 404, non i dati di
+        un altro cliente. È la differenza fra un bug e un incidente.
+    - title: "Difesa 2: il vincolo dentro il database (Postgres RLS)"
+      language: sql
+      code: |-
+        ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+
+        CREATE POLICY tenant_isolation ON invoices
+          USING (tenant_id = current_setting('app.tenant_id')::uuid);
+
+        -- L'applicazione imposta il tenant all'inizio della transazione:
+        SET LOCAL app.tenant_id = '2f1c...';
+        SELECT * FROM invoices WHERE id = 1042;   -- 0 righe se non è tua
+      note: >-
+        Attenzione: RLS non si applica al proprietario della tabella e agli utenti
+        BYPASSRLS. Va verificata con un test, non data per scontata.
+  trade_offs:
+    - option: RBAC (ruoli)
+      pros: Semplice da capire e da spiegare a chi non è tecnico, facile da auditare
+      cons: Esplosione di ruoli quando i casi si specializzano, non esprime la proprietà
+      when: Funzionalità e sezioni dell'app (admin, editor, viewer)
+    - option: ABAC (attributi)
+      pros: Esprime proprietà, tenant, orario, stato del record
+      cons: Regole sparse e difficili da verificare tutte insieme
+      when: Controllo di proprietà per riga, multi-tenant
+    - option: ReBAC (Zanzibar, OpenFGA)
+      pros: Gestisce condivisioni, ereditarietà per cartelle, grafi di permessi
+      cons: Servizio in più, modellazione non banale, latenza di lookup
+      when: Prodotti stile Drive o Notion, con condivisione fra utenti
+  numbers:
+    - "OWASP API Security Top 10: API1 è Broken Object Level Authorization, cioè l'IDOR"
+    - "Zanzibar (Google) serve i controlli con una latenza tipica sotto i 10 ms al 95° percentile su miliardi di relazioni"
   interview_answer: >-
     Autenticazione è l'identità, autorizzazione sono i permessi. Nel codice le tengo su
     due livelli: un middleware che valida il token e popola l'identità, e poi un controllo
     di autorizzazione vicino alla risorsa, non all'ingresso. Il motivo è che l'errore
     classico non è lasciare un endpoint senza auth, è avere l'endpoint autenticato ma
     dimenticarsi di verificare che quella riga appartenga davvero a chi la sta chiedendo,
-    l'IDOR. Per questo preferisco query che filtrano per owner a livello di repository,
-    così il controllo è strutturale e non affidato alla memoria di chi scrive l'endpoint.
+    l'IDOR - che OWASP mette al primo posto fra i rischi delle API. Per questo preferisco
+    query che filtrano per owner a livello di repository, così il controllo è strutturale
+    e non affidato alla memoria di chi scrive l'endpoint, e dove posso attivo la Row Level
+    Security per avere la stessa garanzia dentro il database.
+  senior_signals:
+    - "Parla di IDOR/BOLA come del rischio principale, non di endpoint dimenticati"
+    - "Propone difese strutturali (repository che filtra, RLS) invece di 'ricordarsi di controllare'"
+    - "Distingue enumerazione (UUID) da autorizzazione e non confonde le due"
+    - "Menziona deny by default e come renderlo obbligatorio nel framework"
   pitfalls:
     - "Controllare i permessi solo nel frontend"
     - "Verificare il ruolo ma non la proprietà della singola risorsa"
     - "Restituire 403 rivelando l'esistenza di risorse che l'utente non dovrebbe conoscere"
-  follow_up_questions:
-    - "Cos'è un IDOR e come lo previeni in modo sistematico?"
-    - "RBAC o ABAC per un sistema multi-tenant?"
+    - "Affidarsi agli UUID come misura di sicurezza: sono contro l'enumerazione, non contro l'accesso"
+  follow_ups:
+    - question: Cos'è un IDOR e come lo previeni in modo sistematico?
+      answer: >-
+        È l'accesso a una risorsa altrui cambiando l'identificatore in una richiesta
+        autenticata. Sistematicamente lo si previene togliendo la possibilità di
+        sbagliare: nessuna query per id "nudo", ma sempre id + proprietario nel
+        repository; dove possibile Row Level Security; e un test di sicurezza che, per
+        ogni endpoint con un id nel path, provi l'id di un altro tenant e pretenda 404.
+    - question: RBAC o ABAC per un sistema multi-tenant?
+      answer: >-
+        Entrambi, a livelli diversi. RBAC decide cosa puoi fare dentro il tuo tenant
+        (admin, editor, lettore); un controllo ad attributi decide su quali righe, ed è
+        sempre e comunque il tenant. Il primo è una tabella di ruoli, il secondo è un
+        filtro obbligatorio nelle query: tenerli separati evita l'esplosione di ruoli
+        tipo "admin-tenant-42".
+    - question: Dove metti il controllo dei permessi, nel controller o nel service?
+      answer: >-
+        L'autenticazione all'ingresso, l'autorizzazione dove vive la regola di dominio,
+        quindi nel service o nel repository. Nel controller resta solo la parte
+        dichiarativa (questa rotta richiede il ruolo X). Così lo stesso caso d'uso
+        invocato da un job o da un altro canale non salta i controlli, che è esattamente
+        quello che succede quando la regola vive solo nel controller.
+  related: [core-07-sessions-vs-jwt, core-08-oauth2, eng-04-security, db-17-sharding-partitioning]
+  resources:
+    - title: "OWASP API Security Top 10 - API1 Broken Object Level Authorization"
+      url: "https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/"
+      kind: doc
+    - title: "Google Zanzibar - Consistent, Global Authorization System"
+      url: "https://research.google/pubs/pub48190/"
+      kind: article
+    - title: "PostgreSQL - Row Security Policies"
+      url: "https://www.postgresql.org/docs/current/ddl-rowsecurity.html"
+      kind: doc
 
 - id: core-07-sessions-vs-jwt
   title: Autenticazione a sessione vs JWT
@@ -224,31 +1001,211 @@
     Le sessioni tengono lo stato sul server e l'ID nel cookie: revocare è immediato ma
     serve uno store condiviso. I JWT mettono le informazioni nel token firmato: niente
     lookup ma nessuna revoca reale prima della scadenza. Il compromesso è tutto qui.
+  deep_dive: |-
+    Un JWT è `base64url(header).base64url(payload).firma`. Le prime due parti sono
+    codificate, non cifrate: chiunque intercetti il token le legge con un decoder
+    online. La firma garantisce integrità e origine, non riservatezza. Se servono dati
+    riservati dentro il token esiste JWE (token cifrato), ma nella stragrande
+    maggioranza dei casi la risposta giusta è non metterceli.
+
+    I claim registrati da RFC 7519 sono pochi e vanno usati tutti: `iss` (chi lo ha
+    emesso), `sub` (di chi parla), `aud` (per chi è destinato), `exp` (scadenza),
+    `nbf` (non prima di), `iat` (emesso il), `jti` (identificatore univoco del token).
+    Validarli è responsabilità di chi riceve: un servizio che verifica la firma ma
+    non controlla `aud` accetta volentieri un token emesso per un altro servizio
+    dello stesso tenant.
+
+    Le due vulnerabilità storiche sono entrambe errori di validazione dell'algoritmo.
+    La prima è `alg: none`: il token dichiara di non essere firmato e una libreria
+    compiacente lo accetta. La seconda, più sottile, è la confusione di algoritmo: il
+    server si aspetta RS256 (chiave pubblica/privata), l'attaccante rifirma il token
+    con HS256 usando come segreto HMAC la chiave pubblica, che è pubblica per
+    definizione. La difesa è sempre la stessa: l'algoritmo atteso lo decide il server,
+    non l'header del token. In pratica si passa alla libreria una lista chiusa di
+    algoritmi ammessi, e con chiavi asimmetriche si usa `kid` più un endpoint JWKS per
+    ruotare le chiavi senza redeploy.
+
+    Il vero problema pratico dei JWT non è crittografico, è operativo: non si revocano.
+    Finché non scade, un token rubato è valido; e un logout che cancella solo il
+    cookie del browser non impedisce a chi ha copiato il token di continuare a usarlo.
+    Le contromisure, in ordine di costo: scadenze brevi (5-15 minuti), refresh token
+    opaco salvato su database con rotazione e rilevamento del riuso (se un refresh già
+    usato ricompare, quella famiglia di token viene invalidata perché è probabile un
+    furto), e infine una denylist dei `jti` revocati - che però reintroduce il lookup
+    che si voleva evitare, su un insieme molto più piccolo.
+
+    La sessione classica ribalta il compromesso: nel cookie c'è un identificatore
+    opaco, lo stato sta su Redis o sul database, la revoca è una DELETE. Il costo è un
+    lookup per richiesta, che nello stesso datacenter è meno di un millisecondo:
+    raramente è questo il collo di bottiglia. Va però protetta da session fixation
+    rigenerando l'identificatore al login, e vanno impostati due timeout, uno di
+    inattività e uno assoluto.
+
+    Dove il token vive conta quanto com'è fatto. In `localStorage` qualunque XSS lo
+    ruba, perché è leggibile da JavaScript. In un cookie `HttpOnly` non lo è, ma il
+    cookie viaggia da solo e apre il fronte CSRF, che si chiude con `SameSite=Lax` o
+    `Strict` (Lax è il default nei browser moderni) e, per le API cross-site, con un
+    token anti-CSRF esplicito. Il prefisso `__Host-` è una difesa in più che quasi
+    nessuno usa: obbliga il browser ad accettare il cookie solo se è Secure, senza
+    attributo Domain e con Path=/, cioè impedisce a un sottodominio compromesso di
+    sovrascriverlo.
+
+    Lo schema che copre bene la maggior parte dei prodotti: access token JWT di breve
+    durata in memoria (o in cookie HttpOnly), refresh token opaco in cookie HttpOnly
+    con rotazione e rilevamento del riuso, revoca sul database. Sul percorso caldo non
+    fai I/O; sul percorso di rinnovo, che è raro, paghi un lookup e ottieni il
+    controllo.
   key_points:
     - "Sessione: cookie opaco + store server (Redis/DB). Revoca immediata, richiede un lookup per richiesta"
     - "JWT: header.payload.signature firmato. Verifica senza I/O, ma il token resta valido fino a exp"
+    - "Il payload è codificato in base64url, NON cifrato: chiunque lo legge. Per cifrare davvero serve JWE"
+    - "Claim registrati (RFC 7519): iss, sub, aud, exp, nbf, iat, jti. Validare aud è tanto importante quanto validare la firma"
     - "Il pattern standard è ibrido: access token JWT di breve durata (5-15 min) + refresh token opaco e revocabile, salvato su DB"
-    - "Cookie sicuri: HttpOnly (niente JS), Secure (solo HTTPS), SameSite=Lax o Strict (anti-CSRF)"
-    - "Mai mettere dati sensibili nel payload JWT: è firmato, non cifrato, chiunque può leggerlo con base64"
-    - "Vulnerabilità storica: accettare alg=none o confondere HS256 con RS256. Fissa sempre l'algoritmo atteso"
+    - "Refresh token rotation con reuse detection: se un refresh già consumato ricompare, invalidi l'intera famiglia perché è probabile un furto"
+    - "Cookie sicuri: HttpOnly (niente JS), Secure (solo HTTPS), SameSite=Lax o Strict (anti-CSRF), prefisso __Host- contro i sottodomini"
+    - "Vulnerabilità storiche: alg=none e confusione RS256/HS256 (la chiave pubblica usata come segreto HMAC). L'algoritmo lo impone il server"
+    - "Chiavi asimmetriche + kid + endpoint JWKS = rotazione delle chiavi senza redeploy dei consumatori"
+  examples:
+    - title: Un JWT smontato pezzo per pezzo
+      language: python
+      code: |-
+        import base64, json
+        token = "eyJhbGciOiJSUzI1NiIsImtpZCI6IjNmMSJ9.eyJpc3MiOiJodHRwczovL2F1dGguZXMuaXQiLCJzdWIiOiJ1XzQyIiwiYXVkIjoiYXBpOi8vb3JkZXJzIiwiZXhwIjoxNzY5OTk5OTk5LCJqdGkiOiJhYjEyIn0.FIRMA"
+
+        def leggi(parte: str) -> dict:
+            parte += "=" * (-len(parte) % 4)          # padding base64url
+            return json.loads(base64.urlsafe_b64decode(parte))
+
+        header, payload, _ = token.split(".")
+        print(leggi(header))   # {'alg': 'RS256', 'kid': '3f1'}
+        print(leggi(payload))  # {'iss': ..., 'sub': 'u_42', 'aud': 'api://orders', 'exp': ..., 'jti': 'ab12'}
+      note: >-
+        Nessuna chiave, nessuna firma: solo base64. È la dimostrazione pratica del perché
+        nel payload non vanno codici fiscali, email o ruoli che l'utente non deve vedere.
+    - title: Verifica fatta bene, in Python
+      language: python
+      code: |-
+        import jwt   # PyJWT
+        from jwt import PyJWKClient
+
+        jwks = PyJWKClient("https://auth.esempio.it/.well-known/jwks.json")
+
+        def verifica(token: str) -> dict:
+            chiave = jwks.get_signing_key_from_jwt(token).key     # sceglie in base a kid
+            return jwt.decode(
+                token,
+                chiave,
+                algorithms=["RS256"],                 # lista CHIUSA: niente alg dal token
+                audience="api://orders",              # senza questo accetti token altrui
+                issuer="https://auth.esempio.it",
+                options={"require": ["exp", "iat", "aud", "iss"]},
+                leeway=30,                            # tolleranza per l'orologio sfasato
+            )
+      note: >-
+        Tre righe fanno la sicurezza: `algorithms` chiuso, `audience` e `issuer`
+        verificati. Toglierne una qualsiasi apre un buco reale.
+    - title: Rotazione del refresh token con rilevamento del riuso
+      language: sql
+      code: |-
+        -- Una riga per token emesso, legata alla "famiglia" nata dal login.
+        CREATE TABLE refresh_tokens (
+          id          uuid PRIMARY KEY,
+          family_id   uuid NOT NULL,
+          user_id     uuid NOT NULL,
+          token_hash  bytea NOT NULL,        -- si salva l'hash, mai il token
+          used_at     timestamptz,
+          expires_at  timestamptz NOT NULL
+        );
+        CREATE INDEX ON refresh_tokens (family_id);
+
+        -- Al rinnovo: se il token presentato risulta GIA' usato, è un furto.
+        -- Si invalida tutta la famiglia e si obbliga un nuovo login.
+        UPDATE refresh_tokens SET used_at = now()
+         WHERE family_id = :family AND used_at IS NULL;
+      note: >-
+        Il token si salva come hash, esattamente come una password: chi legge il database
+        non deve poter impersonare nessuno.
+  trade_offs:
+    - option: Sessione server-side
+      pros: Revoca immediata, payload invisibile al client, cookie piccolo
+      cons: Un lookup per richiesta, store condiviso da tenere vivo
+      when: App web con utenti reali, logout e ban che devono avere effetto subito
+    - option: JWT puro a lunga scadenza
+      pros: Nessuna dipendenza sul percorso caldo, ottimo per service-to-service
+      cons: Nessuna revoca, token grandi, rischio se finisce in localStorage
+      when: Machine-to-machine, o token brevissimi
+    - option: Ibrido (access JWT breve + refresh opaco)
+      pros: Verifica senza I/O nel caso comune, revoca reale sul rinnovo
+      cons: Più componenti da implementare e testare, logica di rotazione da curare
+      when: Il default per un prodotto con utenti
+  numbers:
+    - "Access token: 5-15 minuti. Refresh token: giorni o settimane, con rotazione a ogni uso"
+    - "Un JWT con pochi claim pesa 400-800 byte e viaggia a OGNI richiesta: su API chiacchierone il costo si sente"
+    - "Un lookup di sessione su Redis nello stesso datacenter: 0,2-1 ms"
+    - "Tolleranza sull'orologio (leeway) tipica: 30-60 secondi, perché i server non sono mai perfettamente sincronizzati"
   interview_answer: >-
     Parto chiedendomi se mi serve la revoca immediata. Per un'app con utenti reali la
     risposta è quasi sempre sì, quindi non uso JWT a lunga scadenza come unica credenziale.
     Il pattern che adotto è access token JWT breve più refresh token opaco salvato su
     database: ottengo verifica senza I/O sul percorso caldo e mantengo la possibilità di
-    invalidare una sessione al logout o dopo un cambio password. I JWT puri li tengo per
-    la comunicazione service-to-service, dove la revoca è meno critica e mi interessa non
-    avere una dipendenza in più sul percorso di ogni chiamata.
+    invalidare una sessione al logout o dopo un cambio password, con rotazione del refresh
+    e rilevamento del riuso per accorgermi di un furto. I JWT puri li tengo per la
+    comunicazione service-to-service. E in ogni caso fisso l'algoritmo lato server e
+    valido audience e issuer, perché le vulnerabilità storiche dei JWT - alg none e la
+    confusione RS256/HS256 - sono tutte errori di validazione, non di crittografia.
+  senior_signals:
+    - "Dice che il payload è leggibile da chiunque e ne trae la conseguenza pratica"
+    - "Parla di revoca e di rotazione del refresh con reuse detection, non solo di scadenza"
+    - "Fissa la lista degli algoritmi e valida aud/iss, e sa spiegare l'attacco che previene"
+    - "Collega la scelta del contenitore (localStorage vs cookie) ai due fronti XSS e CSRF"
   pitfalls:
-    - "Salvare i JWT in localStorage: qualunque XSS li ruba. HttpOnly cookie è più sicuro"
+    - "Salvare i JWT in localStorage: qualunque XSS li ruba. Un cookie HttpOnly è più sicuro"
     - "JWT con scadenza lunga e nessun meccanismo di revoca"
     - "Mettere dati personali nel payload pensando che sia cifrato"
-  follow_up_questions:
-    - "Come invalidi un JWT prima della sua scadenza?"
-    - "Perché SameSite aiuta contro il CSRF?"
+    - "Accettare l'algoritmo dichiarato nell'header del token invece di imporlo"
+    - "Non validare aud: il token di un altro servizio dello stesso emittente diventa valido anche da te"
+  follow_ups:
+    - question: Come invalidi un JWT prima della sua scadenza?
+      answer: >-
+        Non puoi invalidare il token in sé: puoi solo smettere di accettarlo. Le strade
+        sono tre: scadenze brevi, così la finestra è piccola; una denylist di `jti` in
+        Redis con TTL pari alla scadenza residua, che costa un lookup ma solo per i token
+        revocati; oppure un contatore per utente (token_version) incluso nei claim, che
+        invalida tutti i token emessi prima di un cambio password. Quest'ultima è la più
+        economica quando la revoca serve "per utente" e non "per token".
+    - question: Perché SameSite aiuta contro il CSRF?
+      answer: >-
+        Perché istruisce il browser a non allegare il cookie alle richieste che partono
+        da un altro sito. Con `Lax` - oggi il default - il cookie viaggia solo sulle
+        navigazioni di primo livello in GET, quindi una POST cross-site verso la tua API
+        arriva senza cookie e il CSRF classico muore. Non basta da solo: se l'API deve
+        essere richiamata legittimamente da un altro sito serve `SameSite=None; Secure` e
+        allora il token anti-CSRF torna necessario.
+    - question: Access token in cookie o nell'header Authorization?
+      answer: >-
+        Cookie HttpOnly se il client è un browser sullo stesso sito: protegge dall'XSS
+        che ruba il token, al prezzo di dover pensare al CSRF (SameSite + token anti-CSRF
+        dove serve). Header Authorization se il client è un'app mobile, un altro servizio
+        o una SPA su dominio diverso: lì il CSRF non esiste, perché nessuno allega
+        automaticamente un header, ma il token va tenuto in memoria e non in localStorage.
+    - question: Cosa cambia fra HS256 e RS256 nella pratica operativa?
+      answer: >-
+        HS256 usa un segreto condiviso: chi verifica può anche firmare, quindi ogni
+        servizio che valida i token potrebbe emetterli. RS256/ES256 separano i ruoli -
+        l'authorization server firma con la privata, tutti gli altri verificano con la
+        pubblica presa dal JWKS - e permettono di ruotare le chiavi con `kid` senza
+        toccare i consumatori. In un sistema con più servizi RS256 è quasi sempre la
+        scelta giusta.
+  related: [core-06-authn-vs-authz, core-08-oauth2, core-05-stateless-vs-stateful, eng-04-security]
   resources:
+    - title: "RFC 7519 - JSON Web Token"
+      url: "https://www.rfc-editor.org/rfc/rfc7519.html"
+      kind: doc
     - title: "OWASP - JSON Web Token Cheat Sheet"
       url: "https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_for_Java_Cheat_Sheet.html"
+      kind: doc
+    - title: "OWASP - Session Management Cheat Sheet"
+      url: "https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html"
       kind: doc
 
 - id: core-08-oauth2
@@ -262,32 +1219,182 @@
     OAuth 2.0 è un protocollo di delega di autorizzazione: permette a un'app di agire su
     risorse altrui senza conoscerne la password. Non è un protocollo di autenticazione:
     per il "login con Google" serve OpenID Connect, che aggiunge l'id_token sopra OAuth.
+  deep_dive: |-
+    OAuth nasce per un problema preciso: far agire un'applicazione per conto di un
+    utente su un servizio terzo, senza che l'applicazione veda mai la password. Gli
+    attori sono quattro: il resource owner (l'utente), il client (la tua app),
+    l'authorization server (chi emette i token) e il resource server (l'API che li
+    accetta). Confondere client e resource server è l'errore concettuale più comune.
+
+    Il flusso moderno è uno solo: Authorization Code con PKCE. Il client manda
+    l'utente all'authorization server con `response_type=code`, `redirect_uri`,
+    `scope`, `state` e `code_challenge`; l'utente si autentica e acconsente; torna un
+    `code` monouso sul redirect URI; il client lo scambia al token endpoint
+    presentando il `code_verifier`. Il codice viaggia sul canale del browser, il token
+    no: è questa separazione che rende il flusso sicuro.
+
+    PKCE (RFC 7636) esiste per un attacco concreto: su client pubblici - app mobile,
+    SPA - il codice può essere intercettato, per esempio da un'app malevola registrata
+    sullo stesso schema di URL. Con PKCE il client genera un `code_verifier` casuale
+    (43-128 caratteri) e manda all'inizio solo il suo hash,
+    `code_challenge = base64url(sha256(verifier))` con `code_challenge_method=S256`.
+    Chi intercetta il codice non ha il verifier, e il token endpoint rifiuta lo scambio.
+    OAuth 2.1 lo rende obbligatorio per tutti i client, anche confidenziali, e toglie
+    del tutto implicit flow e password grant.
+
+    Ci sono tre parametri che vengono confusi in continuazione. `state` protegge dal
+    CSRF sul callback: è un valore casuale legato alla sessione del browser, che il
+    client verifica al ritorno. `nonce` è di OpenID Connect e protegge dal replay
+    dell'id_token: viene messo nella richiesta e ritrovato dentro il token. PKCE
+    protegge l'intercettazione del codice. Sono tre difese diverse per tre attacchi
+    diversi, e servono tutte e tre.
+
+    Il secondo grande equivoco è access token contro id_token. L'access token è per il
+    resource server: il client non dovrebbe nemmeno provare a interpretarlo, può
+    essere opaco. L'id_token è di OpenID Connect, è un JWT con i claim identitari
+    (`sub`, `email`, `name`) ed è destinato proprio al client. Usare l'access token
+    come prova di identità è l'errore che porta a bug di sicurezza reali, perché
+    quell'access token potrebbe essere stato emesso per un'altra applicazione.
+
+    Per i servizi senza utente c'è il Client Credentials grant: il servizio si
+    autentica con le proprie credenziali e riceve un token per sé. E per alzare
+    l'asticella oltre i bearer token - che chiunque li possieda può usare - esistono i
+    token vincolati al mittente: mTLS (RFC 8705) o DPoP (RFC 9449), dove il client
+    dimostra a ogni richiesta di possedere una chiave privata. È la risposta giusta
+    alla domanda "e se il token me lo rubano?".
   key_points:
     - "Attori: resource owner (l'utente), client (la tua app), authorization server (Google), resource server (l'API)"
-    - "Il flow moderno è Authorization Code + PKCE, per web e mobile allo stesso modo"
-    - "PKCE (code_verifier/code_challenge) impedisce l'intercettazione del code su client pubblici"
-    - "Implicit flow e Resource Owner Password Credentials sono deprecati"
+    - "Il flow moderno è Authorization Code + PKCE, per web, SPA e mobile allo stesso modo"
+    - "PKCE (RFC 7636): verifier casuale di 43-128 caratteri, challenge = base64url(sha256(verifier)), method S256"
+    - "OAuth 2.1 rende PKCE obbligatorio per tutti i client e rimuove implicit e password grant"
+    - "state = anti-CSRF sul callback; nonce = anti-replay dell'id_token (OIDC); PKCE = anti-intercettazione del code. Tre difese diverse"
     - "Client Credentials è il flow per macchina-a-macchina, senza utente coinvolto"
-    - "access_token = autorizzazione, id_token (OIDC) = identità. Confonderli è l'errore classico"
+    - "access_token = autorizzazione (può essere opaco, è per l'API), id_token = identità (JWT, è per il client). Confonderli è l'errore classico"
+    - "Il redirect_uri si valida per corrispondenza esatta, non per prefisso: il match parziale è una vulnerabilità nota"
+    - "Token vincolati al mittente (mTLS RFC 8705, DPoP RFC 9449) quando il furto del bearer token è un rischio concreto"
+  examples:
+    - title: Authorization Code + PKCE, i due passaggi
+      language: http
+      code: |-
+        # 1) Il browser va all'authorization server
+        GET /authorize
+          ?response_type=code
+          &client_id=ipc-web
+          &redirect_uri=https://app.esempio.it/          # match ESATTO con quello registrato
+          &scope=openid%20profile%20api://orders/read
+          &state=9f2c...                                 # anti-CSRF, legato alla sessione
+          &nonce=71ab...                                 # anti-replay dell'id_token
+          &code_challenge=E9Melhoa2Ow...                 # base64url(sha256(verifier))
+          &code_challenge_method=S256
+
+        # 2) Il client scambia il code, dimostrando di conoscere il verifier
+        POST /token
+        Content-Type: application/x-www-form-urlencoded
+
+        grant_type=authorization_code
+        &code=SplxlOBeZQ...
+        &redirect_uri=https://app.esempio.it/
+        &client_id=ipc-web
+        &code_verifier=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+      note: >-
+        Chi intercetta il `code` al passo 1 non può completare il passo 2: non ha il
+        verifier, e l'hash non è invertibile.
+    - title: Generare verifier e challenge
+      language: python
+      code: |-
+        import base64, hashlib, secrets
+
+        verifier = base64.urlsafe_b64encode(secrets.token_bytes(64)).rstrip(b"=").decode()
+        challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode("ascii")).digest()
+        ).rstrip(b"=").decode()
+
+        assert 43 <= len(verifier) <= 128          # vincolo della RFC 7636
+      note: >-
+        Il padding `=` va tolto: base64url senza padding è ciò che la specifica richiede.
+        Il verifier si conserva nella sessione del client fino allo scambio.
+  trade_offs:
+    - option: Authorization Code + PKCE
+      pros: Sicuro su client pubblici e confidenziali, unico flusso da imparare
+      cons: Richiede un redirect e la gestione dello stato lato client
+      when: Sempre, per login utente (web, SPA, mobile)
+    - option: Client Credentials
+      pros: Nessun utente coinvolto, semplice, adatto ai job
+      cons: Le credenziali del servizio vanno custodite e ruotate
+      when: Servizio che chiama un altro servizio
+    - option: Implicit flow
+      pros: Nessuna chiamata al token endpoint (storicamente comodo per le SPA)
+      cons: Token nel frammento dell'URL, niente refresh sicuro, rimosso da OAuth 2.1
+      when: Mai in un progetto nuovo
+  numbers:
+    - "code_verifier: 43-128 caratteri; il code è monouso e dura tipicamente 30-60 secondi"
+    - "Access token da provider pubblici: 1 ora è il valore più comune (Google, Microsoft)"
+    - "OAuth 2.1 è ancora un draft IETF, ma le sue restrizioni sono già le raccomandazioni della BCP RFC 9700"
   interview_answer: >-
     OAuth serve a delegare l'accesso: dico a Google di rilasciare alla mia app un token con
     permessi limitati, senza che la mia app veda mai la password dell'utente. Il punto che
     spesso si confonde è che OAuth da solo non mi dice chi è l'utente: l'access token è
-    pensato per essere opaco al client. Per il login uso OpenID Connect, che aggiunge un
-    id_token JWT con i claim identitari. Come flow uso Authorization Code con PKCE anche
-    su web, dato che ormai è la raccomandazione generale e mi protegge dall'intercettazione
-    del codice.
+    pensato per il resource server e può essere opaco. Per il login uso OpenID Connect, che
+    aggiunge un id_token JWT con i claim identitari. Come flow uso Authorization Code con
+    PKCE ovunque, anche su web, perché è la raccomandazione di OAuth 2.1 e mi protegge
+    dall'intercettazione del codice. E tengo separate le tre difese: state per il CSRF sul
+    callback, nonce per il replay dell'id_token, PKCE per il codice.
+  senior_signals:
+    - "Distingue nettamente access token e id_token e sa dire a chi è destinato ciascuno"
+    - "Sa che state, nonce e PKCE risolvono tre problemi diversi"
+    - "Cita la validazione esatta del redirect_uri e la rotazione dei refresh token"
+    - "Conosce l'esistenza dei token sender-constrained (mTLS, DPoP) e quando valgono la complessità"
   pitfalls:
     - "Usare l'access token come prova di identità invece dell'id_token"
     - "Non validare il parametro state, restando esposti al CSRF sul callback"
     - "Implementare l'implicit flow perché è quello che si trova nei tutorial vecchi"
-  follow_up_questions:
-    - "A cosa serve PKCE e quale attacco previene?"
-    - "Che differenza c'è tra access token e refresh token?"
+    - "Validare il redirect_uri per prefisso: `https://app.esempio.it.attaccante.com` passa"
+    - "Trattare gli scope come ruoli applicativi: gli scope delimitano ciò che il client può chiedere, non chi è l'utente"
+  follow_ups:
+    - question: A cosa serve PKCE e quale attacco previene?
+      answer: >-
+        Previene l'intercettazione del codice di autorizzazione su client pubblici. Il
+        client genera un segreto casuale (code_verifier) e manda solo il suo hash nella
+        richiesta iniziale; al momento dello scambio deve presentare il segreto in
+        chiaro. Chi ruba il codice - per esempio un'app malevola registrata sullo stesso
+        schema di URL - non ha il verifier e non può ottenere token. OAuth 2.1 lo rende
+        obbligatorio per tutti i client, non solo per quelli pubblici.
+    - question: Che differenza c'è tra access token e refresh token?
+      answer: >-
+        L'access token è la credenziale che presenti all'API: breve, spesso JWT,
+        verificabile senza I/O. Il refresh token serve solo a ottenere un nuovo access
+        token dall'authorization server: è di lunga durata, non va mai mandato all'API ed
+        è tipicamente opaco e revocabile. Per questo il refresh va custodito meglio
+        dell'access, e oggi si usa con rotazione: ogni uso ne emette uno nuovo e
+        invalida il precedente.
+    - question: Cosa sono gli scope e perché non bastano per l'autorizzazione?
+      answer: >-
+        Gli scope limitano ciò che il client può chiedere per conto dell'utente:
+        `orders:read` dice "questa app può leggere gli ordini". Non dicono quali ordini:
+        la proprietà della singola risorsa resta un controllo che fa il resource server.
+        Un sistema che si ferma agli scope è esattamente il sistema che ha problemi di
+        IDOR appena qualcuno cambia un id.
+    - question: Come funziona OpenID Connect rispetto a OAuth?
+      answer: >-
+        È un livello sopra OAuth 2.0. Aggiungendo lo scope `openid` ottieni, oltre
+        all'access token, un id_token JWT firmato con i claim identitari e un endpoint
+        `userinfo` per i dati aggiuntivi. Definisce anche la discovery
+        (`/.well-known/openid-configuration`) e il JWKS per le chiavi. In pratica OAuth
+        risponde "questa app può fare X", OIDC risponde "e l'utente è Mario".
+  related: [core-07-sessions-vs-jwt, core-06-authn-vs-authz, eng-04-security]
   resources:
-    - title: "OAuth 2.0 Simplified"
-      url: "https://www.oauth.com/"
-      kind: article
+    - title: "RFC 6749 - The OAuth 2.0 Authorization Framework"
+      url: "https://www.rfc-editor.org/rfc/rfc6749.html"
+      kind: doc
+    - title: "RFC 7636 - PKCE"
+      url: "https://www.rfc-editor.org/rfc/rfc7636.html"
+      kind: doc
+    - title: "RFC 9700 - OAuth 2.0 Security Best Current Practice"
+      url: "https://www.rfc-editor.org/rfc/rfc9700.html"
+      kind: doc
+    - title: "OAuth 2.1 (draft IETF)"
+      url: "https://datatracker.ietf.org/doc/draft-ietf-oauth-v2-1/"
+      kind: doc
 
 - id: core-09-rate-limiting-throttling
   title: Rate limiting vs throttling
@@ -300,26 +1407,177 @@
     Il rate limiting rifiuta le richieste oltre una soglia (429); il throttling le
     rallenta o le accoda invece di rifiutarle. Entrambi proteggono il servizio, ma
     comunicano cose diverse al client.
+  deep_dive: |-
+    Il rate limiting serve a tre scopi distinti, e confonderli porta a configurazioni
+    sbagliate: proteggere il servizio dal sovraccarico (limite globale), garantire
+    equità fra i client perché uno solo non consumi tutto (limite per tenant), e
+    contenere gli abusi come il credential stuffing (limite per IP o per account su
+    endpoint sensibili). Le tre esigenze hanno soglie e chiavi diverse.
+
+    Gli algoritmi classici sono quattro. *Fixed window*: un contatore per finestra di
+    tempo, semplice ma con il difetto del doppio burst al confine - con 100 richieste
+    al minuto se ne possono fare 100 alle 12:00:59 e altre 100 alle 12:01:00, cioè 200
+    in due secondi. *Sliding window log*: si tengono i timestamp e si conta quanti
+    stanno nell'ultima finestra mobile; è esatto ma costoso in memoria. *Sliding
+    window counter*: si interpolano la finestra corrente e la precedente, ottenendo
+    una buona approssimazione a costo costante - è quello che usano Cloudflare e molti
+    gateway. *Token bucket*: un secchio di capacità B che si riempie a R token al
+    secondo; ogni richiesta consuma un token. È lo standard de facto perché separa due
+    parametri che contano davvero: la capacità è il burst tollerato, il refill rate è
+    il throughput sostenuto. Il *leaky bucket* è il suo duale: smussa l'uscita a
+    ritmo costante, quindi è più adatto a proteggere un consumatore lento.
+
+    In un sistema distribuito il contatore deve essere condiviso, altrimenti con N
+    istanze il limite effettivo diventa N volte quello configurato. La soluzione più
+    comune è Redis; il punto delicato è l'atomicità: leggere il contatore, decidere e
+    riscriverlo sono tre operazioni, e fra loro ci sta una race. Si risolve con uno
+    script Lua, che Redis esegue atomicamente, o con INCR+EXPIRE per la fixed window.
+    C'è poi un compromesso di prestazioni: chiedere a Redis a ogni richiesta aggiunge
+    un round trip, quindi in sistemi ad altissimo volume si usa il rate limiting
+    approssimato, con quote locali sincronizzate periodicamente.
+
+    Cosa restituire conta quanto quanto limitare. Il codice è 429 Too Many Requests, e
+    deve portare `Retry-After`. I campi `RateLimit` e `RateLimit-Policy` del draft
+    IETF stanno standardizzando ciò che finora era `X-RateLimit-*`: comunicano al
+    client quota, residuo e reset, così può rallentare da solo invece di sbattere
+    contro il muro. Da evitare il 503 al posto del 429: il primo dice "sono rotto", il
+    secondo dice "stai esagerando", e i client li trattano diversamente.
+
+    Infine la scelta della chiave, che è dove si sbaglia di più. Limitare per IP
+    penalizza intere aziende dietro NAT e non ferma un attaccante distribuito;
+    limitare per utente non protegge gli endpoint di login, dove l'utente non è ancora
+    autenticato; limitare per API key è l'unico che riflette davvero un contratto
+    commerciale. In pratica si combinano più livelli: per API key sul traffico
+    autenticato, per IP e per account sugli endpoint di autenticazione, più un limite
+    globale come ultima rete di sicurezza.
   key_points:
     - "Algoritmi: fixed window (semplice, soffre il burst al confine), sliding window (più equo), token bucket (permette burst controllati), leaky bucket (smussa il traffico in uscita)"
     - "Token bucket è lo standard de facto: capacità = burst tollerato, refill rate = throughput sostenuto"
+    - "Il difetto della fixed window: 2x il limite a cavallo di due finestre (100 alle 12:00:59 + 100 alle 12:01:00)"
     - "In un sistema distribuito il contatore deve essere condiviso: Redis con INCR+EXPIRE o script Lua per l'atomicità"
-    - "Header da restituire: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset e Retry-After sul 429"
+    - "Header da restituire: RateLimit e RateLimit-Policy (draft IETF, prima X-RateLimit-*) e Retry-After sul 429"
+    - "429 significa 'stai esagerando', 503 significa 'sono rotto': non sono intercambiabili"
     - "La chiave di limite va scelta con cura: per utente, per API key, per IP, per tenant. L'IP da solo penalizza chi sta dietro NAT"
+    - "Tre scopi diversi: protezione dal sovraccarico, equità fra tenant, contenimento degli abusi. Soglie e chiavi diverse per ciascuno"
+  examples:
+    - title: Token bucket atomico in Redis (script Lua)
+      language: lua
+      code: |-
+        -- KEYS[1] = chiave del secchio   ARGV = capacita, refill/s, ora, costo
+        local capacita  = tonumber(ARGV[1])
+        local rate      = tonumber(ARGV[2])
+        local ora       = tonumber(ARGV[3])
+        local costo     = tonumber(ARGV[4])
+
+        local dati    = redis.call("HMGET", KEYS[1], "token", "ts")
+        local token   = tonumber(dati[1]) or capacita
+        local ts      = tonumber(dati[2]) or ora
+
+        -- ricarica proporzionale al tempo trascorso, senza superare la capacita
+        token = math.min(capacita, token + (ora - ts) * rate)
+
+        local ok = 0
+        if token >= costo then
+          token = token - costo
+          ok = 1
+        end
+
+        redis.call("HMSET", KEYS[1], "token", token, "ts", ora)
+        redis.call("EXPIRE", KEYS[1], math.ceil(capacita / rate) * 2)
+        return { ok, math.floor(token) }
+      note: >-
+        Lo script gira atomicamente: niente race fra lettura e scrittura. Il costo
+        parametrico permette di far pesare di più le operazioni care (upload, export).
+    - title: Il client che collabora invece di sbattere
+      language: python
+      code: |-
+        async def chiama(client, url, tentativi=3):
+            for tentativo in range(tentativi):
+                r = await client.get(url)
+                if r.status_code != 429:
+                    return r
+                # Retry-After è la fonte di verità; il backoff è il piano B
+                attesa = float(r.headers.get("Retry-After", 2 ** tentativo))
+                # jitter: senza, tutti i client ritentano nello stesso istante
+                await asyncio.sleep(attesa * (0.5 + random.random()))
+            raise TooManyRetries(url)
+      note: >-
+        Il jitter non è un dettaglio: senza, mille client rifiutati insieme tornano
+        insieme e ricreano il picco che il rate limiter aveva appena assorbito.
+  trade_offs:
+    - option: Token bucket
+      pros: Tollera burst legittimi, due parametri chiari, poco stato (2 campi)
+      cons: Con capacità alta si possono superare di molto le soglie istantanee
+      when: API pubbliche e interne, default sensato
+    - option: Sliding window counter
+      pros: Niente doppio burst al confine, costo costante
+      cons: Approssimato, leggermente più complesso da spiegare
+      when: Quando l'equità sulla finestra conta più del burst
+    - option: Coda con throttling
+      pros: Non perde lavoro, appiattisce i picchi
+      cons: Latenza che cresce, rischio di code infinite e timeout a valle
+      when: Job interni e consumatori che controlli
+  numbers:
+    - "Limiti tipici di API pubbliche: 10-100 richieste/secondo per chiave; GitHub usa 5.000 richieste/ora autenticate"
+    - "Su login e reset password: soglie molto più basse, tipo 5-10 tentativi per account e per IP ogni 15 minuti"
+    - "Un round trip a Redis per ogni richiesta costa 0,2-1 ms: accettabile fino a decine di migliaia di richieste al secondo"
   interview_answer: >-
     Li vedo come due risposte diverse alla stessa pressione. Il rate limiting dice no e
     restituisce 429 con Retry-After, ed è quello che uso sulle API pubbliche perché è
     esplicito e il client può adattarsi. Il throttling invece rallenta senza rifiutare, e
     lo uso sui job interni dove ho il controllo del consumatore e preferisco allungare i
     tempi piuttosto che perdere lavoro. Come algoritmo parto quasi sempre da token bucket
-    su Redis, perché mi lascia tollerare i burst legittimi senza alzare la soglia media.
+    su Redis con uno script Lua per l'atomicità, perché mi lascia tollerare i burst
+    legittimi senza alzare la soglia media. E scelgo la chiave in base allo scopo: API key
+    per l'equità fra clienti, IP più account sugli endpoint di login, più un limite
+    globale come rete di sicurezza.
+  senior_signals:
+    - "Distingue i tre scopi (sovraccarico, equità, abusi) e non usa una soglia sola per tutto"
+    - "Sa perché serve l'atomicità in Redis e propone Lua o INCR+EXPIRE"
+    - "Parla di Retry-After e jitter dal lato client, non solo del lato server"
+    - "Nota che con N istanze un contatore locale moltiplica il limite per N"
   pitfalls:
     - "Contatore in memoria con più istanze: il limite effettivo diventa N volte quello previsto"
     - "Limitare solo per IP in presenza di NAT aziendali o proxy mobile"
     - "429 senza Retry-After, che spinge i client a ritentare subito e peggiorare il carico"
-  follow_up_questions:
-    - "Come implementeresti un rate limiter distribuito con Redis?"
-    - "Perché il fixed window soffre il problema del burst al confine della finestra?"
+    - "Usare 503 al posto di 429: il client lo interpreta come guasto e ritenta con politiche diverse"
+    - "Applicare lo stesso limite a un GET leggero e a un export che genera un CSV da 200 MB"
+  follow_ups:
+    - question: Come implementeresti un rate limiter distribuito con Redis?
+      answer: >-
+        Token bucket con stato in una hash per chiave (token residui + timestamp
+        dell'ultima ricarica) e uno script Lua che ricarica, verifica e decrementa in
+        un'unica operazione atomica. Metto una EXPIRE proporzionale al tempo di ricarica
+        completa per non accumulare chiavi morte. Se Redis diventa il collo di bottiglia
+        passo a quote locali per istanza sincronizzate ogni tot, accettando un limite
+        approssimato.
+    - question: Perché il fixed window soffre il problema del burst al confine della finestra?
+      answer: >-
+        Perché il contatore si azzera di colpo. Con 100 richieste al minuto un client può
+        farne 100 nell'ultimo secondo della finestra e altre 100 nel primo della
+        successiva: 200 richieste in due secondi, il doppio del limite nominale. Lo
+        sliding window counter risolve interpolando il conteggio della finestra
+        precedente, il token bucket lo risolve perché il credito si ricostituisce
+        gradualmente e non di colpo.
+    - question: Cosa fai quando Redis, che tiene i contatori, non risponde?
+      answer: >-
+        È una decisione di progetto da prendere prima: fail-open o fail-closed. Su
+        un'API pubblica esposta ad abusi preferisco fail-closed su endpoint sensibili
+        (login) e fail-open sul resto, perché un guasto al rate limiter non deve
+        diventare un'interruzione di servizio. In ogni caso ci metto un limite locale
+        per istanza come rete di sicurezza e un allarme, perché "il rate limiter è giù"
+        deve essere una notizia.
+  related: [core-04-http-status-codes, rel-32-retries-timeouts-breakers, rel-40-traffic-spikes, core-02-rest-vs-graphql]
+  resources:
+    - title: "RateLimit header fields for HTTP (draft IETF)"
+      url: "https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/"
+      kind: doc
+    - title: "Cloudflare - How we built rate limiting"
+      url: "https://blog.cloudflare.com/counting-things-a-lot-of-different-things/"
+      kind: article
+    - title: "Stripe - Scaling your API with rate limiters"
+      url: "https://stripe.com/blog/rate-limiters"
+      kind: article
 
 - id: core-10-idempotency
   title: Idempotenza (specialmente nei pagamenti)
@@ -332,30 +1590,185 @@
     Un'operazione è idempotente se eseguirla più volte lascia il sistema nello stesso
     stato di averla eseguita una volta sola. Serve perché la rete non dà mai certezze: un
     timeout non dice se l'operazione è andata a buon fine o no.
+  deep_dive: |-
+    Il problema da cui tutto nasce è l'incertezza del timeout. Il client manda un
+    pagamento, scade il timeout, e a quel punto ha tre ipotesi indistinguibili: la
+    richiesta non è mai arrivata, è arrivata ed è stata eseguita ma la risposta si è
+    persa, oppure è ancora in esecuzione. Senza idempotenza ogni retry è una scommessa
+    fra perdere l'ordine e addebitare due volte.
+
+    La soluzione standard è la idempotency key: un identificatore generato dal client,
+    uno per *tentativo logico* (non uno per retry!), inviato nell'header
+    `Idempotency-Key`. Il server lo registra insieme al risultato della prima
+    esecuzione; se la stessa chiave ritorna, non riesegue: restituisce la risposta
+    memorizzata. È il modo in cui funzionano Stripe, Adyen e PayPal, e c'è anche un
+    draft IETF che ne standardizza l'header, benché sia scaduto senza diventare RFC.
+
+    Il punto che separa un'implementazione corretta da una che sembra corretta è
+    l'atomicità. Controllare "esiste già questa chiave?" e poi eseguire sono due
+    operazioni distinte: fra le due ci sta una race, e due richieste parallele passano
+    entrambe il controllo. La forma giusta è inserire la chiave con un vincolo di
+    unicità *dentro la stessa transazione* che esegue l'operazione: il database diventa
+    l'arbitro, una richiesta vince e l'altra riceve una violazione di unicità, che si
+    traduce in "questa chiave esiste già".
+
+    Ne segue che gli stati da gestire sono tre, non due. Chiave nuova: si esegue.
+    Chiave completata: si restituisce la risposta salvata, con lo stesso status code.
+    Chiave in corso: la prima richiesta sta ancora lavorando, e qui si risponde 409 (o
+    si attende brevemente), perché rieseguire sarebbe proprio il doppio addebito che si
+    vuole evitare. Va anche confrontato il corpo della richiesta con quello originale -
+    di solito via hash - perché riusare la stessa chiave con parametri diversi è un
+    errore del client che va segnalato, non assecondato.
+
+    Idempotenza e deduplicazione si somigliano ma rispondono a domande diverse.
+    L'idempotenza è una proprietà dell'operazione lato server, richiesta per richiesta.
+    La deduplicazione è il filtro che si mette su un flusso di messaggi per scartare
+    quelli già visti. Nei sistemi a messaggi le due si incontrano: poiché la consegna
+    è quasi sempre at-least-once, il consumatore deve essere idempotente o deduplicare,
+    altrimenti "exactly-once" resta una promessa da slide.
+
+    Un'ultima nota di progetto: molte operazioni si possono rendere naturalmente
+    idempotenti senza chiavi, scegliendo bene il modello. `PUT /carts/42/items/ABC
+    {qty: 3}` è idempotente per costruzione, mentre "aggiungi una unità" non lo è. Un
+    identificatore deciso dal client (UUID dell'ordine) trasforma una creazione in un
+    upsert. Prima di costruire l'infrastruttura delle idempotency key, vale la pena
+    chiedersi se il dominio si può modellare in modo che il problema non si presenti.
   key_points:
     - "Il problema reale: il client va in timeout e non sa se il pagamento è passato. Se ritenta, rischia il doppio addebito"
     - "Soluzione standard: idempotency key generata dal client, salvata dal server con il risultato della prima esecuzione"
+    - "Una chiave per tentativo logico, non per retry: se la rigeneri a ogni retry non serve a niente"
     - "Alla seconda richiesta con la stessa chiave il server NON riesegue: restituisce la risposta memorizzata"
     - "La chiave va inserita con un vincolo di unicità nella stessa transazione dell'operazione, altrimenti due richieste parallele passano entrambe"
     - "Vanno gestiti tre stati: chiave nuova, chiave già completata (restituisci il risultato), chiave in corso (409 o attesa)"
+    - "Va confrontato anche l'hash del corpo: stessa chiave con parametri diversi è un errore del client (422), non una ripetizione"
     - "Le chiavi hanno un TTL: 24 ore è una scelta comune"
+    - "Molte operazioni si rendono idempotenti per modellazione (PUT con id scelto dal client) senza bisogno di chiavi"
+  examples:
+    - title: Lo schema e la transazione che rende tutto atomico
+      language: sql
+      code: |-
+        CREATE TABLE idempotency_keys (
+          key          text PRIMARY KEY,           -- l'unicità è il cuore del meccanismo
+          user_id      uuid NOT NULL,
+          request_hash bytea NOT NULL,             -- per accorgersi del riuso con corpo diverso
+          state        text NOT NULL,              -- in_progress | done
+          status_code  int,
+          response     jsonb,
+          created_at   timestamptz NOT NULL DEFAULT now()
+        );
+
+        BEGIN;
+          -- Se la chiave esiste già, questa INSERT non fa nulla: niente race.
+          INSERT INTO idempotency_keys (key, user_id, request_hash, state)
+          VALUES (:key, :user, :hash, 'in_progress')
+          ON CONFLICT (key) DO NOTHING;
+          -- ... se ho inserito io, eseguo il pagamento nella STESSA transazione ...
+          INSERT INTO payments (id, user_id, amount_cents) VALUES (:pid, :user, :amount);
+          UPDATE idempotency_keys
+             SET state = 'done', status_code = 201, response = :body
+           WHERE key = :key;
+        COMMIT;
+      note: >-
+        Se il processo muore a metà, la transazione non è committata: la chiave resta
+        assente e il retry rifà tutto da capo, correttamente.
+    - title: I tre stati lato applicazione
+      language: python
+      code: |-
+        async def crea_pagamento(req: Richiesta, key: str, user: User) -> Response:
+            corpo_hash = sha256(req.canonical_json().encode()).digest()
+            riga = await repo.claim(key, user.id, corpo_hash)     # INSERT ... ON CONFLICT
+
+            if riga.appena_creata:
+                esito = await esegui_pagamento(req)               # stessa transazione
+                await repo.completa(key, 201, esito)
+                return Response(201, esito)
+
+            if riga.request_hash != corpo_hash:
+                raise HTTPException(422, "Idempotency-Key già usata con un corpo diverso")
+
+            if riga.state == "done":
+                return Response(riga.status_code, riga.response)   # replay della risposta
+
+            # state == 'in_progress': la prima richiesta sta ancora lavorando
+            raise HTTPException(409, "Richiesta con la stessa chiave in corso")
+      note: >-
+        Il ramo 409 è quello che quasi tutti dimenticano al colloquio, ed è proprio il
+        caso in cui il doppio addebito si verificherebbe.
+  trade_offs:
+    - option: Idempotency key esplicita
+      pros: Funziona su qualunque operazione, anche con effetti esterni
+      cons: Tabella, TTL, pulizia, tre stati da gestire correttamente
+      when: "Pagamenti, ordini, invii: tutto ciò che non si può ripetere"
+    - option: Identificatore scelto dal client (upsert)
+      pros: Idempotenza gratis, nessuna infrastruttura aggiuntiva
+      cons: Richiede che il client sappia generare id e che il dominio lo permetta
+      when: Creazione di risorse il cui id può essere un UUID lato client
+    - option: Deduplicazione a valle (sul consumatore)
+      pros: Protegge anche da duplicati prodotti da altri (broker, retry interni)
+      cons: Non evita l'esecuzione doppia, la scarta dopo; serve uno store dei visti
+      when: Consumatori di code, dove la consegna è at-least-once
+  numbers:
+    - "TTL delle chiavi: 24 ore da Stripe in poi è lo standard di fatto"
+    - "Dimensione tipica della chiave: un UUIDv4, 36 caratteri"
+    - "Il doppio addebito costa molto più del lavoro per evitarlo: un chargeback in Europa costa tipicamente 15-25 euro oltre all'importo"
   interview_answer: >-
     Il caso che uso per spiegarlo è il pagamento: il client manda la richiesta, scade il
     timeout e non sa se l'addebito è avvenuto. Senza idempotenza ogni retry è un rischio di
-    doppio addebito. Faccio generare al client una idempotency key, tipicamente un UUID per
-    tentativo logico, e sul server la salvo con un vincolo di unicità dentro la stessa
-    transazione che esegue l'operazione. Così se arrivano due richieste in parallelo, una
-    sola vince sul constraint e l'altra trova la chiave già presente e restituisce il
-    risultato memorizzato invece di rieseguire. La parte che si dimentica spesso è proprio
-    lo stato intermedio, la richiesta ancora in corso: lì rispondo 409 e lascio ritentare.
+    doppio addebito. Faccio generare al client una idempotency key, un UUID per tentativo
+    logico, e sul server la salvo con un vincolo di unicità dentro la stessa transazione
+    che esegue l'operazione. Così se arrivano due richieste in parallelo, una sola vince
+    sul constraint e l'altra trova la chiave già presente e restituisce il risultato
+    memorizzato invece di rieseguire. La parte che si dimentica spesso è proprio lo stato
+    intermedio, la richiesta ancora in corso: lì rispondo 409 e lascio ritentare. E prima
+    di tutto questo guardo se posso modellare l'operazione come un PUT con id scelto dal
+    client, che è idempotente senza infrastruttura.
+  senior_signals:
+    - "Mette l'inserimento della chiave nella stessa transazione e sa dire perché"
+    - "Gestisce lo stato 'in corso' e non solo nuovo/completato"
+    - "Confronta l'hash del corpo per intercettare il riuso scorretto della chiave"
+    - "Propone la modellazione idempotente come alternativa prima di costruire la tabella"
   pitfalls:
     - "Controllare l'esistenza della chiave PRIMA della transazione: fra il controllo e l'inserimento ci sta una race"
     - "Non gestire lo stato 'in corso' e permettere due esecuzioni concorrenti"
     - "Chiave generata dal server: non serve a nulla, cambia a ogni retry"
-  follow_up_questions:
-    - "Cosa succede se due richieste con la stessa idempotency key arrivano contemporaneamente?"
-    - "Che differenza c'è tra idempotenza e deduplicazione?"
+    - "Rigenerare la chiave a ogni tentativo lato client: stesso effetto di non averla"
+    - "Salvare il risultato ma non lo status code: il replay risponde 200 dove la prima volta era 201"
+  follow_ups:
+    - question: Cosa succede se due richieste con la stessa idempotency key arrivano contemporaneamente?
+      answer: >-
+        Vince chi riesce a inserire la chiave: il vincolo di unicità fa da arbitro. La
+        seconda riceve una violazione, legge la riga e trova lo stato `in_progress`,
+        quindi risponde 409 e invita a ritentare, oppure attende brevemente e poi
+        restituisce la risposta memorizzata. Ciò che non deve succedere è che entrambe
+        eseguano: per questo il controllo e l'esecuzione stanno nella stessa transazione.
+    - question: Che differenza c'è tra idempotenza e deduplicazione?
+      answer: >-
+        L'idempotenza è una proprietà dell'operazione: eseguirla N volte equivale a
+        eseguirla una volta. La deduplicazione è un filtro a valle: riconosco un
+        messaggio già visto e lo scarto. La prima è progettata nell'API, la seconda nel
+        consumatore. Nei sistemi a code servono entrambe, perché la consegna è
+        at-least-once e i duplicati arrivano comunque.
+    - question: E se l'operazione chiama un servizio esterno che non è idempotente?
+      answer: >-
+        Allora la mia chiave deve propagarsi: quasi tutti i PSP accettano a loro volta un
+        Idempotency-Key, e gli mando lo stesso valore, così la catena resta idempotente.
+        Dove il servizio esterno non lo supporta, registro l'esito prima di rispondere e
+        uso il pattern outbox con un identificatore correlato, in modo che il retry possa
+        interrogare lo stato invece di rifare la chiamata.
+    - question: Per quanto tempo conservi le chiavi e cosa succede dopo la scadenza?
+      answer: >-
+        24 ore è il valore di riferimento: copre ampiamente i retry automatici e i
+        tentativi manuali. Dopo la scadenza la chiave sparisce e una richiesta con quello
+        stesso valore verrebbe eseguita di nuovo, quindi il TTL va scelto più lungo della
+        finestra di retry più aggressiva dei miei client e documentato nel contratto.
+  related: [core-03-http-methods, rel-31-delivery-semantics, rel-32-retries-timeouts-breakers, db-19-duplicate-records]
   resources:
     - title: "Stripe - Idempotent requests"
       url: "https://docs.stripe.com/api/idempotent_requests"
       kind: doc
+    - title: "The Idempotency-Key HTTP Header Field (draft IETF)"
+      url: "https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/"
+      kind: doc
+    - title: "AWS - Making retries safe with idempotent APIs"
+      url: "https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/"
+      kind: article

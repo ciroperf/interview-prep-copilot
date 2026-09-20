@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from conftest import SAMPLE_JOB
 
-from app.domain.models import StudyPlanCreate
+from app.domain.models import PlanItem, StudyPlanCreate
 from app.services.jobs import JobAnalyzer
 from app.services.planner import StudyPlanBuilder, plan_by_day, plan_progress_by_track
 
@@ -148,21 +148,55 @@ async def test_i_junior_ricevono_piu_esercizi_dei_senior(kb, offline_ai):
     assert any(i.kind == "system_design" for i in piano_senior.items)
 
 
+def _sequenza_piu_lunga(valori: list[str]) -> int:
+    piu_lunga = massimo = 1
+    for precedente, corrente in zip(valori, valori[1:], strict=False):
+        piu_lunga = piu_lunga + 1 if corrente == precedente else 1
+        massimo = max(massimo, piu_lunga)
+    return massimo
+
+
 async def test_i_giorni_alternano_teoria_e_pratica(kb, offline_ai):
-    """Sei quiz di fila sono tecnicamente corretti ma impraticabili da seguire."""
+    """Sei quiz di fila sono tecnicamente corretti ma impraticabili da seguire.
+
+    Il vincolo vale dove l'alternanza è possibile: una giornata fatta solo di
+    studio non ha nulla con cui alternarsi, e pretenderlo significherebbe
+    chiedere al planner di inventare attività che il piano non prevede.
+    """
     builder = StudyPlanBuilder(kb, offline_ai)
     plan = await builder.build(
         _posting(), StudyPlanCreate(job_id="x", days=7, daily_minutes=90, use_ai=False)
     )
     for giorno in plan_by_day(plan):
         tracce = [i["track"] for i in giorno["items"]]
-        piu_lunga = massimo = 1
-        for precedente, corrente in zip(tracce, tracce[1:], strict=False):
-            piu_lunga = piu_lunga + 1 if corrente == precedente else 1
-            massimo = max(massimo, piu_lunga)
-        assert massimo <= 4, (
-            f"giorno {giorno['day']}: {massimo} attività di fila dello stesso tipo"
-        )
+        if len(set(tracce)) > 1:
+            assert _sequenza_piu_lunga(tracce) <= 4, (
+                f"giorno {giorno['day']}: troppe attività di fila dello stesso tipo"
+            )
+        # I quiz restano il caso da sorvegliare: sono brevi, quindi tendono ad
+        # accumularsi, ed è proprio la sequenza che stanca di più.
+        assert _sequenza_piu_lunga([i["kind"] for i in giorno["items"]] ) <= 4 or all(
+            i["kind"] == "study" for i in giorno["items"]
+        ), f"giorno {giorno['day']}: troppe attività di fila dello stesso genere"
+
+
+async def test_l_alternanza_non_dipende_dalla_fascia_di_priorita(kb, offline_ai):
+    """Il caso che sfuggiva: una fascia di priorità con solo teoria.
+
+    L'alternanza dentro la fascia non basta, perché le fasce si susseguono e la
+    sequenza lunga ricompare a cavallo fra due. Qui si verifica il passaggio che
+    spezza le sequenze guardando l'intero elenco.
+    """
+    items = [
+        PlanItem(title=f"t{n}", kind="study", track="knowledge", estimated_minutes=20, priority=3)
+        for n in range(6)
+    ] + [
+        PlanItem(title=f"q{n}", kind="quiz", track="technical", estimated_minutes=10, priority=3)
+        for n in range(2)
+    ]
+    ordinati = StudyPlanBuilder._break_runs(items)
+    assert _sequenza_piu_lunga([i.track for i in ordinati]) <= 4
+    assert len(ordinati) == len(items)
 
 
 async def test_nessun_quiz_su_argomenti_non_studiati(kb, offline_ai):

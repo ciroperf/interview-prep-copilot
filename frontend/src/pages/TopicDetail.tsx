@@ -12,6 +12,65 @@ import {
   formatMinutes,
 } from '../components/ui'
 import { api } from '../lib/api'
+import type { Example, FollowUp, TradeOff } from '../lib/types'
+
+/** Un esempio: si legge, si prova, si capisce se si era capito. */
+function ExampleBlock({ example }: { example: Example }) {
+  return (
+    <figure className="example">
+      <figcaption>
+        {example.title}
+        {example.language !== 'text' && <span className="badge">{example.language}</span>}
+      </figcaption>
+      <pre>
+        <code>{example.code.replace(/\n+$/, '')}</code>
+      </pre>
+      {example.note && <p className="faint">{example.note}</p>}
+    </figure>
+  )
+}
+
+/** La domanda vera non è "cos'è X" ma "perché X e non Y": qui c'è il prezzo. */
+function TradeOffTable({ rows }: { rows: TradeOff[] }) {
+  return (
+    <div className="table-scroll">
+      <table className="grid">
+        <thead>
+          <tr>
+            <th>Opzione</th>
+            <th>A favore</th>
+            <th>Contro</th>
+            <th>Quando</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i}>
+              <th scope="row">{row.option}</th>
+              <td>{row.pros}</td>
+              <td>{row.cons}</td>
+              <td className="muted">{row.when}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/** Chiusa di default: prima prova a rispondere, poi apri. */
+function FollowUpList({ items }: { items: FollowUp[] }) {
+  return (
+    <div className="followups">
+      {items.map((item, i) => (
+        <details key={i}>
+          <summary>{item.question}</summary>
+          {item.answer && <Prose text={item.answer} />}
+        </details>
+      ))}
+    </div>
+  )
+}
 
 export default function TopicDetail() {
   const { topicId = '' } = useParams()
@@ -63,6 +122,44 @@ export default function TopicDetail() {
         )}
       </div>
 
+      {topic.deep_dive && (
+        <div className="card">
+          <h2>Come funziona</h2>
+          <Prose text={topic.deep_dive} />
+        </div>
+      )}
+
+      {topic.key_points.length > 0 && (
+        <div className="card">
+          <Bullets items={topic.key_points} title="Punti chiave" />
+        </div>
+      )}
+
+      {topic.examples.length > 0 && (
+        <div className="card">
+          <h2>Esempi</h2>
+          {topic.examples.map((example, i) => (
+            <ExampleBlock key={i} example={example} />
+          ))}
+        </div>
+      )}
+
+      {topic.trade_offs.length > 0 && (
+        <div className="card">
+          <h2>Trade-off</h2>
+          <TradeOffTable rows={topic.trade_offs} />
+        </div>
+      )}
+
+      {topic.numbers.length > 0 && (
+        <div className="card">
+          <Bullets items={topic.numbers} title="Numeri da ricordare" />
+          <p className="faint">
+            Un ordine di grandezza detto con sicurezza vale più di tre frasi di contorno.
+          </p>
+        </div>
+      )}
+
       {topic.interview_answer && (
         <div className="card">
           <h2>Come rispondere al colloquio</h2>
@@ -76,9 +173,9 @@ export default function TopicDetail() {
         </div>
       )}
 
-      {topic.key_points.length > 0 && (
+      {topic.senior_signals.length > 0 && (
         <div className="card">
-          <Bullets items={topic.key_points} title="Punti chiave" />
+          <Bullets items={topic.senior_signals} title="Cosa distingue una risposta senior" />
         </div>
       )}
 
@@ -88,9 +185,31 @@ export default function TopicDetail() {
         </div>
       )}
 
-      {topic.follow_up_questions.length > 0 && (
+      {(topic.follow_ups.length > 0 || topic.follow_up_questions.length > 0) && (
         <div className="card">
-          <Bullets items={topic.follow_up_questions} title="Possibili domande di approfondimento" />
+          <h2>Possibili domande di approfondimento</h2>
+          {topic.follow_ups.length > 0 ? (
+            <FollowUpList items={topic.follow_ups} />
+          ) : (
+            <ul>
+              {topic.follow_up_questions.map((question, i) => (
+                <li key={i}>{question}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {topic.related.length > 0 && (
+        <div className="card">
+          <h2>Argomenti collegati</h2>
+          <div className="row">
+            {topic.related.map((id) => (
+              <Link key={id} className="btn sm" to={`/knowledge/${id}`}>
+                {id.replace(/^[a-z]+-\d+-/, '').replace(/-/g, ' ')}
+              </Link>
+            ))}
+          </div>
         </div>
       )}
 

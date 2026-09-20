@@ -412,6 +412,12 @@ TOPIC_SCHEMA = {
             "type": "string",
             "description": "2-4 frasi: cos'è e quale problema risolve",
         },
+        "deep_dive": {
+            "type": "string",
+            "description": "La spiegazione da studiare: 3-6 paragrafi su come funziona "
+            "davvero, quando si usa, cosa succede quando si rompe. Separa i "
+            "paragrafi con una riga vuota.",
+        },
         "key_points": {
             "type": "array",
             "items": {"type": "string"},
