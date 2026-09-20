@@ -12,6 +12,16 @@ Tutte le rotte tranne `/api/health` e `/api/meta` richiedono l'header
 |---|---|---|
 | GET | `/health` | Liveness. Pubblica, senza I/O. |
 | GET | `/meta` | Configurazione dell'istanza e conteggi del catalogo. |
+| POST | `/ai/selftest` | Esegue una generazione minima e riferisce cosa ha funzionato. |
+
+```bash
+curl -s -X POST "$API/api/ai/selftest" -H "X-Access-Code: $CODE" | python3 -m json.tool
+```
+
+Il selftest è il modo rapido di verificare modello, versione dell'API e
+permessi dopo un cambio di configurazione. Risponde `400` se l'AI non è
+configurata; se la chiamata fallisce restituisce `ok: false` con l'errore e un
+campo `hint` che dice cosa cambiare.
 
 ```bash
 curl -s "$API/api/meta" | python3 -m json.tool

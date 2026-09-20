@@ -66,6 +66,11 @@ def guess_style(deployment: str, family: str = "auto") -> CallStyle:
     if family == "standard":
         return STANDARD_STYLE
     name = deployment.lower().strip()
+    # Le varianti "-chat" (gpt-5-chat, gpt-5.2-chat, gpt-chat-latest) sono le
+    # controparti conversazionali non-reasoning: accettano temperature e non
+    # spendono token in ragionamento.
+    if "chat" in name:
+        return STANDARD_STYLE
     return REASONING_STYLE if name.startswith(REASONING_PREFIXES) else STANDARD_STYLE
 
 

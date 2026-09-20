@@ -263,3 +263,17 @@ def test_aggiunta_senza_ai_e_senza_contenuto_da_400(client):
     response = client.post("/api/knowledge/topics", json={"term": "Kubernetes"})
     assert response.status_code == 400
     assert "modello AI" in response.json()["detail"]
+
+
+def test_selftest_ai_richiede_la_configurazione(client):
+    """Senza AI configurata il selftest deve dirlo, non fallire con un 500."""
+    response = client.post("/api/ai/selftest")
+    assert response.status_code == 400
+    assert "AZURE_OPENAI_ENDPOINT" in response.json()["detail"]
+
+
+def test_meta_riporta_la_famiglia_del_modello(client):
+    meta = client.get("/api/meta").json()
+    # Senza AI i campi ci sono comunque, così il frontend non deve indovinare.
+    assert "ai_family" in meta
+    assert "ai_max_output_tokens" in meta

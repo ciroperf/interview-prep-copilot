@@ -21,12 +21,40 @@ cd terraform
 ./scripts/list-models.sh swedencentral
 ```
 
-Ottieni nome, versione, SKU e capacità massima di ogni modello deployabile lì.
-Se un modello che ti interessa non compare, prova un'altra regione: `eastus` e
-`swedencentral` sono di solito le più complete.
+Ottieni nome, versione, **tutte le SKU** e la capacità massima di ogni modello
+di chat deployabile lì. Lo script esclude di proposito embedding, sintesi
+vocale, trascrizione, immagini, video, audio e realtime: sono nel catalogo ma a
+questa app non servono.
+
+> **Guarda le SKU, non solo il nome.** Il Terraform usa `GlobalStandard` di
+> default, ma non tutti i modelli la offrono. Se nell'elenco un modello mostra
+> solo `Standard`, devi impostare anche:
+> ```hcl
+> ai_deployment_sku = "Standard"
+> ```
+> altrimenti l'apply fallisce con un errore di SKU non valida.
 
 > `ai_location` può essere diversa da `location`. Puoi tenere l'app a Sweden
 > Central e il modello dove c'è, senza spostare nient'altro.
+
+## Leggere i nomi
+
+Il catalogo segue uno schema abbastanza regolare, e riconoscerlo evita di
+provare a caso:
+
+| Suffisso | Cosa significa | Adatto a questa app |
+|---|---|---|
+| `-nano` | Il più piccolo e veloce della generazione | Solo se il costo è l'unica cosa che conta |
+| `-mini` | Fascia media: buon rapporto qualità/prezzo | **Sì, è il punto d'equilibrio** |
+| *nessun suffisso* | Il modello pieno | Sì, se la qualità vale il costo |
+| `-pro` | Il più capace, molto più lento e caro | Sproporzionato qui |
+| `-chat` | Variante conversazionale, **non ragiona** | Sì: più veloce del pari-nome che ragiona |
+| `-codex` | Specializzato sulla scrittura di codice | No: qui il codice si *rivede*, non si scrive |
+| `model-router` | Sceglie da solo il modello per ogni richiesta | Possibile, ma il costo diventa imprevedibile |
+
+Le varianti `-chat` sono trattate dall'app come famiglia **standard**: accettano
+`temperature` e non spendono token in ragionamento. Le altre della famiglia 5 e
+le `o*` sono **reasoning**.
 
 ## Le due famiglie, e perché la distinzione conta
 
@@ -80,34 +108,46 @@ chiamata.
 
 ### Equilibrata — il consiglio se non sai cosa scegliere
 
+Un `-mini` della generazione 5 più recente che trovi nell'elenco:
+
 ```hcl
-ai_model_name    = "gpt-4.1-mini"
-ai_model_version = "<dalla lista>"
-ai_api_version   = "2024-10-21"
-ai_capacity      = 20
+ai_model_name       = "gpt-5-mini"
+ai_model_version    = "2025-08-07"          # o la più recente dall'elenco
+ai_deployment_sku   = "GlobalStandard"      # verifica nell'elenco
+ai_api_version      = "2025-01-01-preview"  # obbligatoria: è reasoning
+ai_reasoning_effort = "low"
+ai_capacity         = 20
 ```
 
-Qualità nettamente superiore a `gpt-4o-mini` su revisione CV e codice, latenza
-ancora bassa, costo che resta nell'ordine di qualche decina di centesimi al
-mese per uso personale.
+Qualità nettamente superiore a `gpt-4o-mini` su revisione CV e codice, con
+`reasoning_effort = "low"` che tiene la latenza ragionevole. È il punto in cui
+si ferma la maggior parte dei progetti personali.
+
+Se preferisci risposte immediate e ti basta un salto di qualità più contenuto,
+la famiglia `4.1` non ragiona e resta velocissima:
+
+```hcl
+ai_model_name    = "gpt-4.1-mini"
+ai_model_version = "2025-04-14"
+ai_api_version   = "2024-10-21"     # GA, va bene: non è reasoning
+```
 
 ### Massima qualità
 
-```hcl
-ai_model_name    = "gpt-4.1"        # oppure o4-mini / gpt-5, se disponibili
-ai_model_version = "<dalla lista>"
-ai_api_version   = "2024-10-21"     # reasoning: "2025-01-01-preview" o successiva
-ai_capacity      = 20
-```
-
-Per un modello reasoning aggiungi:
+Il modello pieno della generazione più recente, senza suffisso:
 
 ```hcl
-ai_reasoning_effort = "medium"      # low se la latenza dà fastidio
+ai_model_name       = "gpt-5"
+ai_model_version    = "2025-08-07"          # o la più recente dall'elenco
+ai_api_version      = "2025-01-01-preview"
+ai_reasoning_effort = "medium"
+ai_capacity         = 20
 ```
 
 Metti in conto risposte da 10-30 secondi sulle operazioni pesanti come la
 revisione del CV. L'app ha un timeout di 90 secondi, quindi c'è margine.
+I `-pro` esistono ma qui sono sproporzionati: costano molto di più per un
+guadagno che su questi compiti non si nota.
 
 ### Costo minimo
 
@@ -135,14 +175,50 @@ l'immagine né ripubblicare il frontend**: il nome del deployment e la versione
 dell'API arrivano alla Container App come variabili d'ambiente, e l'app riparte
 con una revisione nuova in una decina di secondi.
 
-Verifica subito dopo:
+Verifica subito dopo, con una generazione vera:
 
 ```powershell
-$api = terraform output -raw api_url
-curl.exe -s "$api/api/meta"
+$api  = terraform output -raw api_url
+$code = terraform output -raw access_code
+curl.exe -s -X POST "$api/api/ai/selftest" -H "X-Access-Code: $code"
 ```
 
-Controlla che `ai_deployment` sia quello nuovo e che `ai_family` sia coerente.
+```json
+{ "ok": true, "deployment": "gpt-5-mini", "latency_ms": 1840,
+  "family_guessed": "reasoning", "family_actual": "reasoning", "adapted": false,
+  "style": { "token_param": "max_completion_tokens", "temperature": false } }
+```
+
+Cosa guardare:
+
+* `ok: false` → il campo `hint` dice cosa cambiare, in italiano.
+* `adapted: true` → l'ipotesi iniziale era sbagliata e il client si è corretto
+  da solo. Funziona, ma la prima chiamata di ogni riavvio costa un tentativo in
+  più: puoi eliminarlo fissando `ai_model_family` al valore in `family_actual`.
+* `latency_ms` alto → abbassa `ai_reasoning_effort`.
+
+Il selftest consuma pochi token, quindi puoi rilanciarlo tutte le volte che vuoi.
+
+## Quanto conosco io e quanto devi verificare tu
+
+Questo repository è stato scritto con una certa fotografia del catalogo. I
+modelli usciti dopo non li conosco: non posso dirti se `gpt-5.6-terra` costa più
+o meno di `gpt-5-mini`, né quanto sia più bravo.
+
+Quello che **non** invecchia è il meccanismo: il client si adatta da solo alla
+famiglia, e lo script ti dice cosa è deployabile oggi. Per il prezzo, l'unica
+fonte affidabile è il
+[calcolatore Azure](https://azure.microsoft.com/pricing/calculator/), sezione
+Azure OpenAI, filtrando per il modello esatto.
+
+Regola pratica che regge nel tempo: all'interno di una generazione, `nano` <
+`mini` < *pieno* < `pro` per costo e per qualità, e le varianti `-chat` costano
+meno delle pari-nome che ragionano, perché non pagano i token di ragionamento.
+
+Se vuoi provare un modello nuovo senza rischi: cambialo in `terraform.tfvars`,
+`terraform apply`, lancia il selftest. Se non ti convince, rimetti il
+precedente e rilancia. Ogni giro dura un paio di minuti e non tocca né
+l'immagine né il frontend.
 
 ## Quando qualcosa non va
 
@@ -166,6 +242,10 @@ Controlla con:
 az cognitiveservices account deployment list \
   --name <account-ai> --resource-group <rg> -o table
 ```
+
+**L'apply fallisce con un errore sulla SKU**
+Il modello non offre `GlobalStandard`. Guarda la colonna `sku` nell'elenco e
+imposta `ai_deployment_sku` a uno dei valori che compaiono lì.
 
 **L'apply fallisce con un errore di quota**
 Ogni modello ha una quota TPM per regione, separata dalle altre. Abbassa

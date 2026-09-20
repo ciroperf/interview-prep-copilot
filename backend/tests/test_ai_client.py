@@ -89,6 +89,13 @@ def build_client(deployment: str, rifiuta: set[str], **extra) -> tuple[AIClient,
         ("o4-mini", True),
         ("gpt-5", True),
         ("gpt-5-mini", True),
+        ("gpt-5.4-mini", True),
+        ("gpt-5-codex", True),
+        # Le varianti "-chat" sono le controparti conversazionali: non ragionano
+        # e accettano temperature, quindi vanno trattate come standard.
+        ("gpt-5-chat", False),
+        ("gpt-5.2-chat", False),
+        ("gpt-chat-latest", False),
     ],
 )
 def test_ipotesi_dal_nome_del_deployment(deployment, reasoning):
@@ -228,3 +235,15 @@ async def test_risposta_vuota_da_reasoning_spiega_cosa_cambiare():
     fake.content = ""
     with pytest.raises(RuntimeError, match="AI_REASONING_MAX_OUTPUT_TOKENS"):
         await client.complete_json("sistema", "utente")
+
+
+
+async def test_una_variante_chat_usa_i_parametri_standard():
+    """gpt-5-chat sta nella famiglia 5 ma non ragiona: perdere temperature
+    sarebbe una regressione silenziosa sulla qualità delle generazioni."""
+    client, fake = build_client("gpt-5-chat", rifiuta=set())
+    await client.complete_json("sistema", "utente", temperature=0.7)
+
+    assert len(fake.chiamate) == 1
+    assert fake.chiamate[0]["temperature"] == 0.7
+    assert "max_tokens" in fake.chiamate[0]
