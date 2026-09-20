@@ -18,7 +18,7 @@ Il flusso è **OAuth2 Authorization Code con PKCE**:
 
 ```
 Browser
-  │ 1. MSAL apre un popup su login.microsoftonline.com
+  │ 1. MSAL porta la scheda su login.microsoftonline.com
   │ 2. l'utente si autentica, torna un authorization code
   │ 3. MSAL lo scambia con un access token (PKCE, nessun client secret)
   ▼
@@ -33,8 +33,10 @@ Chi fa cosa:
 * **Terraform** crea l'app registration, espone lo scope `access_as_user`,
   registra gli URI di reindirizzamento e configura l'autenticazione integrata
   della Container App con `unauthenticatedClientAction = Return401`.
-* **MSAL** nel frontend ottiene e rinnova il token. Sta in `sessionStorage`,
-  non in `localStorage`: non sopravvive alla chiusura del browser.
+* **MSAL** nel frontend ottiene e rinnova il token, con il flusso a
+  *redirect*: stessa scheda, nessun popup da sbloccare. Il token sta in
+  `sessionStorage`, non in `localStorage`: non sopravvive alla chiusura del
+  browser.
 * **L'autenticazione integrata di Container Apps** valida il token *prima* che
   la richiesta arrivi all'applicazione, e inietta l'identità negli header
   `X-MS-CLIENT-PRINCIPAL-*`.

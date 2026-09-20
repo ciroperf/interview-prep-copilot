@@ -20,6 +20,12 @@ export const entraEnabled = Boolean(CLIENT_ID && TENANT_ID && API_SCOPE)
 
 let instance: PublicClientApplication | null = null
 let initializing: Promise<PublicClientApplication> | null = null
+let redirectError: string | null = null
+
+/** Messaggio dell'ultimo login fallito al ritorno da Entra, se c'e' stato. */
+export function lastLoginError(): string | null {
+  return redirectError
+}
 
 async function getInstance(): Promise<PublicClientApplication> {
   if (instance) return instance
@@ -47,6 +53,18 @@ async function getInstance(): Promise<PublicClientApplication> {
         },
       })
       await pca.initialize()
+      // Il flusso a redirect torna sull'app con la risposta nell'URL: va
+      // consumata qui, prima che il resto dell'app chieda se c'e' un account.
+      try {
+        const risposta = await pca.handleRedirectPromise()
+        if (risposta?.account) pca.setActiveAccount(risposta.account)
+        redirectError = null
+      } catch (error) {
+        // Un errore di Entra (consenso negato, utente non assegnato, redirect
+        // URI non registrato) arriva qui: senza questo ramo l'app tornerebbe
+        // alla schermata di accesso senza dire perche'.
+        redirectError = error instanceof Error ? error.message : 'Accesso non riuscito.'
+      }
       instance = pca
       return pca
     })()
@@ -67,17 +85,22 @@ export async function currentAccount(): Promise<AccountInfo | null> {
   return null
 }
 
-export async function login(): Promise<AccountInfo> {
+/** Avvia il login. La pagina va su Entra e torna qui: non ritorna davvero. */
+export async function login(): Promise<void> {
   const pca = await getInstance()
-  const result = await pca.loginPopup({ scopes: [API_SCOPE] })
-  pca.setActiveAccount(result.account)
-  return result.account
+  // Redirect e non popup. Il popup e' piu' elegante quando funziona, ma apre
+  // una finestra separata che i browser bloccano di default e che con VPN o
+  // estensioni non arriva nemmeno a login.microsoftonline.com. Il redirect
+  // usa la stessa scheda: non c'e' niente da sbloccare.
+  await pca.loginRedirect({ scopes: [API_SCOPE] })
 }
 
 export async function logout(): Promise<void> {
   const pca = await getInstance()
   const account = pca.getActiveAccount() ?? undefined
-  await pca.logoutPopup({ account })
+  // Stessa forma del redirect URI registrato: Entra confronta le stringhe
+  // esattamente, slash finale compresa.
+  await pca.logoutRedirect({ account, postLogoutRedirectUri: `${window.location.origin}/` })
 }
 
 /** Access token per l'API, o null se non c'è una sessione. */
@@ -94,8 +117,10 @@ export async function getAccessToken(): Promise<string | null> {
     // Token scaduto o consenso da rinnovare: serve l'interazione dell'utente.
     const msal = await import('@azure/msal-browser')
     if (error instanceof msal.InteractionRequiredAuthError) {
-      const result = await pca.acquireTokenPopup({ scopes: [API_SCOPE], account })
-      return result.accessToken
+      // Come per il login: la pagina se ne va e torna con il token in cache,
+      // quindi qui non c'e' un valore da restituire.
+      await pca.acquireTokenRedirect({ scopes: [API_SCOPE], account })
+      return null
     }
     throw error
   }

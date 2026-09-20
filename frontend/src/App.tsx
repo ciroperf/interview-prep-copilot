@@ -3,7 +3,7 @@ import { Link, NavLink, Route, Routes } from 'react-router-dom'
 
 import { ErrorBox, Spinner } from './components/ui'
 import { ApiError, api, getAccessCode, setAccessCode } from './lib/api'
-import { currentAccount, entraEnabled, login, logout } from './lib/auth'
+import { currentAccount, entraEnabled, lastLoginError, login, logout } from './lib/auth'
 import type { Meta } from './lib/types'
 import CodingPage from './pages/CodingPage'
 import CvPage from './pages/CvPage'
@@ -76,26 +76,20 @@ function AccessGate({ onUnlock }: { onUnlock: () => void }) {
   )
 }
 
-function MicrosoftGate({ onSignedIn }: { onSignedIn: () => void }) {
+function MicrosoftGate() {
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  // Se si torna qui dopo un tentativo andato male, il motivo lo sa MSAL.
+  const [error, setError] = useState(lastLoginError() ?? '')
 
   async function accedi() {
     setBusy(true)
     setError('')
     try {
+      // Il login porta la pagina su Entra: se l'esecuzione arriva alla riga
+      // dopo, il redirect non è partito. Lo spinner resta acceso apposta.
       await login()
-      onSignedIn()
     } catch (err) {
-      // Il blocco dei popup è la causa più comune, e il messaggio di MSAL da
-      // solo non lo lascia capire.
-      const message = err instanceof Error ? err.message : 'Errore imprevisto'
-      setError(
-        message.includes('popup')
-          ? 'Il browser ha bloccato la finestra di accesso. Consentila e riprova.'
-          : message,
-      )
-    } finally {
+      setError(err instanceof Error ? err.message : 'Errore imprevisto')
       setBusy(false)
     }
   }
@@ -183,7 +177,7 @@ export default function App() {
     )
   }
   if (entraEnabled && !account) {
-    return <MicrosoftGate onSignedIn={() => setNonce((n) => n + 1)} />
+    return <MicrosoftGate />
   }
   if (locked) return <AccessGate onUnlock={() => setNonce((n) => n + 1)} />
 

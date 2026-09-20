@@ -330,8 +330,9 @@ campo per il codice.
 > l'organizzazione lo vieta, l'apply fallisce con un errore di autorizzazione:
 > chiedi a un amministratore o resta sul codice di accesso.
 
-> Il popup è bloccato dal browser? L'app lo dice esplicitamente. Consenti i
-> popup per il dominio della Static Web App.
+> Il login avviene **nella stessa scheda**: la pagina va su
+> `login.microsoftonline.com` e torna indietro autenticata. Nessuna finestra
+> separata, quindi niente da sbloccare nel browser.
 
 ## Aggiornare il modello AI
 
