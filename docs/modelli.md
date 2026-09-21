@@ -63,7 +63,7 @@ le `o*` sono **reasoning**.
 | Come lavora | Risponde direttamente | Ragiona prima, poi risponde |
 | `temperature` | Supportata | **Rifiutata** |
 | Budget di output | `max_tokens` | `max_completion_tokens`, che include i token di ragionamento |
-| Parametro di sforzo | — | `reasoning_effort`: low / medium / high |
+| Parametro di sforzo | — | `reasoning_effort`: minimal / low / medium / high |
 | Latenza | Bassa | Da 3 a 10 volte più alta |
 | Costo per risposta | Basso | Più alto: il ragionamento si paga come output |
 | Dove rende | Estrazione, riscrittura, generazione di contenuti | Problemi con vincoli da rispettare tutti insieme |
@@ -115,13 +115,16 @@ ai_model_name       = "gpt-5-mini"
 ai_model_version    = "2025-08-07"          # o la più recente dall'elenco
 ai_deployment_sku   = "GlobalStandard"      # verifica nell'elenco
 ai_api_version      = "2025-01-01-preview"  # obbligatoria: è reasoning
-ai_reasoning_effort = "low"
+ai_reasoning_effort = "high"
 ai_capacity         = 20
 ```
 
-Qualità nettamente superiore a `gpt-4o-mini` su revisione CV e codice, con
-`reasoning_effort = "low"` che tiene la latenza ragionevole. È il punto in cui
-si ferma la maggior parte dei progetti personali.
+Qualità nettamente superiore a `gpt-4o-mini` su revisione CV e codice. Il
+default è `reasoning_effort = "high"` perché l'app nasce per un utente solo,
+dove la precisione vale più della latenza e del costo. Se apri l'app ad altri,
+o se le risposte ti sembrano troppo lente, abbassalo a `low` o `medium`: è una
+variabile d'ambiente, quindi basta un `terraform apply` senza ricostruire
+l'immagine.
 
 Se preferisci risposte immediate e ti basta un salto di qualità più contenuto,
 la famiglia `4.1` non ragiona e resta velocissima:
@@ -145,9 +148,33 @@ ai_capacity         = 20
 ```
 
 Metti in conto risposte da 10-30 secondi sulle operazioni pesanti come la
-revisione del CV. L'app ha un timeout di 90 secondi, quindi c'è margine.
+revisione del CV, e più del doppio con `reasoning_effort = "high"`. Il timeout
+predefinito è 180 secondi, quindi c'è margine.
 I `-pro` esistono ma qui sono sproporzionati: costano molto di più per un
 guadagno che su questi compiti non si nota.
+
+### I tre parametri che vanno alzati insieme
+
+`reasoning_effort` non si tocca da solo. I token di ragionamento si contano
+dentro il budget di output, e ragionare richiede tempo: alzando solo l'effort
+si ottengono risposte vuote o timeout, cioè un'app peggiore, non migliore.
+
+| Variabile | Default | A cosa serve |
+|---|---|---|
+| `ai_reasoning_effort` | `high` | Quanto il modello ragiona prima di rispondere |
+| `ai_reasoning_max_output_tokens` | `32000` | Tetto della risposta, ragionamento incluso |
+| `ai_request_timeout_seconds` | `180` | Quanto l'app aspetta prima di rinunciare |
+
+Il timeout non può superare i **240 secondi**: è il punto in cui l'ingress di
+Container Apps chiude la richiesta a prescindere, quindi un valore più alto
+non verrebbe mai raggiunto e vedresti cadere la connessione invece di un
+errore leggibile. Terraform rifiuta i valori sopra 230 proprio per questo.
+
+Sono tutti e tre variabili d'ambiente: si cambiano con `terraform apply`,
+senza ricostruire l'immagine.
+
+Se una risposta torna vuota, la causa è quasi sempre questa combinazione, e
+l'errore dell'app lo dice esplicitamente.
 
 ### Costo minimo
 
@@ -244,7 +271,7 @@ c'è niente da fare: alza `ai_api_version` a una preview recente.
 **L'AI risponde vuoto, o l'app dice "la risposta non conteneva JSON valido"**
 Tipico dei modelli reasoning: il ragionamento ha consumato tutto il budget di
 output. Abbassa `ai_reasoning_effort` a `low`, oppure alza il budget nel backend
-con `AI_REASONING_MAX_OUTPUT_TOKENS` (default 16000). L'errore dell'app dice
+con `ai_reasoning_max_output_tokens` (default 32000). L'errore dell'app dice
 esplicitamente quale delle due provare.
 
 **`DeploymentNotFound` / errore 404 sulle chiamate**

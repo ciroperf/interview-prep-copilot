@@ -57,8 +57,32 @@ def test_i_default_del_modello_sono_quelli_documentati():
     """Se cambiano, devono cambiare anche README e docs/modelli.md."""
     settings = Settings()
     assert settings.azure_openai_deployment == "gpt-5-mini"
-    assert settings.ai_reasoning_effort == "low"
+    assert settings.ai_reasoning_effort == "high"
     assert settings.ai_reasoning_max_output_tokens > settings.ai_max_output_tokens
+
+
+def test_il_budget_regge_un_effort_alto():
+    """Effort e budget sono un parametro solo in due pezzi.
+
+    I token di ragionamento si contano dentro il budget di output: con un
+    effort alto e un tetto basso il modello ragiona, esaurisce il budget e
+    restituisce una stringa vuota. Alzare l'uno senza l'altro rompe le
+    chiamate invece di migliorarle.
+    """
+    settings = Settings()
+    if settings.ai_reasoning_effort in {"medium", "high"}:
+        assert settings.ai_reasoning_max_output_tokens >= 24000, (
+            "con effort alto servono almeno 24k token, o la risposta torna vuota"
+        )
+
+
+def test_il_timeout_sta_sotto_quello_dell_ingress():
+    """Container Apps chiude la richiesta a 240 secondi.
+
+    Un timeout piu' alto non verrebbe mai raggiunto: il client vedrebbe cadere
+    la connessione invece di ricevere un errore leggibile.
+    """
+    assert 30 <= Settings().ai_request_timeout_seconds <= 230
 
 
 def test_ai_configured_richiede_endpoint_e_deployment(monkeypatch):

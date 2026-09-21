@@ -305,17 +305,70 @@ variable "ai_model_family" {
 
 variable "ai_reasoning_effort" {
   description = <<-EOT
-    Quanto deve ragionare un modello reasoning: low, medium, high. Vuoto lascia
-    il default del modello. Alzarlo migliora la qualità e alza il costo, perché
-    i token di ragionamento si pagano come output.
+    Quanto deve ragionare un modello reasoning: minimal, low, medium, high.
+    Vuoto lascia il default del modello. Alzarlo migliora la precisione e si
+    paga due volte: in token, perché il ragionamento si fattura come output, e
+    in latenza, perché la risposta arriva molto più tardi.
+
+    Se lo alzi, alza insieme ai_reasoning_max_output_tokens e
+    ai_request_timeout_seconds: il ragionamento consuma il budget di output, e
+    se lo esaurisce la risposta torna vuota.
+
     Ignorato dai modelli non reasoning.
   EOT
   type        = string
-  default     = "low"
+  default     = "high"
 
   validation {
-    condition     = contains(["", "low", "medium", "high"], var.ai_reasoning_effort)
-    error_message = "Valori ammessi: vuoto, low, medium, high."
+    condition     = contains(["", "minimal", "low", "medium", "high"], var.ai_reasoning_effort)
+    error_message = "Valori ammessi: vuoto, minimal, low, medium, high."
+  }
+}
+
+variable "ai_reasoning_max_output_tokens" {
+  description = <<-EOT
+    Tetto di token per una risposta di un modello reasoning. I token di
+    ragionamento contano qui dentro: con un effort alto e un tetto basso il
+    modello ragiona, finisce il budget e restituisce una stringa vuota.
+  EOT
+  type        = number
+  default     = 32000
+
+  validation {
+    condition     = var.ai_reasoning_max_output_tokens >= 4000
+    error_message = "Sotto i 4000 token un modello reasoning non riesce a rispondere."
+  }
+}
+
+variable "ai_max_output_tokens" {
+  description = "Tetto di token per una risposta di un modello non reasoning."
+  type        = number
+  default     = 8192
+
+  validation {
+    condition     = var.ai_max_output_tokens >= 1000
+    error_message = "Serve almeno un migliaio di token per una risposta utile."
+  }
+}
+
+variable "ai_request_timeout_seconds" {
+  description = <<-EOT
+    Quanto attendere una risposta del modello. Con reasoning_effort alto una
+    chiamata può richiedere minuti: un timeout troppo corto la interrompe
+    proprio quando sta ragionando.
+  EOT
+  type        = number
+  default     = 180
+
+  validation {
+    condition     = var.ai_request_timeout_seconds >= 30 && var.ai_request_timeout_seconds <= 230
+    error_message = <<-EOT
+      Ammessi 30-230 secondi. Il tetto non è arbitrario: l'ingress di Container
+      Apps chiude la richiesta a 240 secondi, quindi un timeout più alto non
+      verrebbe mai raggiunto e il client vedrebbe cadere la connessione invece
+      di ricevere un errore leggibile. Per andare oltre serve la modalità
+      Premium Ingress.
+    EOT
   }
 }
 

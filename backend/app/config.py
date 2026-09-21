@@ -59,15 +59,21 @@ class Settings(BaseSettings):
     # Se non esiste, il client ne sceglie una fra quelle che il servizio elenca
     # nel messaggio d'errore (vedi ai/client.py, _try_other_api_version).
     azure_openai_api_version: str = "2025-01-01-preview"
-    ai_request_timeout_seconds: float = 90.0
-    ai_max_output_tokens: int = 4096
+    # Con reasoning_effort alto il modello impiega molto piu' tempo: 90 secondi
+    # bastavano con "low" e scadono con "high". Il tetto utile e' 240, dove
+    # l'ingress di Container Apps chiude la richiesta a prescindere.
+    ai_request_timeout_seconds: float = 180.0
+    ai_max_output_tokens: int = 8192
 
     # I modelli reasoning (o3, o4-mini, gpt-5) contano i token di ragionamento
-    # dentro il budget di output: con 4096 il ragionamento si mangia la risposta
-    # e torna una stringa vuota. Per loro si usa questo tetto, più alto.
-    ai_reasoning_max_output_tokens: int = 16000
-    # low | medium | high. Vuoto = non inviarlo, lascia il default del modello.
-    ai_reasoning_effort: str = "low"
+    # dentro il budget di output: se il ragionamento lo esaurisce, torna una
+    # stringa vuota e la chiamata fallisce. Il tetto va quindi alzato insieme
+    # all'effort, non dopo: sono un parametro solo in due pezzi.
+    ai_reasoning_max_output_tokens: int = 32000
+    # minimal | low | medium | high. Vuoto = non inviarlo, lascia il default
+    # del modello. Alzarlo migliora la precisione e si paga in token di
+    # ragionamento e in latenza.
+    ai_reasoning_effort: Literal["", "minimal", "low", "medium", "high"] = "high"
     # auto | standard | reasoning. Con auto la famiglia si deduce dal nome del
     # deployment e si corregge da sola al primo errore dell'API.
     ai_model_family: Literal["auto", "standard", "reasoning"] = "auto"

@@ -47,7 +47,11 @@ locals {
       AZURE_OPENAI_API_VERSION   = var.ai_api_version
       AI_MODEL_FAMILY            = var.ai_model_family
       AI_REASONING_EFFORT        = var.ai_reasoning_effort
-      AUTH_MODE                  = var.enable_entra_auth ? "entra_id" : "access_code"
+      # Questi tre vanno insieme: vedi il commento su ai_reasoning_effort.
+      AI_REASONING_MAX_OUTPUT_TOKENS = tostring(var.ai_reasoning_max_output_tokens)
+      AI_MAX_OUTPUT_TOKENS           = tostring(var.ai_max_output_tokens)
+      AI_REQUEST_TIMEOUT_SECONDS     = tostring(var.ai_request_timeout_seconds)
+      AUTH_MODE                      = var.enable_entra_auth ? "entra_id" : "access_code"
       # DefaultAzureCredential va indirizzata all'identità giusta: senza questo,
       # in un container con più identità disponibili sceglierebbe a caso.
       AZURE_CLIENT_ID = azurerm_user_assigned_identity.app.client_id

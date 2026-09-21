@@ -229,12 +229,16 @@ async def test_il_reasoning_effort_viene_inviato_solo_se_configurato():
     assert "reasoning_effort" not in fake.chiamate[0]
 
 
-async def test_il_default_manda_reasoning_effort_low():
-    """Il default punta a gpt-5-mini con effort basso: e' il compromesso scelto
-    fra qualita' e latenza, e una regressione qui si noterebbe solo in bolletta."""
+async def test_il_default_manda_reasoning_effort_high():
+    """Il default punta a gpt-5-mini con effort alto.
+
+    E' una scelta esplicita per un'app a utente singolo, dove la precisione
+    vale piu' della latenza e del costo. Su un deployment pubblico andrebbe
+    abbassata da AI_REASONING_EFFORT, non nel codice.
+    """
     client, fake = build_client("gpt-5-mini", rifiuta=set())
     await client.complete_json("sistema", "utente")
-    assert fake.chiamate[0]["reasoning_effort"] == "low"
+    assert fake.chiamate[0]["reasoning_effort"] == "high"
 
 
 async def test_un_modello_standard_non_riceve_reasoning_effort():
@@ -246,13 +250,16 @@ async def test_un_modello_standard_non_riceve_reasoning_effort():
 
 async def test_i_modelli_reasoning_ricevono_un_budget_di_token_piu_alto():
     """I token di ragionamento contano nel budget: con 4096 la risposta sparisce."""
+    from app.config import Settings
+
+    attese = Settings()
     client, fake = build_client("o4-mini", rifiuta=set())
     await client.complete_json("sistema", "utente")
-    assert fake.chiamate[0]["max_completion_tokens"] == 16000
+    assert fake.chiamate[0]["max_completion_tokens"] == attese.ai_reasoning_max_output_tokens
 
     client, fake = build_client("gpt-4o-mini", rifiuta=set())
     await client.complete_json("sistema", "utente")
-    assert fake.chiamate[0]["max_tokens"] == 4096
+    assert fake.chiamate[0]["max_tokens"] == attese.ai_max_output_tokens
 
 
 async def test_un_errore_non_negoziabile_viene_propagato():

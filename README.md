@@ -206,7 +206,7 @@ Il ragionamento dietro le scelte, e il funzionamento del generatore di piani:
 ## Test
 
 ```bash
-cd backend && pytest        # 209 test
+cd backend && pytest        # 211 test
 ```
 
 Girano senza AI e senza rete: le fixture forzano il client non configurato, il
