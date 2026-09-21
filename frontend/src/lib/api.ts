@@ -140,6 +140,16 @@ export const api = {
   categories: () =>
     request<{ categories: { id: string; count: number }[] }>('/knowledge/categories'),
 
+  createTopicFromSuggestion: (body: {
+    plan_id: string
+    suggestion: string
+    term?: string
+    num_questions?: number
+  }) => request<{ topic: Topic; question_count: number }>(
+    '/knowledge/topics/from-suggestion',
+    json(body),
+  ),
+
   listPacks: () => request<{ total: number; packs: PackSummary[] }>('/knowledge/packs'),
   getPack: (id: string) =>
     request<{ pack: KnowledgePack; estimated_minutes: number; topics: Topic[] }>(

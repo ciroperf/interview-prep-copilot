@@ -304,6 +304,10 @@ class StudyPlan(BaseModel):
     items: list[PlanItem] = Field(default_factory=list)
     focus_areas: list[str] = Field(default_factory=list)
     gap_analysis: list[str] = Field(default_factory=list)
+    # Le competenze che l'AI ha indicato come mancanti dal catalogo, tenute a
+    # parte dalla prosa di gap_analysis: da qui si genera la scheda con un clic,
+    # e una stringa con un prefisso non basterebbe a farlo.
+    suggested_topics: list[str] = Field(default_factory=list)
     ai_generated: bool = False
 
     @property
@@ -466,8 +470,23 @@ class TopicCreate(BaseModel):
     job_id: str = ""
     category: str = ""
     num_questions: int = Field(default=3, ge=0, le=8)
+    # Il suggerimento integrale dell'AI, quando l'argomento nasce da li'. `term`
+    # resta l'etichetta breve che fa da identificativo; questo dice al modello
+    # che cosa esattamente andava coperto, che in una frase sola non ci sta.
+    suggestion: str = Field(default="", max_length=600)
     # Se valorizzato, l'argomento viene creato da questo contenuto senza chiamare l'AI.
     draft: TopicDraft | None = None
+
+
+class SuggestionToTopic(BaseModel):
+    """Richiesta di trasformare in scheda un suggerimento di un piano."""
+
+    plan_id: str
+    suggestion: str = Field(min_length=4, max_length=600)
+    # Etichetta breve sotto cui archiviare la scheda. Vuota: la si ricava dal
+    # suggerimento, che di solito e' una frase intera.
+    term: str = Field(default="", max_length=80)
+    num_questions: int = Field(default=3, ge=0, le=8)
 
 
 class CvReview(BaseModel):

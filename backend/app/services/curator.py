@@ -13,23 +13,31 @@ repository e diventare parte del catalogo stabile.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, get_args
 
 import yaml
 
 from ..ai import prompts
 from ..ai.client import AIClient
 from ..domain.models import (
+    Example,
+    FollowUp,
     JobPosting,
     QuizQuestion,
+    Resource,
+    SourceKind,
     Topic,
     TopicCreate,
     TopicGap,
+    TradeOff,
     new_id,
     utcnow,
 )
 from ..storage.base import Repository
 from .knowledge import KnowledgeBase
+
+# Presi dal modello invece che riscritti: se SourceKind cambia, questo segue.
+VALID_SOURCE_KINDS = set(get_args(SourceKind))
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +91,32 @@ class KnowledgeCurator:
         return gaps[:limit]
 
     # --- creazione di un argomento ------------------------------------------
+
+    @staticmethod
+    def term_from_suggestion(suggestion: str) -> str:
+        """Ricava un'etichetta breve dalla frase di un suggerimento.
+
+        I suggerimenti arrivano come "Studiare X specific: a, b e c" oppure
+        "Approfondire Y pratiche: ...". Serve un nome corto e stabile, perché
+        da lì nasce l'id dell'argomento e il termine con cui gli annunci futuri
+        lo aggancieranno. Si tagliano il verbo iniziale e tutto quello che
+        segue i due punti, che è l'elenco dei dettagli.
+        """
+        testo = suggestion.strip()
+        # Via il prefisso che il modello mette quasi sempre.
+        for prefisso in ("Non coperto dal catalogo:", "Studiare", "Approfondire",
+                         "Studio mirato di", "Pratica su", "Ripasso pratico di",
+                         "Esercizi pratici:", "Pratica"):
+            if testo.lower().startswith(prefisso.lower()):
+                testo = testo[len(prefisso):].lstrip(" :")
+                break
+        # I due punti separano il tema dall'elenco dei dettagli: tieni il tema.
+        testo = testo.split(":", 1)[0]
+        # E la virgola o la parentesi separano il primo concetto dagli altri.
+        for separatore in (" (", ",", " e ", " — ", " - "):
+            testo = testo.split(separatore, 1)[0]
+        testo = testo.strip(" .;")
+        return (testo[:80] or suggestion[:80]).strip()
 
     async def create_topic(
         self, request: TopicCreate, posting: JobPosting | None = None
@@ -146,7 +180,9 @@ class KnowledgeCurator:
             )
         data = await self.ai.complete_json(
             prompts.TOPIC_SYSTEM,
-            prompts.topic_user(request.term, context, request.num_questions),
+            prompts.topic_user(
+                request.term, context, request.num_questions, request.suggestion
+            ),
             schema=prompts.TOPIC_SCHEMA,
             schema_name="nuovo_argomento",
             temperature=0.4,
@@ -171,6 +207,12 @@ class KnowledgeCurator:
             interview_answer=str(data.get("interview_answer", ""))[:3000],
             pitfalls=strings("pitfalls", 6),
             follow_up_questions=strings("follow_up_questions", 5),
+            examples=self._parse_examples(data.get("examples")),
+            trade_offs=self._parse_trade_offs(data.get("trade_offs")),
+            numbers=strings("numbers", 4, 300),
+            senior_signals=strings("senior_signals", 5, 300),
+            follow_ups=self._parse_follow_ups(data.get("follow_ups")),
+            resources=self._parse_resources(data.get("resources")),
             estimated_minutes=self._as_minutes(data.get("estimated_minutes")),
             custom=True,
             created_at=utcnow(),
@@ -181,6 +223,91 @@ class KnowledgeCurator:
 
         questions = self._parse_questions(data.get("questions"), topic.id, request.num_questions)
         return topic, questions
+
+    # --- lettura delle sezioni ricche ---------------------------------------
+    #
+    # Il modello puo' omettere un campo, restituirlo di forma sbagliata o
+    # inventare un URL. Qui si scarta senza far fallire tutta la generazione:
+    # una scheda con una sezione in meno e' utile, una scheda persa no.
+
+    @staticmethod
+    def _righe(raw: Any, limit: int) -> list[dict]:
+        if not isinstance(raw, list):
+            return []
+        return [r for r in raw if isinstance(r, dict)][:limit]
+
+    @classmethod
+    def _parse_examples(cls, raw: Any) -> list[Example]:
+        fuori: list[Example] = []
+        for row in cls._righe(raw, 3):
+            code = str(row.get("code") or "").strip()
+            if not code:
+                continue
+            fuori.append(
+                Example(
+                    title=str(row.get("title") or "Esempio")[:120],
+                    language=str(row.get("language") or "text")[:24],
+                    code=code[:4000],
+                    note=str(row.get("note") or "")[:600],
+                )
+            )
+        return fuori
+
+    @classmethod
+    def _parse_trade_offs(cls, raw: Any) -> list[TradeOff]:
+        fuori: list[TradeOff] = []
+        for row in cls._righe(raw, 5):
+            option = str(row.get("option") or "").strip()
+            if not option:
+                continue
+            fuori.append(
+                TradeOff(
+                    option=option[:160],
+                    pros=str(row.get("pros") or "")[:400],
+                    cons=str(row.get("cons") or "")[:400],
+                    when=str(row.get("when") or "")[:400],
+                )
+            )
+        return fuori
+
+    @classmethod
+    def _parse_follow_ups(cls, raw: Any) -> list[FollowUp]:
+        fuori: list[FollowUp] = []
+        for row in cls._righe(raw, 6):
+            question = str(row.get("question") or "").strip()
+            answer = str(row.get("answer") or "").strip()
+            # Una domanda senza risposta lascia il lavoro a meta': si scarta.
+            if not question or not answer:
+                continue
+            fuori.append(FollowUp(question=question[:300], answer=answer[:2000]))
+        return fuori
+
+    @classmethod
+    def _parse_resources(cls, raw: Any) -> list[Resource]:
+        """Le fonti passano solo se l'URL è plausibile.
+
+        Un modello che non conosce la documentazione di un prodotto di nicchia
+        tende a inventare un permalink verosimile. Un link rotto fa perdere
+        tempo e toglie credibilità al resto della scheda, quindi meglio tenere
+        il titolo e buttare l'URL: la fonte resta cercabile.
+        """
+        fuori: list[Resource] = []
+        for row in cls._righe(raw, 6):
+            title = str(row.get("title") or "").strip()
+            if not title:
+                continue
+            url = str(row.get("url") or "").strip()
+            if url and not url.startswith("https://"):
+                url = ""
+            kind = str(row.get("kind") or "doc")
+            fuori.append(
+                Resource(
+                    title=title[:200],
+                    url=url[:500],
+                    kind=kind if kind in VALID_SOURCE_KINDS else "doc",  # type: ignore[arg-type]
+                )
+            )
+        return fuori
 
     @staticmethod
     def _as_minutes(value: Any) -> int:

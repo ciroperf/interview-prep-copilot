@@ -186,6 +186,32 @@ $EDITOR backend/app/content/topics_miei.yaml
 cd backend && pytest tests/test_knowledge.py -q
 ```
 
+## Far scrivere una scheda all'AI
+
+Il piano elenca le competenze che l'annuncio chiede e il catalogo non copre.
+Su ognuna c'è un pulsante che la trasforma in una scheda vera, generata con il
+contesto dell'annuncio da cui il suggerimento è nato.
+
+```
+POST /api/knowledge/topics/from-suggestion
+{ "plan_id": "plan_...", "suggestion": "<il testo del suggerimento>" }
+```
+
+Il suggerimento deve essere uno di quelli che il piano contiene davvero: il
+campo arriva dal client, e accettare testo arbitrario sarebbe un modo per far
+scrivere al modello qualunque cosa a spese di chi possiede il deployment.
+
+La scheda nasce alla stessa profondità di quelle scritte a mano — spiegazione
+lunga, esempi, trade-off, numeri, segnali senior, domande con la risposta — e
+con le fonti. Su quelle il filtro è severo: un URL che non è `https://` viene
+buttato e resta solo il titolo, perché un modello che non conosce la
+documentazione di un prodotto di nicchia tende a inventare un permalink
+verosimile, e un link rotto toglie credibilità a tutta la scheda.
+
+Le schede generate sono marcate `custom: true`, non passano per il test di
+profondità dei contenuti versionati, e si rendono permanenti con
+**Argomenti → Esporta aggiunti**.
+
 ## Aggiungere un percorso
 
 Un percorso raggruppa argomenti già esistenti su un macroargomento e ci

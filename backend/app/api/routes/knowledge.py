@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from ...deps import AccessGuard, CuratorDep, KnowledgeDep, RepositoryDep
-from ...domain.models import JobPosting, TopicCreate
+from ...domain.models import JobPosting, StudyPlan, SuggestionToTopic, TopicCreate
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"], dependencies=[AccessGuard])
 
@@ -154,6 +154,48 @@ async def create_topic(
         posting = JobPosting(**raw)
 
     topic, questions = await curator.create_topic(payload, posting)
+    return {
+        "topic": topic.model_dump(mode="json"),
+        "question_count": len(questions),
+    }
+
+
+@router.post("/topics/from-suggestion", status_code=201)
+async def create_topic_from_suggestion(
+    payload: SuggestionToTopic, curator: CuratorDep, repo: RepositoryDep
+) -> dict:
+    """Trasforma in scheda un suggerimento che l'AI ha messo nel piano.
+
+    Il piano elenca le competenze che il catalogo non copre, ma finora erano
+    solo testo: qui diventano una scheda vera, generata con il contesto
+    dell'annuncio da cui il suggerimento è nato.
+    """
+    raw = repo.get("plans", payload.plan_id)
+    if raw is None:
+        raise HTTPException(status_code=404, detail="Piano non trovato")
+    plan = StudyPlan(**raw)
+
+    if payload.suggestion not in plan.suggested_topics:
+        # Si accettano solo i suggerimenti che il piano contiene davvero: il
+        # campo arriva dal client, e un testo arbitrario diventerebbe un modo
+        # per far scrivere al modello qualunque cosa.
+        raise HTTPException(
+            status_code=400, detail="Questo suggerimento non appartiene al piano"
+        )
+
+    posting = None
+    if plan.job_id:
+        grezzo = repo.get("jobs", plan.job_id)
+        if grezzo is not None:
+            posting = JobPosting(**grezzo)
+
+    richiesta = TopicCreate(
+        term=payload.term or curator.term_from_suggestion(payload.suggestion),
+        job_id=plan.job_id,
+        num_questions=payload.num_questions,
+        suggestion=payload.suggestion,
+    )
+    topic, questions = await curator.create_topic(richiesta, posting)
     return {
         "topic": topic.model_dump(mode="json"),
         "question_count": len(questions),

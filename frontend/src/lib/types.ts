@@ -231,6 +231,8 @@ export interface StudyPlan {
   items: PlanItem[]
   focus_areas: string[]
   gap_analysis: string[]
+  /** Competenze che l'AI ha indicato come non coperte: da qui si genera la scheda. */
+  suggested_topics: string[]
   ai_generated: boolean
 }
 

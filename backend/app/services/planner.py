@@ -88,6 +88,7 @@ class StudyPlanBuilder:
         summary = ""
         focus_areas: list[str] = []
         gap_analysis: list[str] = []
+        suggested_topics: list[str] = []
         ai_used = False
 
         if request.use_ai and self.ai.available and candidates:
@@ -126,8 +127,13 @@ class StudyPlanBuilder:
                         priority = 3
                     priorities[topic_id] = priority
                     rationales[topic_id] = str(row.get("rationale", ""))[:300]
-                for extra in data.get("extra_recommendations") or []:
-                    gap_analysis.append(f"Non coperto dal catalogo: {str(extra)[:200]}")
+                # Restano anche in gap_analysis per chi legge il piano, ma la
+                # forma azionabile e' questa: il frontend ci mette accanto il
+                # pulsante che genera la scheda.
+                grezzi = data.get("extra_recommendations") or []
+                suggested_topics = [str(x)[:300] for x in grezzi][:8]
+                for extra in suggested_topics:
+                    gap_analysis.append(f"Non coperto dal catalogo: {extra}")
                 ai_used = bool(priorities)
             except Exception as exc:
                 logger.warning("Generazione AI del piano fallita, uso solo l'euristica: %s", exc)
@@ -159,6 +165,7 @@ class StudyPlanBuilder:
             items=items,
             focus_areas=focus_areas,
             gap_analysis=gap_analysis,
+            suggested_topics=suggested_topics,
             ai_generated=ai_used,
         )
         return plan
@@ -369,7 +376,12 @@ class StudyPlanBuilder:
                 continue
 
             kind = KIND_BY_CATEGORY.get(topic.category, "study")
-            track = "technical" if kind == "system_design" else "knowledge"
+            # Il binario lo dichiara l'argomento. Prima veniva forzato a
+            # "knowledge" per tutto tranne il system design, quindi gli argomenti
+            # tecnici senza esercizi collegati - async, prestazioni web, Spring
+            # Web - comparivano nel piano come conoscitivi, e l'alternanza fra i
+            # due binari lavorava su dati sbagliati.
+            track = topic.track
             items.append(
                 PlanItem(
                     track=track,

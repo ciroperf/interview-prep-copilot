@@ -390,6 +390,15 @@ TOPIC_SYSTEM = (
     "davvero e la risposta da dare a voce. Se l'argomento è un prodotto specifico "
     "(un database, un orchestratore, un broker), concentrati sul modello mentale e "
     "sui trade-off, non sulla sintassi."
+    "\n\nLa scheda finisce in un catalogo dove le altre hanno tutte spiegazione "
+    "lunga, esempi commentati, trade-off, numeri, segnali senior e domande di "
+    "approfondimento con la risposta: scrivila a quella profondità, non come un "
+    "riassunto."
+    "\n\nSulle fonti sii conservativo. Cita documentazione ufficiale, specifiche "
+    "e libri di riferimento che esistono davvero, e se hai un dubbio sull'URL "
+    "esatto lascialo vuoto e indica solo il titolo. Un link inventato fa perdere "
+    "tempo e toglie credibilità a tutta la scheda. Vale lo stesso per i numeri: "
+    "citane pochi e solo quelli di cui sei ragionevolmente certo."
 )
 
 TOPIC_SCHEMA = {
@@ -433,6 +442,88 @@ TOPIC_SCHEMA = {
             "description": "Errori tipici e risposte che fanno cattiva impressione",
         },
         "follow_up_questions": {"type": "array", "items": {"type": "string"}},
+        "examples": {
+            "type": "array",
+            "description": "1-2 esempi concreti con codice o schema commentato. "
+            "Devono mostrare il caso che si porta a un colloquio, non la sintassi "
+            "di base. I commenti nel codice vanno in italiano.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "language": {
+                        "type": "string",
+                        "description": "python, javascript, typescript, java, sql, "
+                        "bash, css, html, yaml o text",
+                    },
+                    "code": {"type": "string"},
+                    "note": {"type": "string", "description": "Perché questo esempio conta"},
+                },
+                "required": ["title", "code"],
+            },
+        },
+        "trade_offs": {
+            "type": "array",
+            "description": "2-4 alternative reali messe a confronto. La domanda da "
+            "colloquio non è 'cos'è X' ma 'perché X e non Y': qui c'è il prezzo.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "option": {"type": "string"},
+                    "pros": {"type": "string"},
+                    "cons": {"type": "string"},
+                    "when": {"type": "string", "description": "Quando conviene questa"},
+                },
+                "required": ["option", "pros", "cons"],
+            },
+        },
+        "numbers": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "1-3 numeri o soglie da citare a voce. Solo valori di cui "
+            "sei ragionevolmente certo: un numero inventato fa più danno che bene.",
+        },
+        "senior_signals": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "3-4 comportamenti che distinguono chi ha esperienza vera "
+            "su questo tema da chi lo ha solo studiato",
+        },
+        "follow_ups": {
+            "type": "array",
+            "description": "3-4 domande di approfondimento CON la risposta. È la "
+            "sezione che l'utente usa per allenarsi, quindi la risposta non può mancare.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "answer": {"type": "string", "description": "4-8 frasi, in prima persona"},
+                },
+                "required": ["question", "answer"],
+            },
+        },
+        "resources": {
+            "type": "array",
+            "description": "2-4 fonti per approfondire. Cita SOLO documentazione "
+            "ufficiale, specifiche (RFC), libri di riferimento o repository molto "
+            "noti, e solo se sei certo che esistano e che l'URL sia quello giusto. "
+            "Meglio una fonte in meno che un link inventato: preferisci la home "
+            "della documentazione ufficiale a un permalink profondo che potresti "
+            "sbagliare. Se non sei certo di un URL, lascia il campo url vuoto e "
+            "indica solo il titolo.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "url": {"type": "string", "description": "https:// o stringa vuota"},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["doc", "book", "repo", "article", "practice", "video", "course"],
+                    },
+                },
+                "required": ["title"],
+            },
+        },
         "estimated_minutes": {"type": "integer", "minimum": 10, "maximum": 120},
         "questions": {
             "type": "array",
@@ -454,19 +545,38 @@ TOPIC_SCHEMA = {
             },
         },
     },
-    "required": ["title", "summary", "key_points", "interview_answer"],
+    "required": [
+        "title",
+        "summary",
+        "deep_dive",
+        "key_points",
+        "interview_answer",
+        "follow_ups",
+        "resources",
+    ],
 }
 
 
-def topic_user(term: str, role_context: str, num_questions: int) -> str:
+def topic_user(
+    term: str, role_context: str, num_questions: int, suggestion: str = ""
+) -> str:
     quiz_part = (
         f"Aggiungi {num_questions} domande a risposta multipla con 4 opzioni e una sola "
         "risposta corretta, con distrattori plausibili."
         if num_questions
         else "Non servono domande a risposta multipla."
     )
+    # Quando la scheda nasce da un suggerimento del piano, quel testo dice che
+    # cosa andava coperto molto meglio dell'etichetta breve: "Salesforce
+    # Commerce Cloud" non dice template, hook e integrazioni storefront.
+    parte_suggerimento = (
+        f"COSA DEVE COPRIRE (dall'analisi dell'annuncio): {suggestion}\n\n"
+        if suggestion.strip()
+        else ""
+    )
     return (
         f"ARGOMENTO DA PREPARARE: {term}\n\n"
+        f"{parte_suggerimento}"
         f"CONTESTO DEL COLLOQUIO: {role_context}\n\n"
         "Scrivi la scheda di studio. Calibra la profondità sul contesto: per un ruolo "
         "junior servono i fondamenti, per un senior i trade-off e i casi limite. "

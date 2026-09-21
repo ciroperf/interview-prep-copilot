@@ -432,7 +432,44 @@ table.grid tbody tr:last-child th, table.grid tbody tr:last-child td { border-bo
 .source:last-child { border-bottom: none; padding-bottom: 0; }
 .source p { margin: 0; }
 
+/* Composer: il form per scrivere un argomento a mano. Sta a larghezza piena,
+   non dentro la riga dell'intestazione, dove si schiacciava. */
+.composer { padding: 0; overflow: hidden; }
+.composer-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding: 18px 20px; border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+.composer-head h2 { font-size: 1.05rem; margin: 0 0 4px; }
+.composer-head p { margin: 0; max-width: 62ch; }
+.composer-body { padding: 4px 20px 0; }
+.composer-group { padding: 16px 0; border-bottom: 1px solid var(--border); }
+.composer-group:last-child { border-bottom: none; }
+.composer-group > h3 {
+  font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted); margin: 0 0 12px;
+}
+.composer-foot {
+  display: flex; justify-content: flex-end; gap: 10px;
+  padding: 14px 20px; border-top: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+/* I campi lunghi respirano: erano alti quanto quelli corti. */
+.composer textarea { min-height: 84px; resize: vertical; }
+
+/* Suggerimenti dell'AI nel piano: ognuno e' un'azione, non una riga di testo. */
+.suggerimenti { list-style: none; padding: 0; margin: 0; }
+.suggerimenti > li {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding: 14px 0; border-bottom: 1px solid var(--border);
+}
+.suggerimenti > li:last-child { border-bottom: none; padding-bottom: 0; }
+.suggerimenti > li > p { margin: 0; flex: 1; font-size: 0.92rem; }
+.suggerimenti > li > button, .suggerimenti > li > a { flex-shrink: 0; white-space: nowrap; }
+
 @media (max-width: 680px) {
   table.grid { font-size: 0.86rem; }
   table.grid th, table.grid td { padding: 8px; }
+  .composer-head { flex-direction: column; }
+  .suggerimenti > li { flex-direction: column; align-items: stretch; }
 }

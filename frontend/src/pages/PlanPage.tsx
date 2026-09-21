@@ -86,6 +86,70 @@ function ItemRow({
   )
 }
 
+/** I suggerimenti che l'AI ha messo nel piano, resi azionabili.
+ *
+ * Prima erano solo righe di testo: si leggeva "non coperto dal catalogo" e
+ * finiva li'. Ora ognuno genera una scheda vera, con il contesto dell'annuncio
+ * da cui il suggerimento e' nato.
+ */
+function SuggeritiDallAi({ planId, voci }: { planId: string; voci: string[] }) {
+  const [inCorso, setInCorso] = useState<string | null>(null)
+  const [fatti, setFatti] = useState<Record<string, string>>({})
+  const [errore, setErrore] = useState('')
+
+  async function genera(suggerimento: string) {
+    setInCorso(suggerimento)
+    setErrore('')
+    try {
+      const esito = await api.createTopicFromSuggestion({
+        plan_id: planId,
+        suggestion: suggerimento,
+      })
+      setFatti((prec) => ({ ...prec, [suggerimento]: esito.topic.id }))
+    } catch (err) {
+      setErrore(err instanceof ApiError ? err.message : 'Errore imprevisto')
+    } finally {
+      setInCorso(null)
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-title">
+        <h2>Non coperto dal catalogo</h2>
+        <span className="faint">{voci.length} suggerimenti</span>
+      </div>
+      <p className="small muted" style={{ marginTop: -4 }}>
+        L&apos;AI ha individuato queste competenze nell&apos;annuncio senza trovare una scheda
+        corrispondente. Generane una e finisce nel catalogo, nei piani e nei quiz.
+      </p>
+
+      {errore && <ErrorBox error={errore} />}
+
+      <ul className="suggerimenti">
+        {voci.map((voce) => {
+          const creato = fatti[voce]
+          return (
+            <li key={voce}>
+              <p>{voce}</p>
+              {creato ? (
+                <Link to={`/knowledge/${creato}`} className="badge accent">
+                  Scheda creata — aprila
+                </Link>
+              ) : (
+                <button className="sm" onClick={() => genera(voce)} disabled={inCorso !== null}>
+                  {inCorso === voce && <span className="spinner" />}
+                  {inCorso === voce ? 'Sto scrivendo la scheda…' : 'Genera la scheda'}
+                </button>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
 export default function PlanPage() {
   const { planId = '' } = useParams()
   const navigate = useNavigate()
@@ -211,6 +275,10 @@ export default function PlanPage() {
         <div className="card">
           <Bullets items={plan.gap_analysis} title="Su cosa concentrarti" />
         </div>
+      )}
+
+      {plan.suggested_topics?.length > 0 && (
+        <SuggeritiDallAi planId={plan.id} voci={plan.suggested_topics} />
       )}
 
       <div className="row between" style={{ marginBottom: 12 }}>
