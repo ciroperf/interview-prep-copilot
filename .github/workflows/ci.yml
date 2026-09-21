@@ -57,6 +57,23 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
 
+      # La build puo' riuscire e produrre lo stesso un sito inservibile: e'
+      # gia' successo una volta, pubblicando il sorgente invece di dist/ e
+      # servendo una pagina bianca con la pipeline verde. Questi controlli
+      # guardano l'artefatto, non l'uscita del compilatore.
+      - name: L'artefatto pubblicabile e' sano
+        run: |
+          set -e
+          if grep -q '/src/main.tsx' dist/index.html; then
+            echo "::error::dist/index.html punta al sorgente: il sito servirebbe una pagina bianca"
+            exit 1
+          fi
+          grep -q 'assets/index-.*\.js' dist/index.html \
+            || { echo "::error::dist/index.html non carica nessun bundle"; exit 1; }
+          test -f dist/staticwebapp.config.json \
+            || { echo "::error::staticwebapp.config.json non e' in dist: senza, i link diretti danno 404"; exit 1; }
+          echo "dist/ e' pubblicabile"
+
   terraform:
     name: Terraform (fmt + validate)
     runs-on: ubuntu-latest

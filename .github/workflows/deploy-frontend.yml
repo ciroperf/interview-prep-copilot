@@ -109,6 +109,10 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           action: upload
-          app_location: frontend
-          output_location: dist
+          # Con skip_app_build l'action IGNORA output_location e carica
+          # direttamente app_location: va puntato alla cartella gia'
+          # compilata. Con "frontend" caricava tutto il sorgente, e il sito
+          # serviva l'index.html di Vite che punta a /src/main.tsx - file che
+          # in produzione non esiste, da cui la pagina bianca.
+          app_location: frontend/dist
           skip_app_build: true
