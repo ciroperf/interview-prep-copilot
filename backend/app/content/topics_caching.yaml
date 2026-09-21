@@ -1,4 +1,6 @@
-# Categoria "Caching & Performance" - concetti 21-25 della checklist.
+# Categoria "Caching" - dove mettere la cache, cosa buttare via, come invalidare e
+# perché una cache mal progettata rende un sistema sbagliato invece che veloce.
+
 - id: cache-21-what-and-where
   title: Cos'è il caching e dove mettere la cache
   category: caching
@@ -10,27 +12,161 @@
     La cache conserva il risultato di un'operazione costosa per riusarlo. La domanda
     interessante non è se usarla ma a quale livello metterla, perché ogni livello ha una
     portata e una difficoltà di invalidazione diverse.
+  deep_dive: |-
+    Una richiesta attraversa una catena di cache, e ognuna ha un compromesso diverso
+    fra velocità e controllo: browser, CDN, reverse proxy, cache applicativa condivisa
+    (Redis), cache in-process, buffer pool del database. Vale una regola generale: più
+    la cache è vicina all'utente, più è veloce e meno controllo hai su quando sparisce
+    il dato vecchio. Un file in cache nel browser di diecimila persone non lo invalidi:
+    puoi solo cambiargli il nome.
+
+    I pattern hanno nomi precisi e conviene usarli. *Cache-aside* (lazy loading):
+    l'applicazione cerca in cache, se manca legge dalla sorgente e popola. È il default
+    perché è semplice e perché una cache vuota non rompe niente. *Read-through*: è la
+    cache stessa a saper caricare il dato, quindi l'applicazione la vede come unica
+    interfaccia. *Write-through*: si scrive in cache e nella sorgente insieme, la cache
+    è sempre allineata al prezzo di scritture più lente. *Write-behind* (write-back): si
+    scrive in cache e si aggiorna la sorgente dopo, con throughput altissimo e il
+    rischio concreto di perdere dati se il nodo muore prima di aver scaricato le
+    scritture. *Refresh-ahead*: si rinnova il valore poco prima della scadenza, per
+    non far pagare mai la miss agli utenti.
+
+    Il beneficio si calcola, non si spera. Con hit rate h, latenza della cache `tc` e
+    della sorgente `td`, la latenza media è `h·tc + (1-h)·(tc+td)`. Con `tc` = 1 ms e
+    `td` = 50 ms, passare da hit rate 0,5 a 0,9 porta la media da 26 a 6 ms. Sotto il
+    70-80% di hit rate, spesso la cache aggiunge complessità e un salto di rete senza
+    restituire granché: il problema vero è altrove, di solito un indice mancante.
+
+    La progettazione delle chiavi è dove si fanno i danni. Una chiave deve contenere
+    tutto ciò che fa variare la risposta: entità, versione dello schema di
+    serializzazione, lingua, e soprattutto l'identità quando il contenuto è
+    personalizzato. `utente:42:profilo:v2` è una chiave; `profilo` non lo è. Il giorno
+    in cui cambia la forma del valore serializzato, la `v2` permette di non dover
+    svuotare tutto: le vecchie chiavi scadono da sole.
+
+    Infine il dimensionamento: la cache è utile se ci sta dentro il *working set*,
+    cioè l'insieme dei dati effettivamente richiesti in una finestra di tempo, non
+    l'intero database. È il motivo per cui una cache piccola ma ben mirata batte
+    regolarmente una cache grande che tiene tutto.
   key_points:
     - "Livelli, dal client al dato: browser, CDN, reverse proxy, cache applicativa distribuita (Redis), cache in-process, buffer pool del database"
     - "Più la cache è vicina all'utente, più è veloce e più è difficile da invalidare"
-    - "Pattern: cache-aside (l'app gestisce il miss), read-through, write-through (scrive in entrambi), write-behind (scrive dopo, rischio di perdita)"
+    - "Pattern: cache-aside (l'app gestisce il miss), read-through, write-through (scrive in entrambi), write-behind (scrive dopo, rischio di perdita), refresh-ahead"
     - "Cache-aside è il default: leggi dalla cache, se manca leggi dal DB e popola"
+    - "Latenza media = h·tc + (1-h)·(tc+td): il guadagno si calcola, non si immagina"
     - "Metrica che conta: hit rate. Sotto il 70-80% la cache spesso costa più di quanto rende"
+    - "La chiave deve contenere tutto ciò che fa variare il valore: identità, lingua, versione del formato"
+    - "Versionare il prefisso della chiave (v1, v2) rende i cambi di formato indolori: le vecchie scadono da sole"
+    - "La cache va dimensionata sul working set, non sull'intero dataset"
     - "Cachare è sempre una scommessa sul fatto che il dato stantio sia accettabile"
+  examples:
+    - title: Cache-aside fatto per bene
+      language: python
+      code: |-
+        SCHEMA = "v2"          # cambia quando cambia la forma del valore
+
+        def chiave(utente_id: str, risorsa: str) -> str:
+            return f"{SCHEMA}:utente:{utente_id}:{risorsa}"
+
+        async def profilo(utente_id: str, redis: Redis, db) -> dict:
+            k = chiave(utente_id, "profilo")
+            if (grezzo := await redis.get(k)) is not None:
+                return json.loads(grezzo)                      # HIT
+
+            dato = await db.fetch_profilo(utente_id)           # MISS
+            # jitter sul TTL: mille chiavi popolate insieme non devono scadere insieme
+            ttl = 300 + random.randint(0, 60)
+            await redis.set(k, json.dumps(dato), ex=ttl)
+            return dato
+      note: >-
+        Tre dettagli che fanno la differenza: prefisso di versione, identità nella
+        chiave, TTL con jitter. Nessuno dei tre si nota finché non manca.
+    - title: Quanto rende davvero questa cache?
+      language: python
+      code: |-
+        def latenza_media(hit_rate: float, t_cache_ms: float, t_db_ms: float) -> float:
+            return hit_rate * t_cache_ms + (1 - hit_rate) * (t_cache_ms + t_db_ms)
+
+        for h in (0.5, 0.8, 0.9, 0.99):
+            print(h, round(latenza_media(h, 1, 50), 1), "ms")
+        # 0.5  -> 26.0 ms      0.8 -> 11.0 ms
+        # 0.9  ->  6.0 ms      0.99 ->  1.5 ms
+      note: >-
+        Il salto grande è fra 0,5 e 0,9; oltre il 95% i guadagni si assottigliano. Se il
+        tuo hit rate è basso, prima di ottimizzare la cache guarda perché ci sono tante miss.
+  trade_offs:
+    - option: Cache in-process
+      pros: Latenza nell'ordine dei nanosecondi, nessuna rete, nessuna dipendenza
+      cons: N copie divergenti con N istanze, si svuota a ogni deploy
+      when: Dati quasi immutabili (configurazioni, tabelle di lookup)
+    - option: Cache distribuita (Redis)
+      pros: Una sola verità per tutte le istanze, invalidazione centrale, sopravvive ai deploy
+      cons: Un salto di rete, una dipendenza da tenere viva
+      when: Il default per dati condivisi fra utenti o fra istanze
+    - option: CDN / edge
+      pros: Latenza minima per l'utente, scarica l'origine, assorbe i picchi
+      cons: Invalidazione lenta o a pagamento, rischio di servire contenuti personalizzati
+      when: Asset statici e risposte pubbliche
+    - option: Nessuna cache
+      pros: Una sola verità, nessun bug intermittente
+      cons: Ogni richiesta paga il costo pieno
+      when: Dati che non tollerano ritardo o query già veloci
+  numbers:
+    - "Ordini di grandezza: memoria di processo ~100 ns, Redis in rete locale ~0,2-1 ms, query indicizzata su SSD ~1-10 ms, chiamata HTTP esterna ~50-500 ms"
+    - "Hit rate sotto il 70-80%: la cache spesso non ripaga la complessità che aggiunge"
+    - "Redis: un'istanza regge comodamente 100.000+ operazioni al secondo per core"
   interview_answer: >-
     Decido il livello in base a quanto il dato è condiviso e a quanto tollero che sia
     vecchio. Gli asset statici li metto in CDN con TTL lunghi e nome file con hash, così
     l'invalidazione è gratuita. Le risposte costose e condivise fra utenti vanno in Redis
     con cache-aside. La cache in-process la uso solo per dati quasi immutabili, perché con
-    più istanze ho N copie che divergono. La domanda che mi pongo sempre prima di
-    aggiungere una cache è quanto stantio posso permettermi: se la risposta è zero, il
-    problema non si risolve con la cache ma con una query migliore.
+    più istanze ho N copie che divergono. La domanda che mi pongo sempre prima di aggiungere
+    una cache è quanto stantio posso permettermi: se la risposta è zero, il problema non si
+    risolve con la cache ma con una query migliore. E quando la aggiungo, misuro l'hit rate:
+    sotto il 70-80% di solito sto mascherando un problema invece di risolverlo.
+  senior_signals:
+    - "Calcola il beneficio atteso invece di darlo per scontato"
+    - "Progetta la chiave includendo identità e versione del formato"
+    - "Sa nominare i pattern (cache-aside, write-through, write-behind) e sceglierne uno con una ragione"
+    - "Parla di working set quando si discute la dimensione della cache"
   pitfalls:
     - "Cachare dati personalizzati per utente in una cache condivisa senza includere l'utente nella chiave"
     - "Cache in memoria del processo trattata come coerente fra istanze"
     - "Aggiungere cache per mascherare una query non indicizzata"
-  follow_up_questions:
-    - "Differenza tra write-through e write-behind, e quando accetteresti il rischio del secondo?"
+    - "Nessun prefisso di versione: al primo cambio di formato tocca svuotare tutto a mano"
+  follow_ups:
+    - question: Differenza tra write-through e write-behind, e quando accetteresti il rischio del secondo?
+      answer: >-
+        Write-through scrive in cache e nella sorgente nella stessa operazione: la cache
+        è sempre allineata, ma ogni scrittura paga entrambe le latenze. Write-behind
+        scrive solo in cache e aggiorna la sorgente in modo asincrono: throughput
+        altissimo, ma se il nodo muore prima di scaricare le scritture quei dati sono
+        persi. Accetto il write-behind per dati ad alta frequenza e basso valore
+        unitario - contatori di visualizzazioni, metriche di utilizzo - dove perdere
+        qualche secondo di aggiornamenti non cambia niente. Mai per dati transazionali.
+    - question: Quando NON metteresti una cache?
+      answer: >-
+        Quando il dato deve essere sempre aggiornato (saldi, disponibilità in fase di
+        acquisto), quando la query è già veloce e il collo di bottiglia è altrove,
+        quando l'hit rate atteso è basso perché gli accessi sono distribuiti
+        uniformemente, e quando la complessità di invalidazione supera il guadagno. In
+        questi casi la cache aggiunge solo un modo nuovo di sbagliare.
+    - question: Come dimensioni una cache Redis?
+      answer: >-
+        Parto dal working set: quante chiavi distinte vengono richieste nella finestra
+        che voglio coprire, per la dimensione media del valore, più l'overhead di Redis
+        (qualche decina di byte per chiave). Poi verifico sul campo con l'hit rate e con
+        `INFO memory`, e scelgo una policy di eviction coerente. Se per raggiungere un
+        hit rate accettabile servisse tenere tutto il database in memoria, quella cache
+        è la risposta sbagliata alla domanda.
+  related: [cache-22-eviction, cache-23-consistency, cache-24-cdn, db-12-indexes]
+  resources:
+    - title: "AWS - Caching strategies e best practice"
+      url: "https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/Strategies.html"
+      kind: doc
+    - title: "Redis - Key eviction e memoria"
+      url: "https://redis.io/docs/latest/develop/reference/eviction/"
+      kind: doc
 
 - id: cache-22-eviction
   title: Strategie di eviction (TTL, LRU, LFU)
@@ -42,13 +178,112 @@
   summary: >-
     La memoria è finita, quindi la cache deve decidere cosa buttare via. Il TTL scade per
     tempo, le policy di eviction scelgono la vittima quando lo spazio finisce.
+  deep_dive: |-
+    Scadenza ed eviction rispondono a due domande diverse e vanno progettate separatamente.
+    Il TTL dice *per quanto tempo il dato è ancora attendibile*: è una scelta di
+    correttezza. L'eviction dice *cosa sacrificare quando la memoria finisce*: è una
+    scelta di efficienza. Un sistema può avere TTL corretti e una policy di eviction
+    sbagliata, e viceversa.
+
+    LRU butta l'elemento usato meno di recente. Funziona bene quando gli accessi hanno
+    località temporale, che è il caso normale, ed è il default quasi ovunque. Ha però
+    una debolezza famosa: una scansione completa - un job batch che legge tutto il
+    dataset una volta - riempie la cache di roba che non servirà più e sfratta le chiavi
+    calde. LFU butta l'elemento usato meno *spesso*, resiste alle scansioni, ma nella
+    forma ingenua soffre il problema opposto: una chiave popolarissima il mese scorso
+    resta in cache per sempre. Le implementazioni moderne usano frequenze *decadute* nel
+    tempo: Redis con `allkeys-lfu` ha un contatore logaritmico che decade, e Caffeine
+    (Java) usa W-TinyLFU, che combina uno sketch di frequenza con una finestra LRU ed è
+    lo stato dell'arte pratico.
+
+    Un dettaglio che fa ottima impressione: l'LRU di Redis è *approssimato*. Mantenere
+    una lista esatta costerebbe memoria e tempo, quindi Redis campiona `maxmemory-samples`
+    chiavi (5 di default) e butta la meno recente fra quelle. Alzare il campione avvicina
+    all'LRU esatto e costa un po' di CPU. Sapere che è un'approssimazione spiega perché a
+    volte "quella chiave non avrebbe dovuto essere sfrattata".
+
+    Sempre in Redis, la scadenza funziona in due modi contemporaneamente: *passiva*
+    (quando una chiave scaduta viene richiesta, viene rimossa) e *attiva* (un ciclo in
+    background campiona le chiavi con TTL e ne rimuove una parte). Ne segue che la
+    memoria non si libera istantaneamente alla scadenza, il che a volte sorprende chi
+    guarda il grafico di `used_memory`.
+
+    La policy `maxmemory-policy` va scelta esplicitamente, perché il default
+    `noeviction` fa fallire le *scritture* con un errore OOM quando la memoria finisce:
+    ottimo se Redis è usato come database, pessimo se è una cache. Le varianti
+    `volatile-*` agiscono solo sulle chiavi con TTL, `allkeys-*` su tutte: se usi la
+    stessa istanza per cache e per dati che devono restare, le `volatile-*` sono
+    l'unica scelta sensata - e in realtà la scelta migliore è separare le istanze.
+
+    Ultimo: il jitter sui TTL. Se mille chiavi vengono popolate insieme con lo stesso
+    TTL, scadranno insieme, e il traffico arriverà tutto sul database nello stesso
+    istante. Aggiungere una casualità del 10-20% al TTL distribuisce le scadenze e
+    costa una riga di codice.
   key_points:
-    - "TTL: scadenza assoluta. Semplice, prevedibile, non tiene conto dell'uso"
+    - "TTL: scadenza assoluta, è una scelta di correttezza. Eviction: cosa sacrificare quando la RAM finisce, è una scelta di efficienza"
     - "LRU (Least Recently Used): butta ciò che non si usa da più tempo. Default nella maggior parte dei sistemi"
-    - "LFU (Least Frequently Used): butta ciò che si usa meno spesso. Meglio con hot key stabili, rischia di tenere vecchie glorie"
-    - "FIFO: semplice ma ignora l'uso, raramente la scelta giusta"
-    - "Redis: noeviction, allkeys-lru, volatile-lru, allkeys-lfu, volatile-ttl. Il default noeviction fa fallire le scritture quando la memoria finisce"
+    - "LFU (Least Frequently Used): butta ciò che si usa meno spesso. Resiste alle scansioni, ma serve un decadimento della frequenza"
+    - "W-TinyLFU (Caffeine) è lo stato dell'arte pratico: sketch di frequenza più finestra LRU"
+    - "L'LRU di Redis è approssimato: campiona maxmemory-samples chiavi (5 di default) e sfratta la peggiore fra quelle"
+    - "Redis scade le chiavi in modo passivo (alla lettura) e attivo (ciclo in background): la memoria non si libera all'istante"
+    - "Redis: noeviction, allkeys-lru, volatile-lru, allkeys-lfu, volatile-ttl. Il default noeviction fa fallire le scritture con OOM"
+    - "volatile-* tocca solo le chiavi con TTL: obbligatorio se la stessa istanza contiene dati che devono restare"
     - "TTL con jitter: aggiungere casualità alla scadenza evita che mille chiavi scadano insieme"
+  examples:
+    - title: Configurazione Redis per una cache vera
+      language: bash
+      code: |-
+        # Il default noeviction NON va bene per una cache: le scritture falliscono
+        redis-cli CONFIG SET maxmemory 2gb
+        redis-cli CONFIG SET maxmemory-policy allkeys-lru
+        redis-cli CONFIG SET maxmemory-samples 10      # LRU più preciso, un filo più CPU
+
+        # Verifica: hit rate e memoria
+        redis-cli INFO stats | grep keyspace
+        # keyspace_hits:1843221   keyspace_misses:201455   -> hit rate ~90%
+        redis-cli INFO memory | grep -E "used_memory_human|evicted"
+      note: >-
+        `evicted_keys` che cresce costantemente significa che la cache è troppo piccola
+        per il working set: o si alza la memoria, o si riduce ciò che si cacha.
+    - title: TTL con jitter, e perché serve
+      language: python
+      code: |-
+        # Senza jitter: 10.000 chiavi popolate al deploy scadono nello stesso secondo.
+        await redis.set(k, v, ex=600)
+
+        # Con jitter: le scadenze si spalmano su un minuto.
+        await redis.set(k, v, ex=600 + random.randint(0, 60))
+
+        # Variante più raffinata: rinnovo anticipato probabilistico (XFetch).
+        # Più ci si avvicina alla scadenza, più diventa probabile rigenerare PRIMA
+        # che scada, così nessuna richiesta paga la miss.
+        def va_rigenerato(scade_fra_s: float, costo_rigenerazione_s: float,
+                          beta: float = 1.0) -> bool:
+            return scade_fra_s < costo_rigenerazione_s * beta * -math.log(random.random())
+      note: >-
+        XFetch viene dal paper "Optimal Probabilistic Cache Stampede Prevention": più la
+        rigenerazione è costosa, più presto conviene anticiparla.
+  trade_offs:
+    - option: allkeys-lru
+      pros: Buono nel caso generale, semplice da ragionare
+      cons: Una scansione completa svuota le chiavi calde
+      when: Cache generica, accessi con località temporale
+    - option: allkeys-lfu
+      pros: Resiste alle scansioni, protegge le chiavi davvero calde
+      cons: Serve il decadimento, si adatta più lentamente ai cambi di traffico
+      when: Insieme stabile di chiavi calde, job batch che scorrono tutto
+    - option: volatile-ttl
+      pros: Sfratta prima ciò che sarebbe scaduto comunque
+      cons: Ignora l'uso, e le chiavi senza TTL non vengono mai sfrattate
+      when: Istanza mista, dove alcune chiavi devono restare
+    - option: noeviction
+      pros: Nessun dato sparisce a sorpresa
+      cons: Le scritture falliscono quando la memoria finisce
+      when: Redis usato come archivio, non come cache
+  numbers:
+    - "Redis maxmemory-samples: 5 di default, 10 avvicina molto all'LRU esatto"
+    - "Jitter tipico sul TTL: 10-20% del valore nominale"
+    - "Overhead di Redis per chiave: qualche decina di byte oltre al valore, da contare nel dimensionamento"
   interview_answer: >-
     Il TTL e l'eviction rispondono a domande diverse: il TTL mi dice per quanto il dato è
     ancora attendibile, l'eviction cosa sacrificare quando la RAM finisce. Di solito parto
@@ -56,13 +291,53 @@
     località temporale. Passo a LFU quando ho un insieme piccolo di chiavi molto calde che
     l'LRU rischia di buttare dopo un job batch che scorre tutto. Una cosa che metto sempre
     è il jitter sui TTL: se popolo mille chiavi insieme con lo stesso TTL, scadono insieme
-    e mi arriva tutto il traffico sul database nello stesso istante.
+    e mi arriva tutto il traffico sul database nello stesso istante. E controllo sempre che
+    maxmemory-policy non sia rimasta su noeviction, altrimenti alla prima saturazione le
+    scritture cominciano a fallire.
+  senior_signals:
+    - "Separa esplicitamente TTL (correttezza) ed eviction (efficienza)"
+    - "Sa che l'LRU di Redis è approssimato per campionamento"
+    - "Porta il caso del job batch che svuota la cache utile, e la contromisura"
+    - "Usa il jitter e sa spiegare il fenomeno che previene"
   pitfalls:
     - "Lasciare Redis su noeviction e vedere le scritture fallire con OOM"
     - "TTL identici per chiavi popolate insieme: scadenza sincronizzata e picco sul DB"
     - "LRU con job batch che scorrono l'intero dataset e svuotano la cache utile"
-  follow_up_questions:
-    - "Perché aggiungere jitter al TTL?"
+    - "Usare la stessa istanza Redis per cache e per dati persistenti con una policy allkeys-*"
+  follow_ups:
+    - question: Perché aggiungere jitter al TTL?
+      answer: >-
+        Perché chiavi create insieme scadono insieme, e alla scadenza tutto il traffico
+        che le usava arriva sulla sorgente nello stesso istante: è una stampede
+        autoinflitta. Aggiungere una variazione casuale del 10-20% distribuisce le
+        scadenze nel tempo e trasforma un picco in una curva. Costa una riga e si nota
+        solo il giorno in cui manca.
+    - question: Quando LFU batte LRU, concretamente?
+      answer: >-
+        Quando c'è un nucleo di chiavi molto richieste e un flusso di accessi unici che
+        le sfratterebbe: un catalogo dove il 5% dei prodotti fa il 90% delle
+        visualizzazioni, mentre un crawler o un job notturno scorre tutto. Con LRU la
+        scansione riempie la cache di chiavi che non tornano mai; con LFU le chiavi
+        calde restano perché hanno frequenza alta. L'importante è che la frequenza
+        decada, altrimenti si finisce per proteggere le chiavi calde di sei mesi fa.
+    - question: Cosa succede quando Redis raggiunge maxmemory?
+      answer: >-
+        Dipende dalla policy. Con noeviction i comandi che richiedono memoria falliscono
+        con un errore OOM, quindi l'applicazione smette di poter scrivere in cache. Con
+        una policy allkeys-* o volatile-* Redis sfratta chiavi finché rientra nel limite,
+        e il contatore `evicted_keys` cresce. Quel contatore è il segnale da monitorare:
+        se cresce in continuazione, la cache è sottodimensionata rispetto al working set.
+  related: [cache-21-what-and-where, cache-23-consistency, dsa-03-hash-maps]
+  resources:
+    - title: "Redis - Key eviction policies"
+      url: "https://redis.io/docs/latest/develop/reference/eviction/"
+      kind: doc
+    - title: "Caffeine - Efficiency e W-TinyLFU"
+      url: "https://github.com/ben-manes/caffeine/wiki/Efficiency"
+      kind: doc
+    - title: "Vattani et al. - Optimal Probabilistic Cache Stampede Prevention"
+      url: "https://www.vldb.org/pvldb/vol8/p886-vattani.pdf"
+      kind: article
 
 - id: cache-23-consistency
   title: Coerenza della cache e dati stantii
@@ -75,13 +350,141 @@
     Il problema difficile della cache è l'invalidazione. Ogni strategia lascia una
     finestra in cui cache e database non concordano: l'obiettivo è renderla breve e
     prevedibile, non eliminarla.
+  deep_dive: |-
+    La regola pratica più utile è: dopo una scrittura, *invalida* la chiave, non
+    scriverla. Il motivo è una race che sembra improbabile e capita di continuo. Una
+    lettura in miss legge dal database il valore vecchio; prima che riesca a scriverlo
+    in cache, un'altra transazione aggiorna il database e scrive in cache il valore
+    nuovo; infine la lettura lenta completa e sovrascrive con il vecchio. Da quel
+    momento la cache serve un dato sbagliato fino alla scadenza. Invalidando, il caso
+    peggiore è una miss in più.
+
+    Anche l'invalidazione ha il suo ordine corretto: prima si scrive sul database, poi
+    si invalida. Al contrario (invalida, poi scrivi) si apre una finestra in cui una
+    lettura concorrente ripopola la cache con il valore vecchio prima che il commit sia
+    avvenuto. E resta comunque il caso in cui l'invalidazione fallisce - rete, Redis
+    momentaneamente giù - motivo per cui il TTL corto va sempre messo come rete di
+    sicurezza: l'invalidazione è il percorso principale, il TTL è il paracadute.
+
+    La *cache stampede* (thundering herd) è il fallimento più spettacolare: una chiave
+    molto calda scade e migliaia di richieste, non trovandola, vanno tutte insieme sul
+    database, che collassa proprio mentre la cache si sta ripopolando. Le difese si
+    combinano: *single-flight*, in cui una sola richiesta rigenera il valore e le altre
+    attendono il risultato (in un sistema distribuito serve un lock su Redis con TTL);
+    *rigenerazione anticipata probabilistica*, che rinnova il valore poco prima della
+    scadenza; e *stale-while-revalidate*, in cui si continua a servire il valore
+    scaduto mentre uno lo rigenera in background - di gran lunga la scelta migliore
+    quando servire un dato di qualche secondo fa è accettabile.
+
+    La *cache penetration* è il problema speculare: richieste per chiavi che *non
+    esistono* passano sempre alla sorgente, perché la cache non ha nulla da restituire.
+    Se le chiavi sono generate da un attaccante o da un client difettoso, il database
+    prende tutto il carico. Le contromisure sono cachare anche il risultato negativo
+    (con un TTL breve, altrimenti si trasforma un errore temporaneo in uno permanente) e,
+    per volumi alti, un Bloom filter davanti alla cache: risponde "sicuramente assente"
+    o "forse presente", con pochi byte per chiave.
+
+    Quando la cache va invalidata in più posti - più regioni, più livelli - le opzioni
+    sono la propagazione attiva (pub/sub, o un flusso di eventi dal database via CDC) e
+    le *chiavi versionate*: invece di cancellare, si incrementa un contatore di versione
+    dell'entità e la chiave nuova include quella versione, così le vecchie diventano
+    irraggiungibili e scadono da sole. Quest'ultimo trucco elimina intere classi di bug
+    di invalidazione mancata.
+
+    L'ultima cosa da dire, e da dire con un numero: la finestra di incoerenza va scelta
+    e dichiarata. "Il contatore di like può essere vecchio fino a 30 secondi" è una
+    decisione di prodotto verificabile; "di solito è aggiornato" non lo è.
   key_points:
     - "Cache-aside in scrittura: aggiorna il DB e poi INVALIDA la chiave, non scriverla"
     - "Scrivere in cache dopo il DB apre una race: una lettura lenta può riscrivere il valore vecchio sopra quello nuovo"
-    - "Cache stampede (thundering herd): una chiave calda scade e mille richieste colpiscono il DB insieme. Si mitiga con lock/single-flight o rigenerazione anticipata"
+    - "L'ordine giusto è DB prima, invalidazione dopo: il contrario lascia ripopolare con il valore vecchio"
+    - "L'invalidazione può fallire: il TTL corto è la rete di sicurezza, non il meccanismo principale"
+    - "Cache stampede (thundering herd): una chiave calda scade e mille richieste colpiscono il DB insieme"
+    - "Difese dallo stampede: single-flight con lock, rigenerazione anticipata, stale-while-revalidate"
     - "Cache penetration: richieste per chiavi inesistenti che passano sempre al DB. Si mitiga cachando il risultato negativo o con un Bloom filter"
+    - "Chiavi versionate: incrementare una versione dell'entità rende irraggiungibili tutte le chiavi vecchie senza cancellarle"
     - "Consistenza eventuale: definisci una finestra accettabile e misurala, non sperare"
     - "Pattern robusto: TTL corto come rete di sicurezza + invalidazione esplicita come percorso principale"
+  examples:
+    - title: La race che rende la cache bugiarda
+      language: text
+      code: |-
+        tempo ->
+        Lettura R (miss)   |--legge DB: "Mario"------------------->| scrive cache "Mario"
+        Scrittura W                    |--scrive DB "Maria"--| invalida/scrive cache
+                                                              ^
+        Risultato: la cache resta su "Mario" (il valore vecchio) per tutto il TTL,
+        perché la scrittura lenta di R è arrivata DOPO quella di W.
+
+        Con "invalida invece di scrivere" il peggio che capita è:
+        Lettura R (miss)   |--legge DB: "Mario"--->| scrive cache "Mario"
+        Scrittura W              |--scrive DB--| invalida  ->  la prossima lettura ricarica
+      note: >-
+        È la ragione per cui quasi tutte le guide dicono "invalidate, don't update": non
+        elimina ogni finestra, ma la riduce da "un TTL intero" a "una richiesta".
+    - title: Single-flight distribuito contro lo stampede
+      language: python
+      code: |-
+        async def con_single_flight(k: str, redis: Redis, carica, ttl: int = 300):
+            if (v := await redis.get(k)) is not None:
+                return json.loads(v)
+
+            lock = f"lock:{k}"
+            # NX: solo uno vince. EX: se il vincitore muore, il lock si libera.
+            if await redis.set(lock, "1", nx=True, ex=10):
+                try:
+                    dato = await carica()
+                    await redis.set(k, json.dumps(dato), ex=ttl + random.randint(0, 30))
+                    return dato
+                finally:
+                    await redis.delete(lock)
+
+            # Gli altri aspettano brevemente il vincitore invece di colpire il DB
+            for _ in range(50):
+                await asyncio.sleep(0.02)
+                if (v := await redis.get(k)) is not None:
+                    return json.loads(v)
+            return await carica()      # ultima spiaggia: il vincitore è morto
+      note: >-
+        Senza il ramo finale, un vincitore che muore blocca tutti fino alla scadenza del
+        lock. Senza il TTL sul lock, li blocca per sempre.
+    - title: Chiavi versionate, invalidazione senza cancellare
+      language: python
+      code: |-
+        async def versione(entita: str, id_: str, redis: Redis) -> int:
+            return int(await redis.get(f"ver:{entita}:{id_}") or 0)
+
+        async def chiave(entita: str, id_: str, vista: str, redis: Redis) -> str:
+            return f"{entita}:{id_}:v{await versione(entita, id_, redis)}:{vista}"
+
+        # Alla scrittura NON cancello nulla: incremento, e tutte le viste
+        # di quell'entità diventano irraggiungibili in un colpo solo.
+        async def invalida(entita: str, id_: str, redis: Redis) -> None:
+            await redis.incr(f"ver:{entita}:{id_}")
+      note: >-
+        Utilissimo quando la stessa entità è cachata in dieci forme diverse (lista,
+        dettaglio, riepilogo): dimenticarne una è la causa numero uno dei dati fantasma.
+  trade_offs:
+    - option: Invalidazione esplicita + TTL corto
+      pros: Finestra di incoerenza minima, robusto agli errori
+      cons: Ogni percorso di scrittura deve ricordarsi di invalidare
+      when: Il default per dati che cambiano e si leggono spesso
+    - option: Solo TTL
+      pros: Semplicissimo, nessun accoppiamento fra scrittura e cache
+      cons: Finestra di incoerenza pari al TTL
+      when: Dati dove qualche minuto di ritardo non fa differenza
+    - option: Write-through
+      pros: Cache sempre allineata, nessuna miss dopo la scrittura
+      cons: Scritture più lente, race da gestire con attenzione
+      when: Letture immediate dopo la scrittura, valori costosi da rigenerare
+    - option: Chiavi versionate
+      pros: Invalida tutte le viste di un'entità in un'operazione, niente dimenticanze
+      cons: Un lookup in più per la versione, chiavi morte che occupano fino alla scadenza
+      when: Molte rappresentazioni cachate della stessa entità
+  numbers:
+    - "Finestra tipica dichiarata per dati non critici: 30-300 secondi. Va scritta nei requisiti, non lasciata implicita"
+    - "TTL del lock di single-flight: leggermente più lungo del tempo di rigenerazione peggiore (5-10 secondi è comune)"
+    - "Bloom filter: circa 10 bit per elemento per un tasso di falsi positivi dell'1%"
   interview_answer: >-
     La regola che seguo è invalidare, non aggiornare. Se dopo la scrittura sul database
     scrivo anche in cache, apro una race: una lettura partita prima della mia scrittura può
@@ -90,14 +493,52 @@
     corto come rete di sicurezza, perché prima o poi un'invalidazione si perde. I due
     fallimenti che gestisco esplicitamente sono lo stampede, con un single-flight che fa
     rigenerare il valore a una sola richiesta, e la penetration, cachando anche le risposte
-    negative con TTL breve.
+    negative con TTL breve. Quando la stessa entità è cachata in più forme uso le chiavi
+    versionate: incremento un contatore e tutte le viste vecchie diventano irraggiungibili,
+    invece di dover ricordare dieci cancellazioni.
+  senior_signals:
+    - "Spiega la race concreta che rende sbagliato l'aggiornamento della cache"
+    - "Mette il TTL come rete di sicurezza e non come meccanismo principale"
+    - "Conosce stampede e penetration con i rispettivi rimedi"
+    - "Dichiara una finestra di incoerenza numerica invece di dire 'quasi subito'"
   pitfalls:
     - "Scrivere in cache invece di invalidare, con conseguenti valori vecchi persistenti"
     - "Nessuna protezione dallo stampede su chiavi molto calde"
     - "Invalidazione dimenticata su uno dei percorsi di scrittura"
-  follow_up_questions:
-    - "Come eviteresti una cache stampede su una chiave molto richiesta?"
-    - "Cos'è la cache penetration e come la mitighi?"
+    - "Cachare un errore temporaneo con TTL lungo: un guasto di 3 secondi diventa un guasto di 10 minuti"
+    - "Invalidare prima di scrivere sul database, lasciando ripopolare il valore vecchio"
+  follow_ups:
+    - question: Come eviteresti una cache stampede su una chiave molto richiesta?
+      answer: >-
+        Combino tre cose. Single-flight: un lock su Redis fa sì che una sola richiesta
+        rigeneri e le altre attendano. Stale-while-revalidate: finché la rigenerazione è
+        in corso servo il valore scaduto, così nessuno aspetta. Rigenerazione anticipata
+        probabilistica, così la chiave calda si rinnova prima di scadere. E in ogni caso
+        jitter sul TTL, perché il caso peggiore è che mille chiavi scadano insieme.
+    - question: Cos'è la cache penetration e come la mitighi?
+      answer: >-
+        È quando arrivano richieste per chiavi che non esistono: la cache non ha niente,
+        quindi ogni richiesta passa al database. Con id generati a caso da un client
+        difettoso o da un attaccante diventa un modo per saturare la sorgente. Mitigo
+        cachando il risultato negativo con TTL breve (30-60 secondi) e, se il volume è
+        alto, mettendo davanti un Bloom filter che risponde subito "questa chiave non
+        esiste" con pochi byte per elemento.
+    - question: "Due datacenter, una cache per ciascuno: come le tieni allineate?"
+      answer: >-
+        Evito di fingere che siano una sola. Propago le invalidazioni con un canale
+        affidabile - pub/sub o meglio un flusso di eventi dal database via CDC - e
+        accetto una finestra di incoerenza fra le regioni, dichiarandola. Dove
+        l'incoerenza non è accettabile, non cacho in locale: leggo dalla regione
+        primaria. Le chiavi versionate aiutano molto, perché l'evento da propagare
+        diventa uno solo per entità.
+  related: [cache-21-what-and-where, cache-25-cache-danger, db-15-normalization, rel-35-event-driven]
+  resources:
+    - title: "Facebook - Scaling Memcache at Facebook (NSDI)"
+      url: "https://www.usenix.org/system/files/conference/nsdi13/nsdi13-final170_update.pdf"
+      kind: article
+    - title: "RFC 5861 - stale-while-revalidate e stale-if-error"
+      url: "https://www.rfc-editor.org/rfc/rfc5861.html"
+      kind: doc
 
 - id: cache-24-cdn
   title: CDN e edge caching
@@ -110,27 +551,179 @@
     Una CDN replica i contenuti su nodi vicini agli utenti. Riduce la latenza, scarica
     l'origine e assorbe i picchi. Il controllo si esercita quasi interamente tramite
     header HTTP di cache.
+  deep_dive: |-
+    La CDN è una cache condivisa che vive fra l'utente e la tua origine, e si governa
+    con gli header di `Cache-Control`. Le direttive che contano davvero: `max-age` vale
+    per tutte le cache, `s-maxage` solo per quelle *condivise* (CDN e proxy) e prevale
+    su max-age, `public` autorizza la memorizzazione anche di risposte che di norma non
+    lo sarebbero, `private` la vieta alle cache condivise lasciandola al browser,
+    `no-store` vieta del tutto, `immutable` dice al browser di non revalidare nemmeno al
+    refresh. `no-cache`, contro ogni intuizione, non significa "non cachare": significa
+    "cacha pure, ma rivalida prima di usarlo".
+
+    La coppia più utile per il contenuto dinamico viene da RFC 5861:
+    `stale-while-revalidate` permette alla CDN di servire la copia scaduta *mentre*
+    rigenera in background, e `stale-if-error` di continuare a servirla se l'origine
+    risponde con errore. Con `s-maxage=60, stale-while-revalidate=600` la latenza
+    percepita è sempre quella della cache e l'origine riceve una richiesta al minuto
+    invece di migliaia.
+
+    Le richieste condizionali sono l'altro pilastro: l'origine espone `ETag` o
+    `Last-Modified`, il client o la CDN rimandano `If-None-Match`/`If-Modified-Since`, e
+    la risposta 304 Not Modified trasferisce solo gli header. Si risparmia banda, non
+    round trip.
+
+    Per gli asset statici esiste una soluzione che chiude il problema: il *cache
+    busting* tramite nome file. Si inserisce l'hash del contenuto nel nome
+    (`app.9f2c1a.js`) e si serve con `max-age=31536000, immutable`. Il file non cambia
+    mai, quindi non va mai invalidato; quando il contenuto cambia, cambia il nome, e il
+    riferimento nell'HTML - che ha invece un TTL corto - punta al nuovo. È il motivo per
+    cui i bundler moderni generano nomi con hash.
+
+    Il `Vary` è la trappola più comune. Dice alla cache quali header di richiesta fanno
+    variare la risposta, e ogni valore distinto crea una voce separata. `Vary:
+    Accept-Encoding` è sensato (poche varianti). `Vary: User-Agent` moltiplica la cache
+    per migliaia di varianti e azzera l'hit rate senza che nessuno se ne accorga, se non
+    guardando il grafico dell'origine.
+
+    Il rischio più serio, invece, è servire dalla CDN una risposta personalizzata: basta
+    dimenticare `private` su una pagina che contiene il nome dell'utente perché il
+    secondo visitatore veda i dati del primo. La regola è semplice: tutto ciò che
+    dipende dal cookie di sessione è `private, no-store`, e le risposte pubbliche non
+    devono contenere nulla di personale.
+
+    L'invalidazione esplicita (purge) esiste ed è utile, ma è lenta - deve raggiungere
+    centinaia di POP - e su alcuni provider ha un costo. Le *surrogate key* (o cache
+    tag) permettono di invalidare per etichetta invece che per URL, per esempio tutte le
+    pagine che mostrano il prodotto 42. Resta comunque una buona norma progettare per
+    non doverne dipendere.
   key_points:
-    - "Cache-Control: max-age (per il browser), s-maxage (per le cache condivise), public/private, no-store, immutable"
-    - "stale-while-revalidate: servi il contenuto vecchio e aggiorna in background. Ottimo per la latenza percepita"
-    - "ETag e Last-Modified abilitano le richieste condizionali e la risposta 304"
-    - "Cache busting: contenuto statico con hash nel nome file e max-age lunghissimo"
-    - "Purge/invalidation esplicita: utile ma lenta e a volte a pagamento, meglio non dipenderne"
+    - "Cache-Control: max-age (tutte le cache), s-maxage (solo le condivise, prevale), public/private, no-store, immutable"
+    - "no-cache NON significa 'non cachare': significa 'rivalida sempre prima di usare la copia'"
+    - "stale-while-revalidate (RFC 5861): servi il contenuto vecchio e aggiorna in background. stale-if-error: continua a servirlo se l'origine è giù"
+    - "ETag e Last-Modified abilitano le richieste condizionali e la risposta 304: risparmiano banda, non round trip"
+    - "Cache busting: contenuto statico con hash nel nome file e max-age lunghissimo con immutable"
+    - "Purge/invalidation esplicita: utile ma lenta e a volte a pagamento, meglio non dipenderne; le surrogate key invalidano per etichetta"
     - "Attenzione al Vary: un Vary troppo largo (es. User-Agent) frammenta la cache e annulla il beneficio"
+    - "Tutto ciò che dipende dalla sessione va marcato private o no-store: una risposta personalizzata in CDN è un leak fra utenti"
+  examples:
+    - title: I tre profili di cache che coprono quasi tutto
+      language: http
+      code: |-
+        # 1) Asset con hash nel nome: non cambia mai, non si invalida mai
+        GET /assets/app.9f2c1a.js
+        Cache-Control: public, max-age=31536000, immutable
+
+        # 2) HTML o API pubblica: fresco poco, servibile stantio a lungo
+        GET /prodotti/42
+        Cache-Control: public, s-maxage=60, stale-while-revalidate=600, stale-if-error=86400
+        ETag: "p42-rev18"
+        Vary: Accept-Encoding
+
+        # 3) Risposta personalizzata: fuori dalle cache condivise, punto
+        GET /api/me
+        Cache-Control: private, no-store
+      note: >-
+        Con il profilo 2 l'origine riceve circa una richiesta al minuto per URL, e se
+        cade continua a essere servita per un giorno dal contenuto stantio.
+    - title: Rivalidazione condizionale lato origine
+      language: python
+      code: |-
+        @app.get("/prodotti/{id}")
+        async def prodotto(id: str, request: Request):
+            p = await repo.get(id)
+            etag = f'"p{id}-rev{p.version}"'
+            if request.headers.get("if-none-match") == etag:
+                # niente corpo: solo header. La CDN riusa la copia che ha già.
+                return Response(status_code=304, headers={"ETag": etag})
+            return JSONResponse(
+                p.model_dump(),
+                headers={
+                    "ETag": etag,
+                    "Cache-Control": "public, s-maxage=60, stale-while-revalidate=600",
+                },
+            )
+      note: >-
+        L'ETag basato sulla versione dell'entità è stabile e calcolabile senza serializzare
+        la risposta: meglio di un hash del corpo, che costa a ogni richiesta.
+  trade_offs:
+    - option: Hash nel nome + immutable
+      pros: Nessuna invalidazione, hit rate altissimo, deploy atomico
+      cons: Serve un build step, l'HTML che li referenzia deve restare fresco
+      when: JS, CSS, immagini, font
+    - option: s-maxage breve + stale-while-revalidate
+      pros: Latenza da cache anche per contenuti dinamici, origine protetta
+      cons: Gli utenti possono vedere dati vecchi di qualche minuto
+      when: Pagine pubbliche, API di lettura non personalizzate
+    - option: Purge esplicita
+      pros: Controllo puntuale, aggiornamento immediato quando serve
+      cons: Lenta a propagarsi, a volte a pagamento, fragile come unico meccanismo
+      when: Correzioni urgenti, contenuti editoriali
+    - option: Nessuna cache CDN
+      pros: Nessun rischio di servire dati sbagliati o personalizzati
+      cons: Tutta la latenza e tutto il carico sull'origine
+      when: API scritte e contenuti interamente personalizzati
+  numbers:
+    - "max-age=31536000 è un anno: il valore convenzionale per gli asset con hash"
+    - "Un hit in CDN vicina all'utente costa 10-40 ms contro i 100-300 ms di un round trip intercontinentale"
+    - "Hit ratio tipico di una CDN ben configurata sugli statici: oltre il 95%"
+    - "Ogni valore distinto di un header in Vary moltiplica le voci in cache: con User-Agent si parla di migliaia"
   interview_answer: >-
     Per gli asset statici uso il pattern che considero risolto: hash nel nome del file,
     Cache-Control immutable con max-age di un anno, e il deploy che cambia il nome quando
     cambia il contenuto. Così non devo mai invalidare nulla. Per le risposte dinamiche ma
     condivise uso s-maxage basso più stale-while-revalidate, che mi dà latenza da cache
-    anche durante il refresh. La cosa su cui faccio attenzione è il Vary: se vario su
-    header ad alta cardinalità la cache si frammenta e l'hit rate crolla senza che nessuno
-    se ne accorga.
+    anche durante il refresh, e aggiungo stale-if-error così se l'origine cade la CDN
+    continua a servire. La cosa su cui faccio attenzione è il Vary: se vario su header ad
+    alta cardinalità la cache si frammenta e l'hit rate crolla senza che nessuno se ne
+    accorga. E tutto ciò che dipende dalla sessione lo marco private o no-store, perché una
+    risposta personalizzata finita in CDN è un leak fra utenti.
+  senior_signals:
+    - "Sa che no-cache significa rivalida, non 'non cachare'"
+    - "Usa stale-while-revalidate e stale-if-error, non solo max-age"
+    - "Tratta il Vary come una scelta di capacità, non come un dettaglio"
+    - "Nomina esplicitamente il rischio di servire risposte personalizzate dalla CDN"
   pitfalls:
     - "Cachare in CDN risposte personalizzate: un utente vede i dati di un altro"
     - "max-age lungo su file senza hash: utenti bloccati su una versione vecchia"
     - "Vary: User-Agent, che moltiplica le varianti in cache"
-  follow_up_questions:
-    - "Differenza tra max-age e s-maxage?"
+    - "Usare no-cache pensando di disabilitare la cache: serve no-store"
+    - "Dipendere dalla purge per la correttezza: propaga lentamente e può fallire"
+  follow_ups:
+    - question: Differenza tra max-age e s-maxage?
+      answer: >-
+        max-age vale per tutte le cache, comprese quelle private del browser; s-maxage
+        vale solo per le cache condivise come CDN e proxy, e quando c'è prevale su
+        max-age per loro. Si usano insieme per dare tempi diversi: per esempio
+        `max-age=0, s-maxage=300` significa "il browser rivalida sempre, la CDN tiene
+        cinque minuti", che è esattamente ciò che serve per una pagina pubblica che deve
+        sembrare fresca ma non deve martellare l'origine.
+    - question: Come aggiorni un contenuto in CDN quando cambia prima della scadenza?
+      answer: >-
+        Preferibilmente cambiando l'URL, perché è istantaneo e non dipende dal provider.
+        Se l'URL deve restare, uso la purge, meglio se per surrogate key così invalido
+        tutte le pagine che dipendono da un'entità con una sola chiamata. In ogni caso
+        progetto perché la purge sia un'ottimizzazione e non il meccanismo su cui si
+        regge la correttezza: con s-maxage breve il sistema si allinea comunque da solo.
+    - question: Cosa succede se la CDN cachea per errore una pagina con dati personali?
+      answer: >-
+        È un incidente di sicurezza: gli utenti successivi vedono i dati del primo.
+        Vanno fatte tre cose subito: purge del percorso interessato, correzione degli
+        header (private/no-store) e verifica di quante richieste hanno ricevuto la
+        risposta sbagliata dai log della CDN. Poi la prevenzione: un test automatico che
+        controlli gli header di cache sulle rotte autenticate, perché è un errore che
+        rientra facilmente.
+  related: [cache-21-what-and-where, core-04-http-status-codes, core-03-http-methods, rel-37-graceful-degradation]
+  resources:
+    - title: "MDN - Cache-Control"
+      url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control"
+      kind: doc
+    - title: "RFC 9111 - HTTP Caching"
+      url: "https://www.rfc-editor.org/rfc/rfc9111.html"
+      kind: doc
+    - title: "Google - HTTP caching best practices"
+      url: "https://web.dev/articles/http-cache"
+      kind: article
 
 - id: cache-25-cache-danger
   title: Perché la cache può rendere sbagliato un sistema
@@ -143,6 +736,47 @@
     La cache introduce una seconda copia della verità. Da quel momento il sistema può
     mostrare dati vecchi, comportarsi in modo non deterministico e fallire in modi nuovi,
     inclusi i fallimenti causati dalla cache stessa.
+  deep_dive: |-
+    Il primo danno della cache non è la latenza, è l'*intermittenza*. Lo stesso input
+    produce risultati diversi a seconda dello stato della cache, quindi un bug di
+    coerenza non si riproduce a comando: appare in produzione, sparisce in staging,
+    riappare due giorni dopo. È la categoria di bug più costosa da diagnosticare, e la
+    cura è progettuale: rendere deterministico ciò che si cacha, includere nella chiave
+    tutto ciò che fa variare la risposta, e avere un interruttore per disattivare la
+    cache e confrontare.
+
+    Il secondo danno è più subdolo: la cache diventa una *dipendenza critica* senza che
+    nessuno l'abbia deciso. Se il database regge il traffico solo perché il 95% delle
+    richieste non lo raggiunge, un riavvio di Redis significa moltiplicare per venti il
+    carico sull'origine, a freddo, in un istante. Non è ipotetico: è il modo tipico in
+    cui un incidente da "cache non disponibile" diventa un'interruzione totale. La
+    contromisura si progetta prima: limitare la concorrenza verso l'origine, riscaldare
+    la cache prima di riaprire il traffico, e verificare periodicamente che il sistema
+    stia in piedi - più lento, ma in piedi - anche a cache spenta.
+
+    Il terzo è la cache usata come archivio. Le cache sono progettate per perdere dati:
+    sfrattano, scadono, si riavviano vuote. Nel momento in cui l'unica copia di qualcosa
+    sta solo lì - una sessione, un carrello, un risultato di calcolo lungo - si è
+    costruito un database senza durabilità. La regola è netta: la cache deve poter
+    essere svuotata in qualunque momento senza perdita di dati.
+
+    Il quarto riguarda la sicurezza: una cache condivisa con chiavi progettate male fa
+    trapelare dati fra utenti. Il caso classico è la chiave basata solo sull'URL quando
+    la risposta dipende dall'identità; il secondo è il `Vary` dimenticato; il terzo è il
+    framework che cacha una risposta intera, header di autorizzazione compresi. Qui
+    l'errore non produce lentezza, produce un incidente.
+
+    Il quinto è il *negative caching* fatto male: si cacha un errore temporaneo con un
+    TTL lungo, e un guasto di tre secondi diventa un guasto di dieci minuti per tutti.
+    Gli errori vanno cachati con TTL molto brevi, e mai gli errori 5xx della propria
+    origine.
+
+    Infine, la prova del nove che vale la pena portare al colloquio: l'esperimento
+    mentale del flush. "Se svuoto la cache adesso, cosa succede?" Se la risposta è
+    "niente, solo più lento", l'architettura è sana. Se la risposta è "cade il
+    database", la cache non è un'ottimizzazione: è un pezzo strutturale non dichiarato,
+    e va trattato con la stessa cura del database - ridondanza, monitoraggio, prove di
+    ripristino.
   key_points:
     - "La cache trasforma un bug di coerenza in un bug intermittente, quindi difficilissimo da riprodurre"
     - "Dipendere dalla cache per reggere il carico significa che un flush o un riavvio di Redis fa cadere il database"
@@ -150,17 +784,112 @@
     - "Dati sensibili in cache condivise: rischio di leak fra utenti se la chiave non include l'identità"
     - "Cache negative mal gestite: un errore temporaneo cachato diventa un errore permanente"
     - "Il sistema va progettato per restare corretto, anche se più lento, con cache disabilitata"
+    - "Contromisure al riavvio a freddo: limite di concorrenza verso l'origine, riscaldamento, apertura graduale del traffico"
+    - "Serve un interruttore per spegnere la cache e confrontare i risultati: è lo strumento diagnostico principale"
+  examples:
+    - title: Proteggere l'origine quando la cache riparte vuota
+      language: python
+      code: |-
+        # Un semaforo limita quante richieste possono raggiungere il database
+        # contemporaneamente: a cache fredda le altre attendono invece di sommarsi.
+        ORIGINE = asyncio.Semaphore(20)
+
+        async def leggi(k: str, redis: Redis, carica):
+            if (v := await redis.get(k)) is not None:
+                return json.loads(v)
+            async with ORIGINE:                      # coda, non valanga
+                # ricontrolla: mentre aspettavo qualcuno può aver popolato
+                if (v := await redis.get(k)) is not None:
+                    return json.loads(v)
+                dato = await carica()
+            await redis.set(k, json.dumps(dato), ex=300 + random.randint(0, 60))
+            return dato
+      note: >-
+        Il secondo controllo dopo il semaforo è ciò che trasforma mille query in una.
+        Senza, il semaforo rallenta soltanto la valanga invece di eliminarla.
+    - title: Un interruttore per la diagnosi
+      language: python
+      code: |-
+        # Variabile d'ambiente o feature flag: si può spegnere senza rilasciare codice.
+        CACHE_ATTIVA = os.getenv("CACHE_ENABLED", "true").lower() == "true"
+
+        async def leggi(k: str, carica):
+            if not CACHE_ATTIVA:
+                return await carica()          # percorso senza cache, sempre corretto
+            ...
+      note: >-
+        "Succede solo a volte" diventa una domanda con risposta: spegni la cache e vedi
+        se il problema resta. Senza questo interruttore si indaga alla cieca.
+  trade_offs:
+    - option: Cache come ottimizzazione
+      pros: Si può svuotare, riavviare, spegnere senza incidenti
+      cons: L'origine deve essere dimensionata per reggere il picco a cache fredda
+      when: Sempre, se possibile
+    - option: Cache come dipendenza dichiarata
+      pros: Permette di dimensionare l'origine molto più piccola
+      cons: Va resa ridondante, monitorata e ripristinabile come un database
+      when: Scala molto grande, quando l'origine non può reggere il traffico pieno
+    - option: Cache negativa
+      pros: Protegge dalla penetration e dalle richieste per chiavi inesistenti
+      cons: Un errore temporaneo può diventare permanente se il TTL è lungo
+      when: Solo per risultati "non trovato", con TTL di decine di secondi
+  numbers:
+    - "Se l'hit rate è 95%, una cache vuota moltiplica per 20 il carico sull'origine"
+    - "TTL per cachare un 404: 30-60 secondi. Per un errore 5xx: meglio non cacharlo affatto"
+    - "Prova del riavvio: va fatta in un ambiente reale almeno una volta, non ipotizzata"
   interview_answer: >-
     Il rischio che tengo più presente è che la cache diventi una dipendenza critica senza
     che nessuno lo abbia deciso. Se il database regge solo grazie al 95% di hit rate, un
     riavvio di Redis è un incidente: parte tutto il traffico sull'origine a freddo. Per
     questo il criterio che uso è che il sistema deve restare corretto con la cache spenta,
-    anche se più lento, e che il degrado vada provato. L'altro rischio è più subdolo: la
-    cache rende i bug intermittenti, perché lo stesso input dà risposte diverse a seconda
-    dello stato della cache, e quei bug sono i più costosi da diagnosticare.
+    anche se più lento, e che il degrado vada provato davvero, non ipotizzato. Dove
+    l'origine non può reggere il picco a freddo, allora la cache è una dipendenza vera e la
+    tratto come tale: ridondanza, monitoraggio, riscaldamento e apertura graduale del
+    traffico. L'altro rischio è più subdolo: la cache rende i bug intermittenti, perché lo
+    stesso input dà risposte diverse a seconda dello stato della cache, e quei bug sono i
+    più costosi da diagnosticare. Per questo tengo sempre un interruttore per spegnerla.
+  senior_signals:
+    - "Fa l'esperimento mentale del flush e ne trae conseguenze architetturali"
+    - "Distingue la cache-ottimizzazione dalla cache-dipendenza e le tratta diversamente"
+    - "Cita l'intermittenza dei bug come costo nascosto"
+    - "Prevede un interruttore e un piano di riscaldamento, non solo la configurazione felice"
   pitfalls:
     - "Cache diventata fonte di verità per errore"
     - "Nessun test del comportamento a cache fredda"
     - "Cachare gli errori senza TTL corto"
-  follow_up_questions:
-    - "Cosa succede al tuo sistema se Redis viene svuotato nell'ora di punta?"
+    - "Nessun limite di concorrenza verso l'origine: a cache vuota il database prende tutto insieme"
+    - "Chiavi che non includono l'identità in una cache condivisa: dati di un utente serviti a un altro"
+  follow_ups:
+    - question: Cosa succede al tuo sistema se Redis viene svuotato nell'ora di punta?
+      answer: >-
+        Con un hit rate del 95%, il carico sull'origine si moltiplica per venti in un
+        istante. Se non ho difese, il database satura, le latenze salgono, i timeout
+        generano retry e la situazione peggiora da sola. Le difese che metto: limite di
+        concorrenza verso l'origine con coda, single-flight per chiave, apertura graduale
+        del traffico dopo un riavvio e, dove possibile, riscaldamento preventivo delle
+        chiavi più calde. E lo provo in un ambiente reale, perché sulla carta funziona
+        sempre.
+    - question: Come diagnostichi un bug che compare solo a volte e sospetti sia la cache?
+      answer: >-
+        Prima riproduco con la cache spenta: se sparisce, il colpevole è lì. Poi guardo
+        la chiave: contiene tutto ciò che fa variare la risposta (utente, lingua,
+        versione, permessi)? Poi i percorsi di scrittura: ce n'è uno che non invalida?
+        Infine i tempi: la finestra di incoerenza osservata combacia con il TTL? Questo
+        percorso richiede due cose che vanno preparate prima: l'interruttore e log che
+        dicano se una risposta veniva dalla cache.
+    - question: Quando la cache è legittimamente una dipendenza critica?
+      answer: >-
+        Quando il volume è tale che dimensionare l'origine per il traffico pieno sarebbe
+        assurdo - pensiamo a un feed letto milioni di volte al minuto. In quel caso la
+        scelta è legittima ma va dichiarata: la cache entra nel diagramma delle
+        dipendenze, ha ridondanza e failover, il suo hit rate è un indicatore di salute,
+        e il ripristino dopo un guasto è una procedura provata. Quello che non deve
+        succedere è arrivarci per inerzia.
+  related: [cache-23-consistency, rel-37-graceful-degradation, rel-40-traffic-spikes, rel-38-observability]
+  resources:
+    - title: "AWS Builders' Library - Caching challenges and strategies"
+      url: "https://aws.amazon.com/builders-library/caching-challenges-and-strategies/"
+      kind: article
+    - title: "Google SRE Book - Addressing Cascading Failures"
+      url: "https://sre.google/sre-book/addressing-cascading-failures/"
+      kind: book

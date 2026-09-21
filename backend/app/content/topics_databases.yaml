@@ -1,4 +1,7 @@
-# Categoria "Databases & Data Handling" - concetti 11-20 della checklist.
+# Categoria "Databases" - modellazione, indici, transazioni e scalabilità dei dati.
+# È la parte dove i colloqui backend scavano di più, perché è quella dove gli errori
+# costano di più in produzione.
+
 - id: db-11-sql-vs-nosql
   title: SQL vs NoSQL - quando usare cosa
   category: databases
@@ -11,14 +14,120 @@
     interrogherai i dati. I database relazionali ti danno schema, join e transazioni
     multi-riga; i NoSQL ti danno modelli specializzati e scalabilità orizzontale più
     semplice, al prezzo di dover conoscere i pattern di accesso in anticipo.
+  deep_dive: |-
+    La differenza che conta non è "tabelle contro documenti", è *quando* devi sapere
+    come interrogherai i dati. In un relazionale modelli le entità e le relazioni, poi
+    scrivi le query che ti servono, anche quelle a cui non avevi pensato: il join è
+    un'operazione di prima classe e l'ottimizzatore decide il piano per te. Nei
+    database non relazionali il modello dei dati è la conseguenza delle query: in
+    DynamoDB si progetta la chiave primaria (partition key + sort key) a partire
+    dagli accessi previsti, e una query non prevista può richiedere un indice
+    secondario globale o una riscrittura della tabella.
+
+    I modelli principali risolvono problemi diversi. *Document* (MongoDB, Cosmos):
+    l'aggregato si legge e si scrive intero, ottimo quando i confini del documento
+    coincidono con quelli della transazione. *Key-value* (Redis, DynamoDB): accesso
+    per chiave con latenza minima e prevedibile, nessuna query ad hoc. *Colonnare*
+    (ClickHouse, BigQuery): l'analitica legge poche colonne su miliardi di righe, e
+    salvare per colonna permette compressione e scansioni sequenziali molto più
+    efficienti; le scritture puntuali però sono pessime. *Grafo* (Neo4j): attraversare
+    relazioni a profondità variabile, dove in SQL servirebbero CTE ricorsive che
+    esplodono.
+
+    Sul piano delle garanzie vale la pena superare CAP, che è troppo grossolano, e
+    usare PACELC: in caso di partizione (P) si sceglie fra disponibilità e consistenza
+    (A/C), ma *anche quando tutto funziona* (E) si sceglie fra latenza e consistenza
+    (L/C). È il motivo per cui un database distribuito "consistente" costa comunque
+    latenza in condizioni normali: deve coordinare più repliche prima di rispondere.
+
+    La linea si è spostata parecchio. Postgres oggi ha JSONB con indici GIN, ricerca
+    full-text, array, tipi geometrici con PostGIS, e con estensioni come Citus fa
+    sharding; MongoDB ha transazioni multi-documento dal 4.0 e uno schema validabile.
+    Il risultato pratico è che la scelta "NoSQL per scalare" quasi mai regge: una
+    singola istanza Postgres ben indicizzata gestisce decine di migliaia di
+    transazioni al secondo e terabyte di dati, che è molto oltre il punto in cui si
+    trova la maggior parte dei progetti.
+
+    Il criterio onesto da portare al colloquio: parto dal relazionale perché le
+    transazioni multi-riga e le query non previste sono ciò che si rimpiange di più, e
+    mi sposto solo quando c'è un requisito che il relazionale non serve bene - latenza
+    sotto il millisecondo per chiave, scritture che non stanno su una macchina,
+    analitica su colonne, relazioni profonde. E valuto la poliglossia: spesso la
+    risposta giusta è Postgres come sistema di verità più Redis o ClickHouse accanto,
+    non sostituire tutto.
   key_points:
     - "Relazionale: schema forte, join, transazioni ACID, query non previste in fase di design restano possibili"
     - "Document (MongoDB, Cosmos): documenti annidati, schema flessibile, ottimo quando l'aggregato si legge e si scrive intero"
     - "Key-value (Redis, DynamoDB): latenza minima, accesso per chiave, zero query ad-hoc"
-    - "Colonnare (ClickHouse, BigQuery): analitica su grandi volumi, pessimo per scritture puntuali"
+    - "Colonnare (ClickHouse, BigQuery): analitica su grandi volumi, compressione per colonna, pessimo per scritture puntuali"
     - "Grafo (Neo4j): relazioni a profondità variabile, dove i join ricorsivi in SQL esplodono"
     - "In NoSQL si modella per query: la denormalizzazione è la norma, non l'eccezione"
-    - "Oggi la scelta è meno netta: Postgres fa JSONB, ricerca full-text e sharding con estensioni"
+    - "PACELC è più utile di CAP: in partizione scegli A o C, ma anche a regime scegli fra latenza e consistenza"
+    - "Oggi la scelta è meno netta: Postgres fa JSONB con indici GIN, full-text, PostGIS e sharding con Citus; MongoDB ha transazioni multi-documento"
+    - "Spesso la risposta è poliglotta: relazionale come verità, Redis per la latenza, colonnare per l'analitica"
+  examples:
+    - title: Lo stesso dato, tre modellazioni
+      language: sql
+      code: |-
+        -- RELAZIONALE: normalizzato, la query la decidi dopo
+        SELECT o.id, u.email, sum(i.qty * i.price_cents) AS totale
+          FROM orders o
+          JOIN users u ON u.id = o.user_id
+          JOIN order_items i ON i.order_id = o.id
+         WHERE o.created_at >= now() - interval '7 days'
+         GROUP BY o.id, u.email;
+
+        -- DOCUMENT: l'aggregato si legge intero, niente join
+        -- { _id, user: {id, email}, items: [{sku, qty, price_cents}], total_cents }
+
+        -- KEY-VALUE (DynamoDB): la chiave È il pattern di accesso
+        -- PK = "USER#42"   SK = "ORDER#2026-02-11#8f2a"
+        -- "gli ordini dell'utente 42, più recenti prima" costa una sola query
+      note: >-
+        Nel terzo caso "tutti gli ordini sopra i 100 euro di ieri" non è una query: è
+        una scansione, o un indice secondario progettato apposta.
+    - title: Postgres quando i dati sono semi-strutturati
+      language: sql
+      code: |-
+        CREATE TABLE eventi (
+          id     bigserial PRIMARY KEY,
+          tipo   text NOT NULL,
+          dati   jsonb NOT NULL,
+          ts     timestamptz NOT NULL DEFAULT now()
+        );
+
+        -- GIN indicizza le chiavi del JSON: niente scansione per cercare dentro
+        CREATE INDEX ON eventi USING gin (dati jsonb_path_ops);
+
+        SELECT * FROM eventi
+         WHERE dati @> '{"paese": "IT", "piano": "pro"}'   -- usa l'indice GIN
+           AND ts >= now() - interval '1 day';
+      note: >-
+        Con JSONB + GIN la flessibilità di un document store convive con join e
+        transazioni. È l'argomento più forte contro il "ci serve MongoDB per i campi
+        variabili".
+  trade_offs:
+    - option: Relazionale (Postgres, MySQL)
+      pros: Transazioni multi-riga, join, vincoli, query non previste, ecosistema enorme
+      cons: Scalare le scritture oltre una macchina richiede lavoro (sharding)
+      when: Default per quasi tutto ciò che ha un dominio con relazioni
+    - option: Document (MongoDB, Cosmos)
+      pros: Aggregati letti e scritti interi, schema flessibile, scaling orizzontale nativo
+      cons: Join a carico dell'applicazione, consistenza fra documenti da progettare
+      when: Cataloghi, contenuti eterogenei, aggregati autosufficienti
+    - option: Key-value (Redis, DynamoDB)
+      pros: Latenza sotto il millisecondo, capacità praticamente illimitata
+      cons: Solo accessi per chiave, modellazione rigida, costi per accesso
+      when: Sessioni, cache, contatori, tabelle con pattern di accesso fissi
+    - option: Colonnare (ClickHouse, BigQuery)
+      pros: Aggregazioni su miliardi di righe, compressione 10x e oltre
+      cons: Inadatto a letture/scritture puntuali e a transazioni
+      when: Analitica, dashboard, event store da interrogare
+  numbers:
+    - "Un'istanza Postgres ben configurata regge comodamente decine di migliaia di transazioni al secondo e database da terabyte"
+    - "Redis: 100.000+ operazioni al secondo per core, latenza tipica sotto il millisecondo nello stesso datacenter"
+    - "Colonnare: compressione tipica 5-15x rispetto alla stessa tabella riga per riga"
+    - "DynamoDB: limite di 400 KB per item e 3.000 RCU / 1.000 WCU per partizione: due vincoli che guidano la modellazione"
   interview_answer: >-
     Parto dal default relazionale, di solito Postgres, e chiedo cosa mi costringerebbe ad
     allontanarmene. Se i pattern di accesso sono noti e servono latenze sotto il
@@ -27,13 +136,52 @@
     miliardi di righe, un colonnare. Il motivo per cui parto dal relazionale è che le
     transazioni e le query non previste sono le cose che si rimpiangono di più: i pattern
     di accesso cambiano, e in NoSQL cambiare pattern spesso significa rimodellare i dati.
+    Aggiungo che oggi la scelta è meno netta di qualche anno fa: con JSONB e GIN, Postgres
+    copre buona parte dei casi per cui si sceglieva un document store.
+  senior_signals:
+    - "Chiede i pattern di accesso e il volume prima di nominare un prodotto"
+    - "Usa PACELC invece di fermarsi a CAP, e sa che la latenza si paga anche senza partizioni"
+    - "Conosce i limiti concreti (dimensione item, throughput per partizione) e non solo le categorie"
+    - "Propone la poliglossia invece di una sostituzione totale"
   pitfalls:
     - "Scegliere NoSQL per la scalabilità quando il carico reale sta comodamente su una singola istanza Postgres"
     - "Usare un document store e poi ricostruire i join a mano nel codice applicativo"
-    - "Credere che NoSQL significhi senza schema: lo schema c'è, è solo implicito nel codice"
-  follow_up_questions:
-    - "Quando conviene denormalizzare in un database relazionale?"
-    - "Come modelleresti un feed social su DynamoDB?"
+    - "Credere che NoSQL significhi senza schema: lo schema c'è, è solo implicito nel codice e non validato"
+    - "Progettare la chiave in DynamoDB dopo aver scritto l'applicazione, invece che prima"
+  follow_ups:
+    - question: Quando conviene denormalizzare in un database relazionale?
+      answer: >-
+        Quando ho una query lenta misurata in cui il join è davvero il collo di
+        bottiglia, e la lettura è molto più frequente della scrittura. I casi tipici
+        sono i contatori materializzati e i campi copiati per evitare un join in liste
+        molto trafficate. Da quel momento tratto il campo come una cache: decido chi lo
+        aggiorna, come si ricostruisce e cosa succede se diverge.
+    - question: Come modelleresti un feed social su DynamoDB?
+      answer: >-
+        Partirei dagli accessi: "gli ultimi N post delle persone che seguo". Con il
+        fan-out in scrittura scrivo una copia del post nella timeline di ogni follower
+        (PK = USER#id, SK = TS#post_id), così la lettura è una sola query ordinata; il
+        prezzo è la scrittura moltiplicata, che per gli account con milioni di follower
+        va gestita a parte, leggendo i loro post al volo. È il modello ibrido che usano
+        i social veri.
+    - question: Quali garanzie perdi passando a un database distribuito?
+      answer: >-
+        Tipicamente le transazioni multi-entità senza coordinamento e la lettura
+        immediatamente coerente. Molti sistemi offrono consistenza forte come opzione,
+        ma la paghi in latenza (è la E di PACELC) e in disponibilità durante le
+        partizioni. La domanda pratica non è "è consistente?" ma "quali operazioni lo
+        sono, e quanto costano".
+  related: [db-13-acid, db-17-sharding-partitioning, db-15-normalization, cache-21-what-and-where]
+  resources:
+    - title: "Kleppmann - Designing Data-Intensive Applications"
+      url: "https://dataintensive.net/"
+      kind: book
+    - title: "Abadi - Consistency Tradeoffs in Modern Distributed Database Design (PACELC)"
+      url: "https://www.cs.umd.edu/~abadi/papers/abadi-pacelc.pdf"
+      kind: article
+    - title: "PostgreSQL - JSON Types e indici GIN"
+      url: "https://www.postgresql.org/docs/current/datatype-json.html"
+      kind: doc
 
 - id: db-12-indexes
   title: Indici e come velocizzano le query
@@ -46,15 +194,130 @@
     Un indice è una struttura ordinata (quasi sempre un B-tree) che permette di trovare
     le righe senza scandire la tabella. Accelera le letture e rallenta le scritture,
     perché ogni INSERT, UPDATE e DELETE deve aggiornare anche gli indici.
+  deep_dive: |-
+    Il B-tree dei database è in realtà un B+tree: le chiavi stanno nei nodi interni,
+    i dati (o i puntatori alle righe) solo nelle foglie, che sono concatenate fra
+    loro. Questa struttura spiega tutte le proprietà che contano: la ricerca puntuale
+    è logaritmica, le scansioni di intervallo sono efficienti perché le foglie sono in
+    ordine e collegate, e un ORDER BY sulla colonna indicizzata può essere servito
+    senza ordinare nulla. Con pagine da 8 KB il fan-out è di centinaia di elementi per
+    nodo, quindi anche una tabella da centinaia di milioni di righe ha un albero alto
+    3-4 livelli: trovare una riga costa una manciata di letture di pagina.
+
+    L'ordine delle colonne in un indice composito non è un dettaglio: è la regola del
+    *leftmost prefix*. Un indice su `(a, b)` serve le query su `a` e su `a AND b`, ma
+    non quelle sul solo `b`, perché le chiavi sono ordinate prima per `a`. La
+    conseguenza pratica è che un indice su `(user_id, created_at)` è perfetto per "gli
+    ultimi ordini di un utente" e inutile per "tutti gli ordini di ieri".
+
+    Un indice serve la query in tre modi diversi, ed è utile saperli nominare: come
+    *access predicate* (restringe la porzione di albero da leggere: è il lavoro vero),
+    come *filter predicate* (legge più voci e scarta: meglio di niente, molto peggio
+    del primo) e come *index-only scan*, quando tutte le colonne richieste sono
+    nell'indice e la tabella non viene toccata affatto. In Postgres l'index-only scan
+    richiede anche che la visibility map dica che le pagine sono "tutte visibili", il
+    che dipende dall'ultimo VACUUM: è il motivo per cui la stessa query a volte è
+    velocissima e a volte no.
+
+    Le scritture pagano. Ogni indice in più significa un albero in più da aggiornare a
+    ogni INSERT e a ogni UPDATE che tocchi le colonne indicizzate. In Postgres c'è un
+    dettaglio ulteriore: per via di MVCC un UPDATE crea una nuova versione della riga,
+    e se le colonne indicizzate cambiano vanno aggiornati tutti gli indici (l'ottimizzazione
+    HOT, heap-only tuple, evita questo lavoro solo quando nessuna colonna indicizzata
+    cambia e c'è spazio nella pagina). Su tabelle molto scritte, cinque indici
+    superflui si vedono nella latenza.
+
+    Il planner sceglie in base alle *statistiche*, non alla speranza: se una condizione
+    seleziona il 30% della tabella, la scansione sequenziale è più veloce di saltare
+    avanti e indietro fra indice e heap, e un seq scan in quel caso è la scelta giusta.
+    Per questo indicizzare colonne a bassa cardinalità (un booleano) spesso non serve a
+    niente - a meno di usare un indice parziale, che indicizza solo le righe che
+    interessano davvero: `WHERE stato = 'in_attesa'` su una tabella dove quelle righe
+    sono l'1%.
+
+    Infine, le cose che rendono un indice invisibile: applicare una funzione alla
+    colonna (`lower(email) = ...` richiede un indice funzionale su `lower(email)`), un
+    cast implicito per tipi diversi, un `LIKE '%testo'` con carattere jolly iniziale
+    (per quello serve trigram o full-text), e `OR` fra colonne diverse, che spesso
+    conviene riscrivere come `UNION`. Il modo per accorgersene non è intuire: è
+    `EXPLAIN (ANALYZE, BUFFERS)`, che mostra il piano reale, le righe stimate contro
+    quelle effettive e quante pagine sono state lette.
   key_points:
-    - "B-tree: ricerca, range e ORDER BY. È il default e copre il 90% dei casi"
-    - "Hash: solo uguaglianza, niente range. Utile in casi specifici"
-    - "GIN/GiST: full-text, JSONB, dati geospaziali"
-    - "Indice composito: l'ordine delle colonne conta. Un indice (a, b) serve per WHERE a e per WHERE a AND b, non per WHERE b da solo (regola del leftmost prefix)"
-    - "Covering index: se l'indice contiene tutte le colonne richieste, il DB non tocca la tabella (index-only scan)"
-    - "Cardinalità: indicizzare una colonna booleana è spesso inutile, il planner preferisce il seq scan"
-    - "Una funzione sulla colonna annulla l'indice: WHERE lower(email)=... richiede un indice funzionale su lower(email)"
-    - "EXPLAIN ANALYZE è lo strumento per capire cosa sta davvero succedendo"
+    - "B+tree: chiavi nei nodi interni, dati nelle foglie collegate fra loro. Serve ricerca, range e ORDER BY. È il default e copre il 90% dei casi"
+    - "Con pagine da 8 KB il fan-out è di centinaia: una tabella da centinaia di milioni di righe ha un albero alto 3-4 livelli"
+    - "Hash: solo uguaglianza, niente range. GIN/GiST: full-text, JSONB, geospaziale. BRIN: tabelle enormi e naturalmente ordinate"
+    - "Indice composito: l'ordine delle colonne conta. Un indice (a, b) serve per WHERE a e per WHERE a AND b, non per WHERE b da solo (leftmost prefix)"
+    - "Covering index / index-only scan: se l'indice contiene tutte le colonne richieste, il DB non tocca la tabella"
+    - "Cardinalità: indicizzare un booleano è spesso inutile; l'indice parziale (WHERE stato='in_attesa') lo rende invece efficace"
+    - "Una funzione o un cast sulla colonna annulla l'indice: WHERE lower(email)=... richiede un indice funzionale"
+    - "Ogni indice rallenta le scritture: in Postgres un UPDATE che tocca colonne indicizzate perde l'ottimizzazione HOT"
+    - "Il planner sceglie con le statistiche: sopra il ~20-30% di selettività il seq scan è la scelta giusta, non un bug"
+    - "EXPLAIN (ANALYZE, BUFFERS) è lo strumento: confronta righe stimate ed effettive e conta le pagine lette"
+  examples:
+    - title: Leggere un EXPLAIN senza indovinare
+      language: sql
+      code: |-
+        EXPLAIN (ANALYZE, BUFFERS)
+        SELECT id, total_cents FROM orders
+         WHERE user_id = 42 AND created_at >= now() - interval '30 days'
+         ORDER BY created_at DESC LIMIT 20;
+
+        -- PRIMA (nessun indice utile):
+        -- Seq Scan on orders  (cost=0..48210 rows=19 width=20)
+        --   (actual time=812.4..812.4 rows=20 loops=1)
+        --   Filter: ((user_id = 42) AND (created_at >= ...))
+        --   Rows Removed by Filter: 1998431          <-- 2 milioni di righe scartate
+        --   Buffers: shared read=18422
+
+        CREATE INDEX CONCURRENTLY idx_orders_user_created
+            ON orders (user_id, created_at DESC) INCLUDE (total_cents);
+
+        -- DOPO:
+        -- Index Only Scan using idx_orders_user_created  (actual time=0.06..0.09 rows=20)
+        --   Index Cond: ((user_id = 42) AND (created_at >= ...))
+        --   Heap Fetches: 0                            <-- la tabella non è stata toccata
+        --   Buffers: shared hit=5
+      note: >-
+        Le tre righe da guardare sempre: `Rows Removed by Filter` (lavoro sprecato),
+        lo scarto fra `rows` stimate e `actual rows` (statistiche vecchie), e `Buffers`
+        (quante pagine si sono lette davvero).
+    - title: Indice parziale e indice funzionale
+      language: sql
+      code: |-
+        -- Parziale: indicizza solo l'1% di righe che interroghi davvero
+        CREATE INDEX idx_ordini_da_evadere ON orders (created_at)
+            WHERE status = 'pending';
+
+        -- Funzionale: rende usabile la ricerca case-insensitive
+        CREATE UNIQUE INDEX idx_users_email_lower ON users (lower(email));
+        SELECT * FROM users WHERE lower(email) = lower('Mario@Esempio.IT');
+
+        -- Trigram: rende indicizzabile anche il LIKE con jolly iniziale
+        CREATE EXTENSION IF NOT EXISTS pg_trgm;
+        CREATE INDEX idx_prodotti_nome_trgm ON prodotti USING gin (nome gin_trgm_ops);
+        SELECT * FROM prodotti WHERE nome ILIKE '%tastiera%';
+      note: >-
+        L'indice parziale su una coda di lavorazione è uno dei rapporti
+        beneficio/costo più alti che esistano: piccolo, sempre in cache, e la tabella
+        può essere enorme.
+  trade_offs:
+    - option: Indice composito largo con INCLUDE
+      pros: Abilita l'index-only scan, elimina l'accesso alla tabella
+      cons: Occupa spazio, rallenta le scritture, va ricostruito quando cambia
+      when: Query lette moltissimo con poche colonne in output
+    - option: Indice parziale
+      pros: Piccolo, spesso interamente in cache, mirato
+      cons: Serve solo le query che contengono la stessa condizione
+      when: Code di lavorazione, righe "attive" fra molte storiche
+    - option: Nessun indice (seq scan)
+      pros: Zero costo in scrittura, il planner legge sequenzialmente, che è veloce
+      cons: Latenza proporzionale alla tabella
+      when: Tabelle piccole o query che toccano gran parte delle righe
+  numbers:
+    - "Altezza tipica di un B+tree: 3-4 livelli anche con centinaia di milioni di righe"
+    - "Un indice costa tipicamente il 10-30% della dimensione della tabella, a colonna indicizzata"
+    - "Selettività oltre il 20-30% delle righe: il planner preferisce (giustamente) il seq scan"
+    - "CREATE INDEX blocca le scritture; CREATE INDEX CONCURRENTLY no, ma impiega circa il doppio e può fallire lasciando un indice invalido"
   interview_answer: >-
     Un indice è una copia ordinata di alcune colonne che permette al database di fare una
     ricerca logaritmica invece di leggere tutta la tabella. Il costo è sulle scritture e
@@ -62,19 +325,60 @@
     l'EXPLAIN ANALYZE e verifico se sto facendo un seq scan dove mi aspettavo un index
     scan. Le due cose che controllo più spesso sono l'ordine delle colonne negli indici
     compositi, per via del leftmost prefix, e le funzioni applicate alla colonna nel WHERE,
-    perché rendono l'indice inutilizzabile a meno di non crearne uno funzionale.
+    perché rendono l'indice inutilizzabile a meno di non crearne uno funzionale. E in
+    produzione li creo sempre con CONCURRENTLY, perché un CREATE INDEX normale blocca le
+    scritture per tutta la durata.
+  senior_signals:
+    - "Legge un EXPLAIN vero e cita Rows Removed by Filter o lo scarto fra stimato ed effettivo"
+    - "Sa che il seq scan è spesso la scelta giusta del planner, non un errore da forzare"
+    - "Conosce indici parziali e funzionali, non solo quelli su colonna intera"
+    - "Ricorda CONCURRENTLY e il costo delle scritture prima di proporre l'ennesimo indice"
   pitfalls:
     - "Indicizzare ogni colonna per sicurezza, degradando tutte le scritture"
     - "Indice composito nell'ordine sbagliato, che quindi non viene mai usato"
     - "WHERE con funzioni o cast impliciti che invalidano l'indice"
     - "Creare un indice su una tabella grande in produzione senza CREATE INDEX CONCURRENTLY"
-  follow_up_questions:
-    - "Hai un indice su (user_id, created_at). Serve per WHERE created_at > X?"
-    - "Perché aggiungere indici può peggiorare le performance complessive?"
+    - "Duplicare indici: (a) è già coperto da (a, b), tenerli entrambi è solo costo in scrittura"
+  follow_ups:
+    - question: Hai un indice su (user_id, created_at). Serve per WHERE created_at > X?
+      answer: >-
+        Da solo no: per il leftmost prefix le chiavi sono ordinate prima per user_id,
+        quindi filtrare solo su created_at richiederebbe di scorrere tutto l'indice.
+        Il database può comunque usarlo in un index scan completo se l'indice è molto
+        più piccolo della tabella, ma non è una ricerca mirata. Se quella query è
+        frequente serve un indice che parta da created_at.
+    - question: Perché aggiungere indici può peggiorare le performance complessive?
+      answer: >-
+        Perché ogni indice va mantenuto a ogni scrittura, e in Postgres un UPDATE su una
+        colonna indicizzata perde l'ottimizzazione HOT, moltiplicando il lavoro. In più
+        gli indici occupano memoria nella cache: indici inutili sfrattano dalla cache le
+        pagine che servono davvero. Su tabelle molto scritte la regola è tenere solo gli
+        indici che una query reale usa.
+    - question: Quando un indice non viene usato anche se sembra adatto?
+      answer: >-
+        I casi classici: funzione o cast sulla colonna, LIKE con jolly iniziale,
+        selettività troppo bassa (il planner sceglie il seq scan ed è giusto),
+        statistiche vecchie dopo un caricamento massivo (serve ANALYZE), tipi non
+        compatibili fra colonna e parametro, e OR fra colonne diverse. EXPLAIN dice
+        quale dei casi è, ed è più veloce che tirare a indovinare.
+    - question: Cos'è un index-only scan e perché a volte non scatta?
+      answer: >-
+        È quando tutte le colonne richieste stanno nell'indice, quindi la tabella non
+        viene letta. In Postgres richiede però che la visibility map segni le pagine
+        come tutte visibili, perché l'indice non contiene le informazioni di visibilità
+        MVCC: dopo molte scritture e senza VACUUM recente, la stessa query ricade in
+        Heap Fetches e rallenta.
+  related: [db-14-transactions-isolation, db-16-pagination, db-11-sql-vs-nosql, cache-21-what-and-where]
   resources:
     - title: "Use The Index, Luke!"
       url: "https://use-the-index-luke.com/"
       kind: article
+    - title: "PostgreSQL - Index Types"
+      url: "https://www.postgresql.org/docs/current/indexes-types.html"
+      kind: doc
+    - title: "PostgreSQL - Using EXPLAIN"
+      url: "https://www.postgresql.org/docs/current/using-explain.html"
+      kind: doc
 
 - id: db-13-acid
   title: Proprietà ACID
@@ -84,27 +388,158 @@
   tags: [database, transazioni, sql]
   estimated_minutes: 20
   summary: >-
-    ACID descrive le garanzie di una transazione: Atomicità (tutto o niente), Consistenza
-    (i vincoli restano validi), Isolamento (le transazioni concorrenti non si disturbano),
-    Durabilità (una volta confermata, resta).
+    ACID descrive le garanzie di una transazione: Atomicità (tutto o niente),
+    Consistenza (i vincoli restano validi), Isolamento (le transazioni concorrenti non
+    si disturbano), Durabilità (una volta confermata, resta).
+  deep_dive: |-
+    Le quattro lettere non sono sullo stesso piano, ed è questa la cosa da capire.
+    Atomicità e durabilità sono binarie: un database o le garantisce o no. La
+    consistenza, nel senso di ACID, è la promessa che i vincoli dichiarati (chiavi,
+    unique, check, foreign key) valgano prima e dopo la transazione - ed è in buona
+    parte responsabilità di chi progetta lo schema, non del motore. L'isolamento è
+    l'unica proprietà che si *negozia*, per livelli, e ogni livello ha un prezzo in
+    concorrenza.
+
+    Il meccanismo che rende possibili atomicità e durabilità è il write-ahead log. Il
+    principio è semplice: prima di modificare le pagine dei dati, il database scrive
+    nel log l'intenzione della modifica, e il commit è considerato avvenuto quando il
+    log è stato reso persistente su disco (fsync). Se manca la corrente subito dopo,
+    al riavvio il recovery rilegge il log e riapplica ciò che era committato (redo) e
+    annulla ciò che non lo era (undo). È anche il motivo per cui un commit costa una
+    scrittura sincrona: i database raggruppano più commit in un solo fsync (group
+    commit) proprio per ammortizzarla.
+
+    La durabilità ha delle sfumature che fanno ottima impressione al colloquio. In
+    Postgres `synchronous_commit = off` rende i commit molto più veloci ma accetta di
+    perdere le ultime transazioni in caso di crash del server (non di corruzione: il
+    database resta coerente). In MySQL il parametro equivalente è
+    `innodb_flush_log_at_trx_commit`. E in un sistema replicato la domanda "durabile
+    dove?" diventa seria: durabile sul primario non significa durabile dopo una
+    failover, se la replica era asincrona.
+
+    Sull'atomicità, l'equivoco frequente riguarda il suo confine: la transazione
+    protegge le scritture *sul database*. Se dentro la transazione mando un'email o
+    chiamo un servizio esterno, quella parte non partecipa al rollback - il famoso
+    problema della dual write. La soluzione standard è il pattern outbox: si scrive
+    nella stessa transazione una riga "da inviare", e un processo separato la legge e
+    invia, così l'atomicità copre l'intento anche se non copre l'effetto esterno.
+
+    Infine la confusione più comune in assoluto: la C di ACID non è la C di CAP.
+    ACID-Consistency significa "i vincoli del database restano validi";
+    CAP-Consistency significa "tutti i nodi vedono la stessa scrittura nello stesso
+    istante" (linearizzabilità). Sono concetti di ambiti diversi, e usarli come
+    sinonimi è il segnale che si è studiato l'acronimo e non il meccanismo.
   key_points:
     - "Atomicity: il rollback riporta allo stato iniziale, nessuna esecuzione parziale"
-    - "Consistency: i vincoli del database (chiavi, unique, check) valgono prima e dopo. Non è la consistenza dei sistemi distribuiti di CAP"
+    - "Consistency: i vincoli del database (chiavi, unique, check, foreign key) valgono prima e dopo. Non è la consistenza di CAP"
     - "Isolation: è l'unica proprietà negoziabile, tramite i livelli di isolamento"
-    - "Durability: garantita dal write-ahead log scritto su disco prima del commit"
+    - "Durability: garantita dal write-ahead log reso persistente con fsync prima di confermare il commit"
+    - "Il WAL abilita anche il recovery dopo un crash (redo del committato, undo del resto) e la replica fisica"
+    - "Il commit costa una scrittura sincrona: il group commit raggruppa più transazioni in un fsync per ammortizzarla"
+    - "synchronous_commit=off (Postgres) o innodb_flush_log_at_trx_commit (MySQL) barattano durabilità per latenza"
+    - "L'atomicità copre solo il database: email e chiamate HTTP dentro la transazione non fanno rollback (dual write) - serve l'outbox"
     - "La C di ACID e la C di CAP sono cose diverse: confonderle è un errore frequente"
+  examples:
+    - title: Dove l'atomicità finisce
+      language: python
+      code: |-
+        # SBAGLIATO: l'email non fa rollback, e se il commit fallisce l'hai già mandata.
+        async with db.transaction():
+            ordine = await crea_ordine(dati)
+            await invia_email_conferma(ordine)      # effetto esterno, fuori transazione
+
+        # CORRETTO: outbox. L'intento è atomico con il dato; l'invio è un'altra storia.
+        async with db.transaction():
+            ordine = await crea_ordine(dati)
+            await db.execute(
+                "INSERT INTO outbox (tipo, payload) VALUES ('ordine_creato', :p)",
+                p=ordine.json(),
+            )
+        # un worker separato legge outbox, invia e marca come inviato (at-least-once)
+      note: >-
+        Con l'outbox l'email potrà essere inviata due volte (il worker può morire dopo
+        l'invio e prima di marcare), ma non potrà mai essere inviata per un ordine che
+        non esiste. Fra i due errori, il secondo è quello che non si può spiegare al
+        cliente.
+    - title: Durabilità e velocità, il bottone che quasi nessuno conosce
+      language: sql
+      code: |-
+        -- Postgres: rinuncia alla durabilità delle ultimissime transazioni
+        -- in cambio di commit molto più veloci (il database resta COERENTE).
+        SET LOCAL synchronous_commit = off;     -- per la sola transazione corrente
+
+        -- Uso tipico: caricamenti massivi rigenerabili, tabelle di staging.
+        -- Da non usare per pagamenti o ordini.
+      note: >-
+        È una scelta consapevole: "se il server si spegne posso perdere gli ultimi
+        millisecondi di lavoro". Per una tabella di import va benissimo, per gli ordini no.
+  trade_offs:
+    - option: Commit sincrono (default)
+      pros: Nessuna perdita dopo la conferma, comportamento prevedibile
+      cons: Ogni commit paga un fsync, limite sulle transazioni al secondo
+      when: Dati che non si possono rigenerare
+    - option: Commit asincrono
+      pros: Molte più transazioni al secondo, latenza bassissima
+      cons: Perdita delle ultime transazioni in caso di crash del server
+      when: Import, dati derivati, code di eventi ricostruibili
+    - option: Replica sincrona
+      pros: Durabilità che sopravvive alla perdita del primario
+      cons: Ogni commit paga il round trip verso la replica
+      when: Dati finanziari, requisiti di RPO pari a zero
+  numbers:
+    - "Un fsync su SSD costa tipicamente 0,1-1 ms; su disco rotante 5-10 ms: è il tetto naturale alle transazioni al secondo"
+    - "Il group commit ammortizza: centinaia di transazioni possono condividere un solo fsync"
+    - "RPO (dato che puoi perdere) e RTO (tempo per tornare su) sono i due numeri da concordare prima, non dopo l'incidente"
   interview_answer: >-
     Atomicità, consistenza, isolamento e durabilità. Nella pratica quella su cui si lavora
     davvero è l'isolamento, perché le altre tre o ci sono o non ci sono, mentre
-    l'isolamento si sceglie per livelli e ogni livello ha un costo. Un dettaglio che
-    sottolineo sempre è che la C di ACID riguarda i vincoli di integrità del database e non
-    ha niente a che vedere con la C di CAP, che parla di visibilità delle scritture fra
-    nodi.
+    l'isolamento si sceglie per livelli e ogni livello ha un costo. Sulla durabilità mi
+    piace ricordare il meccanismo: è il write-ahead log, scritto e reso persistente prima
+    del commit, che permette anche il recovery dopo un crash. Un dettaglio che sottolineo
+    sempre è che la C di ACID riguarda i vincoli di integrità del database e non ha niente
+    a che vedere con la C di CAP, che parla di visibilità delle scritture fra nodi. E
+    ricordo che l'atomicità copre il database, non gli effetti esterni: se dentro la
+    transazione mando un'email, quella non torna indietro, e per questo uso l'outbox.
+  senior_signals:
+    - "Spiega il WAL invece di limitarsi a dire 'durabile'"
+    - "Sa che la C di ACID è diversa da quella di CAP e sa spiegare entrambe"
+    - "Porta il limite dell'atomicità sugli effetti esterni e propone l'outbox"
+    - "Conosce i parametri che barattano durabilità e latenza e sa quando ha senso toccarli"
   pitfalls:
     - "Confondere la Consistency di ACID con quella di CAP"
     - "Dare per scontato che il default sia Serializable: quasi mai lo è"
-  follow_up_questions:
-    - "Come fa il database a garantire la durabilità se manca la corrente?"
+    - "Mettere chiamate di rete dentro una transazione: lock tenuti per la latenza di qualcun altro"
+    - "Credere che 'committato' significhi 'al sicuro anche se perdo il server': con replica asincrona non è vero"
+  follow_ups:
+    - question: Come fa il database a garantire la durabilità se manca la corrente?
+      answer: >-
+        Con il write-ahead log: prima di toccare le pagine dei dati scrive nel log cosa
+        sta per fare, e considera il commit avvenuto solo dopo l'fsync del log. Al
+        riavvio il recovery riapplica dal log le transazioni committate e annulla le
+        altre. Le pagine dei dati possono essere scritte con comodo, in modo asincrono,
+        perché la verità sta nel log.
+    - question: Cosa succede a una transazione se il client si disconnette a metà?
+      answer: >-
+        Il server se ne accorge chiudendo la connessione e fa rollback della transazione
+        aperta: l'atomicità è salva. Il problema pratico è un altro: finché il server non
+        si accorge della disconnessione, i lock restano tenuti. Per questo si impostano
+        timeout come `idle_in_transaction_session_timeout`, altrimenti una transazione
+        orfana blocca altri.
+    - question: Le transazioni in un sistema a microservizi valgono ancora?
+      answer: >-
+        Valgono dentro il singolo servizio e il suo database. Fra servizi non esiste una
+        transazione ACID senza coordinamento costoso (2PC), quindi si usa la saga: una
+        sequenza di transazioni locali con azioni compensative in caso di fallimento. Il
+        prezzo è che esistono stati intermedi visibili, e vanno progettati invece che
+        subiti.
+  related: [db-14-transactions-isolation, rel-36-saga, rel-35-event-driven, db-18-read-replicas]
+  resources:
+    - title: "PostgreSQL - Reliability and the Write-Ahead Log"
+      url: "https://www.postgresql.org/docs/current/wal-intro.html"
+      kind: doc
+    - title: "Kleppmann - DDIA, cap. 7 (Transactions)"
+      url: "https://dataintensive.net/"
+      kind: book
 
 - id: db-14-transactions-isolation
   title: Transazioni e livelli di isolamento
@@ -117,15 +552,144 @@
     I livelli di isolamento stabiliscono quali anomalie di concorrenza sono tollerate.
     Più alto è il livello, meno anomalie e meno concorrenza. Conoscere le anomalie conta
     più che memorizzare la tabella.
+  deep_dive: |-
+    Il modo giusto di studiare i livelli è partire dalle anomalie, perché i nomi dei
+    livelli vengono dallo standard SQL-92 e i database non li implementano allo stesso
+    modo. Le anomalie classiche sono tre. *Dirty read*: leggi una modifica non ancora
+    confermata, che potrebbe sparire con un rollback. *Non-repeatable read*: rileggi la
+    stessa riga nella stessa transazione e trovi un valore diverso, perché qualcuno ha
+    committato nel frattempo. *Phantom read*: rieseguì la stessa query su un intervallo
+    e trovi righe nuove.
+
+    Quasi tutti i database seri oggi implementano l'isolamento con MVCC, multi-version
+    concurrency control: una scrittura non sovrascrive, crea una nuova versione della
+    riga, e ogni transazione vede lo snapshot coerente con il proprio istante di
+    inizio (o di statement). La conseguenza più utile da ricordare: *i lettori non
+    bloccano gli scrittori e gli scrittori non bloccano i lettori*. È il motivo per cui
+    le dirty read semplicemente non esistono in Postgres, nemmeno chiedendo READ
+    UNCOMMITTED - che viene trattato come READ COMMITTED.
+
+    I default vanno saputi a memoria perché cambiano il ragionamento: PostgreSQL e SQL
+    Server usano READ COMMITTED, MySQL/InnoDB usa REPEATABLE READ, Oracle usa READ
+    COMMITTED. E le implementazioni divergono: il REPEATABLE READ di Postgres è uno
+    *snapshot isolation* che elimina anche i phantom (lo snapshot è immutabile per
+    tutta la transazione); InnoDB previene i phantom con i next-key lock, che bloccano
+    anche gli intervalli fra le chiavi (gap lock) - da cui deadlock che in Postgres non
+    si vedono.
+
+    Resta un'anomalia che lo snapshot isolation *non* previene, ed è quella che
+    distingue chi ha studiato: la *write skew*. Due transazioni leggono lo stesso
+    insieme di righe, ciascuna verifica un invariante che al momento della lettura
+    regge, e ciascuna scrive righe *diverse*. Nessuna delle due sovrascrive l'altra,
+    quindi non c'è conflitto di scrittura, ma insieme violano l'invariante. L'esempio
+    canonico sono i due medici di guardia: entrambi vedono "siamo in due", entrambi si
+    tolgono dal turno, e il reparto resta scoperto. Le soluzioni: SERIALIZABLE
+    (Postgres lo implementa come SSI, serializable snapshot isolation: rileva i cicli
+    di dipendenza e aborta una transazione con SQLSTATE 40001), oppure materializzare
+    il conflitto con un `SELECT ... FOR UPDATE` sulle righe lette, o con un vincolo che
+    renda l'invariante verificabile dal database.
+
+    Usare SERIALIZABLE ha una conseguenza pratica che va progettata, non scoperta: le
+    transazioni possono fallire per *serialization failure* e vanno ritentate. Senza un
+    loop di retry con backoff, il livello più sicuro diventa una fonte di errori 500.
+
+    Infine il lato operativo, che ai colloqui senior pesa quanto la teoria. Le
+    transazioni lunghe sono velenose: tengono i lock, e in Postgres bloccano il VACUUM
+    dal rimuovere le versioni morte (l'xmin horizon non avanza), facendo gonfiare
+    tabelle e indici. Una transazione aperta mentre si attende una chiamata HTTP è
+    l'errore classico: la latenza di un servizio esterno diventa contesa sul tuo
+    database.
   key_points:
     - "Dirty read: leggi dati non ancora confermati da un'altra transazione"
     - "Non-repeatable read: rileggi la stessa riga e trovi un valore diverso"
     - "Phantom read: rileggi lo stesso intervallo e trovi righe nuove"
     - "Read Uncommitted permette tutto; Read Committed blocca le dirty read; Repeatable Read blocca anche le non-repeatable; Serializable blocca tutto"
-    - "Default: Postgres e SQL Server usano Read Committed, MySQL InnoDB usa Repeatable Read"
-    - "Il Repeatable Read di Postgres è uno snapshot isolation: blocca anche i phantom, ma non previene tutte le write skew"
-    - "Write skew: due transazioni leggono lo stesso stato e scrivono righe diverse, violando insieme un invariante (il classico caso dei due medici di guardia)"
-    - "Transazioni lunghe sono un problema operativo: tengono i lock e gonfiano il bloat"
+    - "Default: Postgres, SQL Server e Oracle usano Read Committed, MySQL InnoDB usa Repeatable Read"
+    - "Con MVCC i lettori non bloccano gli scrittori e viceversa: in Postgres le dirty read non esistono a nessun livello"
+    - "Il Repeatable Read di Postgres è snapshot isolation: blocca anche i phantom, ma non previene la write skew"
+    - "InnoDB previene i phantom con i next-key lock (gap lock): più deadlock, comportamento diverso da Postgres"
+    - "Write skew: due transazioni leggono lo stesso stato e scrivono righe diverse, violando insieme un invariante (i due medici di guardia)"
+    - "Serializable in Postgres è SSI: può abortire con SQLSTATE 40001, quindi serve SEMPRE un retry"
+    - "Transazioni lunghe sono un problema operativo: tengono i lock, bloccano l'avanzamento del VACUUM e gonfiano le tabelle"
+  examples:
+    - title: Write skew, il caso dei due medici
+      language: sql
+      code: |-
+        -- Invariante: almeno un medico di guardia. Entrambe le transazioni partono
+        -- con 2 medici in turno e, sotto snapshot isolation, committano entrambe.
+
+        -- Sessione A                             -- Sessione B
+        BEGIN ISOLATION LEVEL REPEATABLE READ;    BEGIN ISOLATION LEVEL REPEATABLE READ;
+        SELECT count(*) FROM turni                SELECT count(*) FROM turni
+         WHERE reparto='pronto' AND di_guardia;    WHERE reparto='pronto' AND di_guardia;
+        -- 2, posso smontare                      -- 2, posso smontare
+        UPDATE turni SET di_guardia = false       UPDATE turni SET di_guardia = false
+         WHERE medico='rossi';                     WHERE medico='bianchi';
+        COMMIT;                                   COMMIT;
+        -- Risultato: zero medici di guardia. Nessuna riga in conflitto: nessun errore.
+      note: >-
+        Con SERIALIZABLE, Postgres rileva il ciclo di dipendenza e aborta una delle due
+        con "could not serialize access due to read/write dependencies".
+    - title: Le tre difese, in ordine di costo
+      language: sql
+      code: |-
+        -- 1) Materializzare il conflitto: si bloccano le righe LETTE, non solo scritte
+        BEGIN;
+          SELECT * FROM turni WHERE reparto = 'pronto' FOR UPDATE;
+          -- ... conta e decidi ...
+          UPDATE turni SET di_guardia = false WHERE medico = 'rossi';
+        COMMIT;
+
+        -- 2) Vincolo che il database sa verificare da solo (niente race possibile)
+        ALTER TABLE reparti ADD CONSTRAINT almeno_uno CHECK (guardie_attive >= 1);
+
+        -- 3) SERIALIZABLE + retry applicativo
+        BEGIN ISOLATION LEVEL SERIALIZABLE;  -- ... ;  COMMIT;
+        -- in caso di SQLSTATE 40001 si riprova l'intera transazione
+      note: >-
+        La 2 è la più solida quando l'invariante si può esprimere su una riga sola: il
+        database non può dimenticarsene, a differenza del codice applicativo.
+    - title: Retry corretto su serialization failure
+      language: python
+      code: |-
+        import asyncpg, asyncio, random
+
+        async def esegui_serializzabile(pool, lavoro, tentativi: int = 5):
+            for tentativo in range(tentativi):
+                try:
+                    async with pool.acquire() as conn:
+                        async with conn.transaction(isolation="serializable"):
+                            return await lavoro(conn)
+                except asyncpg.SerializationError:          # SQLSTATE 40001
+                    if tentativo == tentativi - 1:
+                        raise
+                    # backoff con jitter: senza, le stesse due transazioni ricollidono
+                    await asyncio.sleep((2 ** tentativo) * 0.01 * (0.5 + random.random()))
+      note: >-
+        Il lavoro deve essere ripetibile per intero: se dentro ha effetti esterni (una
+        mail, una chiamata HTTP) il retry li duplica. Altro motivo per tenerli fuori.
+  trade_offs:
+    - option: Read Committed
+      pros: Massima concorrenza, nessun retry, default quasi ovunque
+      cons: Non-repeatable read e write skew possibili
+      when: La stragrande maggioranza delle operazioni CRUD
+    - option: Repeatable Read / Snapshot
+      pros: Lettura coerente per tutta la transazione, utile per report
+      cons: Non previene la write skew, più conflitti di aggiornamento
+      when: Report multi-query, calcoli che devono vedere uno stato fermo
+    - option: Serializable
+      pros: Correttezza equivalente a un'esecuzione seriale, nessuna anomalia
+      cons: Aborti da ritentare, throughput inferiore sotto contesa
+      when: Invarianti multi-riga che contano davvero (turni, saldi, capienza)
+    - option: SELECT ... FOR UPDATE mirato
+      pros: Costo pagato solo dove serve, prevedibile
+      cons: Serializza quel punto, rischio deadlock se l'ordine non è coerente
+      when: Un singolo invariante identificabile, con poche righe coinvolte
+  numbers:
+    - "SQLSTATE 40001 = serialization failure: è l'errore da intercettare per il retry"
+    - "3-5 tentativi con backoff esponenziale e jitter coprono quasi tutti i conflitti di serializzazione"
+    - "Una transazione aperta per minuti può impedire al VACUUM di recuperare spazio: il bloat si misura in GB, non in righe"
+    - "idle_in_transaction_session_timeout: metterlo a 30-60 secondi evita che una sessione orfana blocchi il database"
   interview_answer: >-
     Ragiono per anomalie, non per nomi di livello. Le tre classiche sono dirty read,
     non-repeatable read e phantom, e ogni livello ne esclude un sottoinsieme. Nella pratica
@@ -133,14 +697,67 @@
     invarianti che coinvolgono più righe. Quando li ho, come il vincolo che almeno un
     medico resti di guardia, Read Committed non basta e nemmeno lo snapshot isolation, per
     via della write skew: lì serve Serializable oppure un lock esplicito con SELECT FOR
-    UPDATE sulle righe coinvolte.
+    UPDATE sulle righe lette. Se scelgo Serializable metto in conto da subito il retry,
+    perché Postgres lo implementa con SSI e può abortire una transazione con un errore di
+    serializzazione. E tengo le transazioni corte: una transazione aperta durante una
+    chiamata HTTP è il modo più rapido per trasformare la lentezza di qualcun altro in un
+    problema del mio database.
+  senior_signals:
+    - "Parte dalle anomalie e sa che i livelli hanno implementazioni diverse fra Postgres e MySQL"
+    - "Conosce la write skew e sa spiegare perché lo snapshot isolation non la previene"
+    - "Sa che Serializable implica una politica di retry e la include nella risposta"
+    - "Cita il costo operativo delle transazioni lunghe (lock, bloat, VACUUM bloccato)"
   pitfalls:
     - "Assumere che il proprio DB usi Serializable di default"
     - "Non gestire il retry: in Serializable le transazioni possono fallire e vanno ritentate"
     - "Tenere aperta una transazione durante una chiamata HTTP esterna"
-  follow_up_questions:
-    - "Cos'è la write skew e perché lo snapshot isolation non la previene?"
-    - "Quando useresti SELECT ... FOR UPDATE?"
+    - "Dare per scontato che il Repeatable Read di MySQL e quello di Postgres si comportino allo stesso modo"
+    - "Ritentare una transazione che contiene effetti esterni non idempotenti"
+  follow_ups:
+    - question: Cos'è la write skew e perché lo snapshot isolation non la previene?
+      answer: >-
+        È quando due transazioni leggono lo stesso insieme di righe, prendono una
+        decisione basata su quella lettura e scrivono righe diverse. Lo snapshot
+        isolation controlla i conflitti fra scritture sulla stessa riga: qui le righe
+        scritte sono diverse, quindi nessun conflitto viene rilevato, ma l'invariante
+        letto da entrambe non vale più. Si risolve con Serializable, oppure bloccando
+        esplicitamente le righe lette, oppure spostando l'invariante in un vincolo che
+        il database possa verificare.
+    - question: Quando useresti SELECT ... FOR UPDATE?
+      answer: >-
+        Quando devo leggere qualcosa, decidere e scrivere, e voglio essere sicuro che
+        nessuno cambi quelle righe nel frattempo: decremento di uno stock, assegnazione
+        dell'ultimo posto, materializzazione di un invariante contro la write skew. Lo
+        uso sulla porzione più piccola possibile e con un ordine di acquisizione
+        coerente fra tutte le transazioni, altrimenti arrivano i deadlock. Nelle code di
+        lavoro uso la variante FOR UPDATE SKIP LOCKED, che lascia passare oltre i worker
+        invece di metterli in fila.
+    - question: Cosa cambia fra MVCC e locking per ottenere l'isolamento?
+      answer: >-
+        Con il locking una transazione impedisce ad altre di leggere o scrivere ciò che
+        sta usando: semplice ma con molta contesa. Con MVCC ogni transazione vede uno
+        snapshot coerente e le scritture creano nuove versioni, quindi letture e
+        scritture non si bloccano a vicenda. Il prezzo di MVCC è lo spazio delle
+        versioni morte e il lavoro di pulizia (VACUUM in Postgres, purge in InnoDB),
+        che diventa un problema proprio in presenza di transazioni lunghe.
+    - question: Perché una transazione lunga è un problema anche se non scrive niente?
+      answer: >-
+        Perché tiene fermo lo snapshot: finché è aperta, il database non può rimuovere
+        le versioni di riga che quella transazione potrebbe ancora dover vedere. Il
+        risultato è bloat su tabelle e indici, piani che peggiorano e spazio che non
+        torna indietro. È il motivo per cui un report che gira per venti minuti può
+        degradare le prestazioni di tutto il sistema.
+  related: [db-13-acid, db-20-locking, db-19-duplicate-records, rel-33-race-conditions]
+  resources:
+    - title: "PostgreSQL - Transaction Isolation"
+      url: "https://www.postgresql.org/docs/current/transaction-iso.html"
+      kind: doc
+    - title: "MySQL - InnoDB Locking and Transaction Model"
+      url: "https://dev.mysql.com/doc/refman/8.0/en/innodb-locking-transaction-model.html"
+      kind: doc
+    - title: "Ports & Grittner - Serializable Snapshot Isolation in PostgreSQL"
+      url: "https://arxiv.org/abs/1208.4179"
+      kind: article
 
 - id: db-15-normalization
   title: Normalizzazione vs denormalizzazione
@@ -153,27 +770,159 @@
     Normalizzare elimina la duplicazione: ogni fatto è scritto in un solo posto, quindi
     non può diventare incoerente. Denormalizzare duplica di proposito per evitare join
     costosi, accettando l'onere di tenere allineate le copie.
+  deep_dive: |-
+    Le forme normali sono una scala, e le prime tre bastano per il 99% del lavoro. 1NF:
+    valori atomici, niente liste dentro una colonna. 2NF: nessuna dipendenza da *parte*
+    della chiave composta. 3NF: nessuna dipendenza transitiva, cioè nessuna colonna che
+    dipende da un'altra colonna non chiave. La formulazione mnemonica classica: ogni
+    attributo non chiave dipende dalla chiave, dalla chiave intera e da nient'altro
+    che la chiave.
+
+    Il vero motivo per normalizzare non è l'eleganza, è che *un fatto scritto in un
+    solo posto non può diventare incoerente*. Se l'indirizzo del cliente è copiato in
+    tre tabelle, prima o poi due divergono, e a quel punto non esiste più una risposta
+    corretta alla domanda "dove abita". Le anomalie di aggiornamento, inserimento e
+    cancellazione che i manuali elencano sono tutte corollari di questo.
+
+    Denormalizzare è un'ottimizzazione: si accetta la duplicazione per evitare un
+    join. La chiave per non pentirsene è trattare il dato duplicato esattamente come
+    una cache, e quindi rispondere a tre domande prima di scriverlo: chi lo aggiorna,
+    quando può divergere, e come lo si ricostruisce. Se le risposte non ci sono, si sta
+    creando debito, non prestazioni.
+
+    C'è una distinzione che al colloquio fa la differenza: un dato copiato per
+    *performance* va ricostruibile dalla sorgente; un dato copiato per *storicità* no,
+    ed è corretto che diverga. Il prezzo di un ordine va copiato nella riga d'ordine,
+    perché l'ordine deve restare come era quando è stato fatto anche se il listino
+    cambia: non è denormalizzazione, è modellare un fatto storico. Confondere i due
+    casi porta a "correggere" con un job dati che erano giusti.
+
+    Gli strumenti per mantenere le copie, dal più semplice al più complesso: un UPDATE
+    nella stessa transazione (semplice, sicuro, ma crea contesa su righe calde come un
+    contatore); un trigger (vive nel database, non può essere aggirato, ma è codice
+    nascosto a chi legge l'applicazione); una vista materializzata con REFRESH
+    CONCURRENTLY (ottima per aggregati che tollerano qualche minuto di ritardo); un
+    evento asincrono (disaccoppia, ma introduce una finestra di incoerenza e la
+    necessità di gestire i duplicati). La contesa sul contatore ha una soluzione
+    classica: invece di aggiornare una riga sola, si scrivono N righe parziali
+    (sharded counter) e si somma alla lettura.
   key_points:
     - "1NF valori atomici, 2NF niente dipendenze parziali dalla chiave, 3NF niente dipendenze transitive"
+    - "Regola mnemonica: ogni attributo dipende dalla chiave, dalla chiave intera e da nient'altro che la chiave"
     - "Normalizzato: scritture semplici e sicure, letture con più join"
     - "Denormalizzato: letture veloci, scritture che devono aggiornare N posti"
     - "Denormalizzazioni comuni: contatori materializzati, campi copiati per evitare un join, viste materializzate"
-    - "Il dato denormalizzato è una cache: vale la stessa domanda, come lo invalido"
+    - "Il dato denormalizzato è una cache: chi lo aggiorna, quando diverge, come si ricostruisce"
+    - "Copia per performance (ricostruibile) e copia per storicità (il prezzo al momento dell'ordine) sono cose diverse"
+    - "Un contatore su riga singola crea contesa: si risolve con contatori partizionati sommati in lettura"
     - "In NoSQL la denormalizzazione è il punto di partenza, non un'ottimizzazione"
+  examples:
+    - title: Il contatore, dalle tre soluzioni
+      language: sql
+      code: |-
+        -- 1) COUNT a ogni lettura: sempre corretto, costa una scansione
+        SELECT count(*) FROM comments WHERE post_id = 42;
+
+        -- 2) Contatore denormalizzato: veloce, ma tutte le scritture si contendono
+        --    la stessa riga di posts (hot row)
+        UPDATE posts SET comments_count = comments_count + 1 WHERE id = 42;
+
+        -- 3) Contatore partizionato: niente contesa, somma in lettura
+        INSERT INTO comment_counters (post_id, bucket, n)
+             VALUES (42, floor(random() * 16), 1)
+        ON CONFLICT (post_id, bucket) DO UPDATE SET n = comment_counters.n + 1;
+
+        SELECT sum(n) FROM comment_counters WHERE post_id = 42;   -- 16 righe, non 1M
+      note: >-
+        La 2 è giusta finché i commenti su uno stesso post non arrivano a decine al
+        secondo; oltre, quella riga diventa un punto di serializzazione globale.
+    - title: Vista materializzata per gli aggregati
+      language: sql
+      code: |-
+        CREATE MATERIALIZED VIEW vendite_giornaliere AS
+        SELECT date_trunc('day', created_at) AS giorno,
+               count(*)                      AS ordini,
+               sum(total_cents)              AS incasso_cents
+          FROM orders
+         GROUP BY 1;
+
+        -- CONCURRENTLY non blocca le letture durante il refresh,
+        -- ma richiede un indice unico sulla vista.
+        CREATE UNIQUE INDEX ON vendite_giornaliere (giorno);
+        REFRESH MATERIALIZED VIEW CONCURRENTLY vendite_giornaliere;
+      note: >-
+        È il compromesso giusto quando il dato può avere qualche minuto di ritardo: costo
+        di scrittura zero sul percorso applicativo, lettura istantanea.
+  trade_offs:
+    - option: Normalizzato puro
+      pros: Nessuna incoerenza possibile, scritture semplici, spazio minimo
+      cons: Letture con molti join, query complesse per le schermate
+      when: Punto di partenza sempre, specie nel dominio transazionale
+    - option: Campo copiato o contatore
+      pros: Lettura immediata, niente join
+      cons: Seconda fonte di verità, contesa sulle righe calde
+      when: Lettura molto più frequente della scrittura, join misurato come collo di bottiglia
+    - option: Vista materializzata
+      pros: Nessun costo sul percorso di scrittura, aggregati pronti
+      cons: Dati in ritardo, refresh da schedulare, spazio
+      when: Dashboard e report che tollerano minuti di latenza
+    - option: Proiezione asincrona (evento)
+      pros: Disaccoppia i servizi, scala in lettura
+      cons: Finestra di incoerenza, duplicati da gestire, più parti mobili
+      when: Sistemi a eventi, CQRS, letture su un altro store
+  numbers:
+    - "Un join su chiave indicizzata costa microsecondi: prima di denormalizzare, misura davvero"
+    - "Contesa su riga singola: oltre qualche decina di update al secondo sulla stessa riga inizia a vedersi"
+    - "REFRESH MATERIALIZED VIEW CONCURRENTLY costa circa il doppio del refresh normale, ma non blocca le letture"
   interview_answer: >-
     Parto normalizzato perché la correttezza è più difficile da recuperare della
-    performance. Denormalizzo solo quando ho una query lenta misurata e il join è
-    davvero il collo di bottiglia, e quando lo faccio tratto il campo duplicato come una
-    cache: decido esplicitamente chi lo aggiorna e cosa succede se va fuori sincrono. Il
-    caso tipico è un contatore di commenti sul post: tenerlo aggiornato con un trigger o
-    un evento è molto meno costoso di un COUNT su ogni lettura, ma va messo in conto che
-    ora esiste un secondo posto dove la verità può divergere.
+    performance. Denormalizzo solo quando ho una query lenta misurata e il join è davvero
+    il collo di bottiglia, e quando lo faccio tratto il campo duplicato come una cache:
+    decido esplicitamente chi lo aggiorna e cosa succede se va fuori sincrono. Il caso
+    tipico è un contatore di commenti sul post: tenerlo aggiornato con un trigger o un
+    evento è molto meno costoso di un COUNT su ogni lettura, ma va messo in conto che ora
+    esiste un secondo posto dove la verità può divergere, e che sotto carico quella riga
+    diventa un punto di contesa. Tengo separato il caso dei dati storici, come il prezzo
+    al momento dell'ordine: lì la copia non è un'ottimizzazione, è il modello corretto.
+  senior_signals:
+    - "Distingue la copia per performance da quella per storicità"
+    - "Tratta il dato denormalizzato come cache e dice come lo ricostruirebbe"
+    - "Conosce la contesa sulla riga calda e la soluzione dei contatori partizionati"
+    - "Chiede di misurare prima di denormalizzare, invece di assumere che il join sia lento"
   pitfalls:
     - "Denormalizzare prima di avere un problema misurato"
     - "Duplicare dati senza definire chi è responsabile dell'aggiornamento"
     - "Normalizzare all'estremo e ritrovarsi con query a otto join per una schermata"
-  follow_up_questions:
-    - "Come mantieni coerente un contatore denormalizzato sotto carico concorrente?"
+    - "Aggiornare un contatore centrale sotto alta concorrenza e scoprire i lock in produzione"
+  follow_ups:
+    - question: Come mantieni coerente un contatore denormalizzato sotto carico concorrente?
+      answer: >-
+        Se il volume è basso, un UPDATE incrementale nella stessa transazione
+        dell'inserimento: atomico e semplice. Quando quella riga diventa calda passo ai
+        contatori partizionati, scrivendo su uno di N bucket e sommando in lettura: la
+        contesa si divide per N. In alternativa aggiorno in modo asincrono da un evento e
+        accetto qualche secondo di ritardo, con un job di riconciliazione periodico che
+        ricalcola il valore vero.
+    - question: Quando NON va bene una vista materializzata?
+      answer: >-
+        Quando il dato deve essere immediatamente coerente - un saldo, una disponibilità
+        - oppure quando il refresh costa più del beneficio perché la tabella sorgente è
+        enorme e cambia in continuazione. In quei casi meglio una tabella di aggregati
+        aggiornata in modo incrementale, o un database colonnare alimentato a eventi.
+    - question: La terza forma normale basta sempre?
+      answer: >-
+        Nella pratica sì, per il modello transazionale. Esistono forme superiori (BCNF,
+        4NF) che risolvono casi particolari con chiavi candidate multiple o dipendenze
+        multivalore, ma si incontrano raramente. Molto più spesso il problema non è
+        normalizzare di più, è aver modellato male i confini delle entità.
+  related: [db-12-indexes, db-11-sql-vs-nosql, cache-23-consistency, pat-11-cqrs]
+  resources:
+    - title: "PostgreSQL - Materialized Views"
+      url: "https://www.postgresql.org/docs/current/rules-materializedviews.html"
+      kind: doc
+    - title: "Codd - A Relational Model of Data for Large Shared Data Banks"
+      url: "https://dl.acm.org/doi/10.1145/362384.362685"
+      kind: article
 
 - id: db-16-pagination
   title: Paginazione - offset vs cursor
@@ -186,27 +935,162 @@
     La paginazione a offset è semplice ma degrada in profondità e salta o duplica righe
     se i dati cambiano. La paginazione a cursore (keyset) resta veloce a qualunque
     profondità ed è stabile, ma non permette di saltare a pagina arbitraria.
+  deep_dive: |-
+    `OFFSET n` non è un salto: il database deve produrre e scartare le prime n righe
+    ordinate. Il costo cresce quindi linearmente con la profondità, e la pagina 5.000
+    costa migliaia di volte la pagina 1 anche se restituisce lo stesso numero di
+    elementi. È un problema che non si vede in sviluppo, dove le tabelle sono piccole,
+    e che esplode in produzione sulle liste lunghe.
+
+    C'è un secondo problema, di correttezza, che spesso pesa di più. Se fra il
+    caricamento della pagina 1 e quello della pagina 2 qualcuno inserisce una riga in
+    cima, tutti gli elementi scalano di una posizione: l'utente vedrà due volte
+    l'elemento al confine, o non lo vedrà affatto. Su un feed ordinato per data
+    decrescente e con inserimenti frequenti succede di continuo.
+
+    La paginazione keyset risolve entrambi: invece di dire "salta 100.000", si dice
+    "dammi i successivi a *questo* punto". La condizione usa la tupla di ordinamento e
+    sfrutta l'indice per posizionarsi direttamente, quindi il costo è indipendente
+    dalla profondità. Il dettaglio che fa la differenza è il *tie-breaker*: se ordini
+    solo per `created_at` e due righe hanno lo stesso istante, la pagina successiva ne
+    salta una. Per questo il cursore deve includere una colonna unica, di solito l'id,
+    e l'indice deve corrispondere esattamente all'ordinamento (`(created_at DESC, id
+    DESC)`).
+
+    Il cursore va esposto come stringa opaca, tipicamente base64 di un piccolo JSON:
+    così puoi cambiare l'implementazione senza rompere i client, e il client non è
+    tentato di costruirselo. È anche una buona idea firmarlo o includere l'ordinamento
+    usato, perché un cursore nato con un ordinamento diverso produce risultati
+    incoerenti.
+
+    Restano due casi in cui il keyset non basta. Il primo è "vai a pagina N", che per
+    costruzione richiede un offset: in un back-office è accettabile, e si può limitare
+    la profondità massima. Il secondo è l'ordinamento per un punteggio calcolato al
+    volo (rilevanza, ranking personalizzato): lì il cursore deve incorporare il
+    punteggio più un identificatore, e il punteggio deve essere stabile per la durata
+    della sessione di scorrimento, altrimenti l'ordine cambia sotto i piedi. La
+    soluzione comune è calcolare e congelare la lista di id per un certo tempo (una
+    "search session"), e poi paginare su quella.
+
+    Ultimo dettaglio spesso dimenticato: il conteggio totale. `SELECT count(*)` su una
+    tabella grande con filtri costa quanto la query stessa. Le alternative sono
+    mostrare "oltre 1.000 risultati" con un `LIMIT` sul conteggio, usare la stima del
+    planner (`reltuples` o `EXPLAIN`) quando basta un ordine di grandezza, o non
+    mostrare affatto il totale, che è ciò che fanno le UI a scorrimento infinito.
   key_points:
-    - "OFFSET 100000 LIMIT 20 costringe il DB a leggere e scartare 100.000 righe"
+    - "OFFSET 100000 LIMIT 20 costringe il DB a leggere e scartare 100.000 righe: il costo cresce con la profondità"
     - "Se qualcuno inserisce una riga fra la pagina 1 e la 2, con offset vedi un elemento due volte o non lo vedi affatto"
     - "Keyset: WHERE (created_at, id) < (:last_created_at, :last_id) ORDER BY created_at DESC, id DESC LIMIT 20"
     - "Il cursore deve includere un tie-breaker unico (l'id) o le righe con lo stesso timestamp si perdono"
+    - "L'indice deve corrispondere all'ordinamento completo, tie-breaker compreso"
     - "Il cursore si restituisce opaco (base64) per poterne cambiare il formato senza rompere i client"
     - "Offset resta accettabile su dataset piccoli o back-office dove serve il 'vai a pagina N'"
+    - "Il conteggio totale è spesso più costoso della pagina: si stima, si limita o si omette"
+  examples:
+    - title: Keyset con tie-breaker, e l'indice che serve
+      language: sql
+      code: |-
+        -- L'indice deve corrispondere ESATTAMENTE all'ordinamento usato
+        CREATE INDEX ON posts (created_at DESC, id DESC);
+
+        -- Prima pagina
+        SELECT id, titolo, created_at FROM posts
+         ORDER BY created_at DESC, id DESC
+         LIMIT 20;
+
+        -- Pagine successive: confronto fra tuple, non due condizioni con OR
+        SELECT id, titolo, created_at FROM posts
+         WHERE (created_at, id) < (:ultimo_created_at, :ultimo_id)
+         ORDER BY created_at DESC, id DESC
+         LIMIT 20;
+      note: >-
+        Il confronto di tuple `(a, b) < (x, y)` è supportato da Postgres e MySQL 8 e usa
+        l'indice; scritto a mano con OR spesso produce un piano peggiore.
+    - title: Cursore opaco, con l'ordinamento dentro
+      language: python
+      code: |-
+        import base64, json
+
+        def codifica(created_at, id_, ordine: str) -> str:
+            dati = {"t": created_at.isoformat(), "i": str(id_), "o": ordine}
+            return base64.urlsafe_b64encode(json.dumps(dati).encode()).decode()
+
+        def decodifica(cursore: str, ordine_atteso: str) -> tuple:
+            dati = json.loads(base64.urlsafe_b64decode(cursore))
+            if dati.get("o") != ordine_atteso:
+                # cursore nato con un altro ordinamento: continuare darebbe risultati incoerenti
+                raise ValueError("Cursore non valido per questo ordinamento")
+            return datetime.fromisoformat(dati["t"]), UUID(dati["i"])
+      note: >-
+        Includere l'ordinamento nel cursore evita il bug sottile in cui l'utente cambia
+        ordinamento a metà scorrimento e la lista si mescola.
+  trade_offs:
+    - option: Offset/limit
+      pros: Banale, permette "vai a pagina N", totale facile da mostrare
+      cons: Costo lineare nella profondità, righe saltate o duplicate se i dati cambiano
+      when: Back-office, dataset piccoli, tabelle statiche
+    - option: Keyset (cursore)
+      pros: Costo costante, stabile agli inserimenti, ideale per scorrimento infinito
+      cons: Niente salto a pagina arbitraria, cursore da gestire, ordinamento vincolato all'indice
+      when: Feed, liste lunghe, API pubbliche
+    - option: Ricerca con lista congelata
+      pros: Ordine stabile anche con punteggi calcolati
+      cons: Stato lato server con scadenza, memoria
+      when: Ricerca per rilevanza, risultati personalizzati
+  numbers:
+    - "OFFSET 1.000.000 su una tabella indicizzata può costare secondi; la stessa pagina in keyset resta sotto il millisecondo"
+    - "Dimensione di pagina tipica per API pubbliche: 20-100 elementi, con un massimo imposto dal server"
+    - "COUNT(*) esatto con filtri su milioni di righe: centinaia di millisecondi o più. La stima del planner costa zero"
   interview_answer: >-
     Per feed e liste infinite uso la paginazione a cursore, perché con l'offset il database
     deve comunque leggere e buttare via tutte le righe precedenti, quindi la pagina 5000
     costa molto più della pagina 1. C'è anche un problema di correttezza che spesso pesa di
     più: con l'offset, se arrivano nuovi elementi mentre l'utente scorre, alcuni vengono
     saltati e altri mostrati due volte. Il cursore risolve entrambi, a patto di ordinare su
-    una coppia di colonne di cui una sia unica, tipicamente timestamp più id, altrimenti i
-    record con lo stesso timestamp scompaiono.
+    una coppia di colonne di cui una sia unica, tipicamente timestamp più id, e di avere un
+    indice che corrisponda esattamente a quell'ordinamento. Il cursore lo espongo opaco, in
+    base64, così posso cambiarne il formato senza rompere i client. E sul totale sono
+    esplicito: se la tabella è grande, o lo stimo o non lo mostro.
+  senior_signals:
+    - "Cita sia il problema di costo sia quello di correttezza, non solo il primo"
+    - "Ricorda il tie-breaker e l'indice che deve corrispondere all'ordinamento"
+    - "Espone il cursore come opaco e spiega perché"
+    - "Affronta il costo del conteggio totale invece di darlo per scontato"
   pitfalls:
     - "Cursore senza tie-breaker unico: perdi righe con timestamp identico"
     - "Esporre il cursore come id numerico grezzo, legandoti all'implementazione"
     - "Usare offset su un feed social e stupirsi dei duplicati"
-  follow_up_questions:
-    - "Come implementeresti un cursore su un ordinamento per rilevanza calcolata?"
+    - "Indice non allineato all'ORDER BY completo: il piano ricade in un sort su tutte le righe"
+  follow_ups:
+    - question: Come implementeresti un cursore su un ordinamento per rilevanza calcolata?
+      answer: >-
+        Il cursore deve contenere il punteggio dell'ultimo elemento più un id come
+        tie-breaker, e la query filtra su `(score, id) < (:score, :id)`. Il punto
+        delicato è la stabilità: se il punteggio si ricalcola a ogni richiesta l'ordine
+        cambia mentre l'utente scorre. Per questo, sulle ricerche personalizzate, si
+        congela la lista di id per qualche minuto e si pagina su quella lista.
+    - question: Come gestisci la paginazione su dati aggregati da più fonti?
+      answer: >-
+        O si normalizza l'ordinamento su una chiave comune (tipicamente un timestamp) e
+        si fa una fusione ordinata prendendo k elementi da ciascuna fonte, oppure si
+        materializza periodicamente una lista unificata e si pagina su quella. La prima
+        è più fresca ma costa una richiesta per fonte a ogni pagina; la seconda è veloce
+        ma introduce ritardo.
+    - question: Il cliente vuole "vai a pagina N" su dieci milioni di righe. Cosa proponi?
+      answer: >-
+        Prima chiedo a cosa serve davvero: nella maggior parte dei casi è un modo per
+        dire "voglio trovare qualcosa", e la risposta giusta sono filtri e ricerca, non
+        la pagina 4.312. Se serve comunque, limito la profondità massima (le prime N
+        pagine con offset) e offro il salto per intervallo, per esempio per data, che
+        sull'indice è economico.
+  related: [db-12-indexes, core-02-rest-vs-graphql, core-01-what-is-an-api]
+  resources:
+    - title: "Use The Index, Luke! - Paging Through Results"
+      url: "https://use-the-index-luke.com/no-offset"
+      kind: article
+    - title: "PostgreSQL - Row-wise comparison"
+      url: "https://www.postgresql.org/docs/current/functions-comparisons.html#ROW-WISE-COMPARISON"
+      kind: doc
 
 - id: db-17-sharding-partitioning
   title: Sharding e partizionamento
@@ -219,30 +1103,200 @@
     Partizionare significa dividere una tabella in pezzi; fare sharding significa
     distribuire quei pezzi su macchine diverse. Il partizionamento risolve problemi di
     manutenzione e di dimensione, lo sharding risolve problemi di capacità di scrittura.
+  deep_dive: |-
+    Le due parole si confondono, ma il confine è netto: il partizionamento resta dentro
+    una sola istanza e serve a rendere gestibile una tabella enorme; lo sharding
+    distribuisce i dati su più istanze e serve quando le scritture non stanno più su
+    una macchina. Il primo è quasi indolore, il secondo cambia per sempre il modo in
+    cui si scrivono le query.
+
+    Il partizionamento dichiarativo (in Postgres, `PARTITION BY RANGE/LIST/HASH`) dà
+    tre benefici concreti. La *partition pruning*: se il filtro contiene la chiave di
+    partizione, il planner legge solo le partizioni interessate. La manutenzione:
+    eliminare i dati vecchi diventa `DROP TABLE` della partizione, istantaneo, invece
+    di una DELETE che genera bloat. E gli indici più piccoli, che stanno in cache. Il
+    caso d'uso di gran lunga più comune è per data: una partizione al mese, retention
+    con drop.
+
+    Nello sharding la decisione che pesa è la *shard key*, ed è quella che non si
+    cambia senza migrare i dati. Le strategie: *range* (facile da capire, rischio
+    hotspot se la chiave cresce monotona, come un timestamp - tutte le scritture
+    finiscono sull'ultimo shard); *hash* (distribuzione uniforme, ma le query per
+    intervallo devono interrogare tutti gli shard); *directory* (una mappa esplicita
+    chiave→shard: massima flessibilità, un lookup in più e un componente da rendere
+    affidabile).
+
+    Il consistent hashing serve a un problema specifico: con `hash(chiave) % N`,
+    cambiare N rimescola quasi tutti i dati. Con l'hashing consistente chiavi e nodi
+    si dispongono su un anello e ogni chiave va al primo nodo in senso orario: aggiungere
+    un nodo sposta in media solo 1/N dei dati. I *virtual node* (ogni nodo fisico
+    presente sull'anello in centinaia di posizioni) servono a evitare che la
+    distribuzione sia sbilanciata e a rendere graduale il rientro di un nodo.
+
+    Il conto da fare prima di partire riguarda le query. Se la shard key compare nel
+    filtro, la query va su un solo nodo. Se non compare, diventa uno *scatter-gather*
+    su tutti i nodi, con latenza pari al più lento. I join fra shard e le aggregazioni
+    globali passano a carico dell'applicazione o di un livello di coordinamento
+    (Citus, Vitess). Le transazioni che attraversano shard richiedono 2PC o una saga:
+    il progetto giusto è quello che le rende non necessarie, tenendo insieme nello
+    stesso shard i dati che si aggiornano insieme (in multi-tenant, quasi sempre per
+    tenant, con i tenant enormi trattati a parte).
+
+    Sparisce anche qualcosa che si dava per scontato: le sequenze auto-incrementali e
+    gli unique globali. Si passa a identificatori generabili ovunque - UUIDv7 o ULID,
+    che sono ordinabili nel tempo e quindi amichevoli per gli indici, o Snowflake id
+    (timestamp + id macchina + contatore).
+
+    Infine il resharding senza fermare il servizio, che è la domanda da colloquio
+    senior. Lo schema collaudato: doppia scrittura sui due layout, backfill storico a
+    lotti, verifica di consistenza, spostamento graduale delle letture con un flag,
+    infine rimozione del vecchio percorso. Ogni passo deve essere reversibile, perché
+    quello che va storto è sempre il backfill.
   key_points:
     - "Partizionamento verticale: colonne diverse su tabelle diverse. Orizzontale: righe diverse su partizioni diverse"
+    - "Partizionamento = una macchina, manutenzione e dimensione. Sharding = più macchine, capacità di scrittura"
+    - "Partition pruning: il filtro sulla chiave di partizione evita di leggere le altre partizioni"
     - "Strategie di shard key: range (semplice, rischio hotspot), hash (distribuzione uniforme, addio range query), directory (flessibile, richiede un lookup)"
     - "La shard key è la decisione più difficile da cambiare: sbagliarla costa una migrazione"
-    - "Le query cross-shard sono costose: join e aggregazioni devono essere fatte a livello applicativo"
+    - "Le query senza shard key diventano scatter-gather: latenza pari al nodo più lento"
     - "Le transazioni cross-shard richiedono 2PC o saga: meglio progettare perché non servano"
-    - "Il consistent hashing limita il rimescolamento quando aggiungi o togli nodi"
+    - "Il consistent hashing con virtual node limita il rimescolamento a circa 1/N quando aggiungi o togli nodi"
+    - "Auto-increment e unique globali smettono di funzionare: servono UUIDv7, ULID o Snowflake id"
     - "Il partizionamento per data è il caso più comune e più utile: DROP PARTITION per la retention è istantaneo"
+  examples:
+    - title: Partizionamento per data, con retention gratis
+      language: sql
+      code: |-
+        CREATE TABLE eventi (
+          id bigserial, ts timestamptz NOT NULL, tipo text, dati jsonb
+        ) PARTITION BY RANGE (ts);
+
+        CREATE TABLE eventi_2026_02 PARTITION OF eventi
+          FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+
+        -- Con il filtro sulla chiave, il planner legge UNA partizione
+        EXPLAIN SELECT count(*) FROM eventi
+         WHERE ts >= '2026-02-10' AND ts < '2026-02-11';
+        --  -> Seq Scan on eventi_2026_02   (le altre non compaiono: pruning)
+
+        -- Retention: istantanea, nessun bloat, nessun VACUUM
+        DROP TABLE eventi_2025_08;
+      note: >-
+        Senza partizionamento, cancellare un mese di dati da una tabella da miliardi di
+        righe significa una DELETE lunghissima che lascia spazio morto da recuperare.
+    - title: Perché hash % N è una trappola
+      language: python
+      code: |-
+        # Modulo semplice: da 4 a 5 nodi rimescola quasi tutto
+        def nodo_modulo(chiave: str, n: int) -> int:
+            return hash(chiave) % n
+        # con n=4 -> 5, circa l'80% delle chiavi cambia nodo: migrazione totale
+
+        # Consistent hashing con virtual node: si sposta circa 1/N
+        import bisect, hashlib
+
+        class Anello:
+            def __init__(self, nodi: list[str], repliche: int = 150):
+                self.punti: list[tuple[int, str]] = []
+                for nodo in nodi:
+                    for r in range(repliche):          # virtual node = distribuzione equa
+                        h = int(hashlib.md5(f"{nodo}#{r}".encode()).hexdigest(), 16)
+                        self.punti.append((h, nodo))
+                self.punti.sort()
+                self.chiavi = [p[0] for p in self.punti]
+
+            def nodo(self, chiave: str) -> str:
+                h = int(hashlib.md5(chiave.encode()).hexdigest(), 16)
+                i = bisect.bisect(self.chiavi, h) % len(self.punti)
+                return self.punti[i][1]
+      note: >-
+        150 virtual node per nodo fisico è un valore tipico: abbastanza da rendere la
+        distribuzione uniforme, abbastanza pochi da tenere l'anello in memoria.
+  trade_offs:
+    - option: Partizionamento locale
+      pros: Manutenzione e retention banali, indici più piccoli, nessun cambio di query
+      cons: Non aumenta la capacità di scrittura, resta il limite di una macchina
+      when: Tabelle enormi ma carico sostenibile da un'istanza
+    - option: Sharding per hash
+      pros: Distribuzione uniforme, nessun hotspot
+      cons: Le range query toccano tutti gli shard, resharding complesso
+      when: Chiavi con accesso puntuale (id utente, id tenant)
+    - option: Sharding per range
+      pros: Range query efficienti, split semplice da capire
+      cons: Hotspot garantito se la chiave cresce nel tempo
+      when: Dati con accesso per intervallo e chiave ben distribuita
+    - option: Middleware (Citus, Vitess)
+      pros: Query distribuite senza riscrivere tutto, join gestiti dal livello
+      cons: Componente in più da operare, non tutte le query sono supportate
+      when: Si vuole scalare restando su Postgres o MySQL
+  numbers:
+    - "Consistent hashing: aggiungere un nodo sposta circa 1/N dei dati, contro quasi il 100% del modulo"
+    - "Virtual node tipici: 100-200 per nodo fisico"
+    - "Un tenant enorme può valere più di tutti gli altri messi insieme: nelle piattaforme SaaS è la regola, non l'eccezione"
+    - "Regola pratica: si valuta lo sharding sopra qualche TB o quando le scritture saturano il primario, non prima"
   interview_answer: >-
     Prima di sharding provo tutto il resto: indici, read replica, caching, partizionamento
     locale. Lo sharding lo considero quando il collo di bottiglia sono le scritture su una
     sola macchina, perché introduce costi permanenti. La scelta della shard key è la parte
     che pesa davvero: deve distribuire uniformemente ma anche tenere insieme i dati che
-    interrogo insieme, altrimenti ogni query diventa uno scatter-gather su tutti i nodi.
-    In un sistema multi-tenant di solito parto dal tenant id, perché quasi tutte le query
-    sono già naturalmente limitate a un tenant, a patto di gestire a parte i tenant enormi
-    che da soli farebbero hotspot.
+    interrogo insieme, altrimenti ogni query diventa uno scatter-gather su tutti i nodi. In
+    un sistema multi-tenant di solito parto dal tenant id, perché quasi tutte le query sono
+    già naturalmente limitate a un tenant, a patto di gestire a parte i tenant enormi. E
+    metto in conto da subito che spariscono auto-increment e unique globali: si passa a
+    UUIDv7 o Snowflake id.
+  senior_signals:
+    - "Distingue partizionamento e sharding e prova il primo prima del secondo"
+    - "Sceglie la shard key ragionando sulle query, non solo sulla distribuzione"
+    - "Sa spiegare perché il consistent hashing riduce il rimescolamento e a cosa servono i virtual node"
+    - "Descrive il resharding come doppia scrittura, backfill, cutover graduale e reversibile"
   pitfalls:
     - "Shard key a bassa cardinalità o con distribuzione sbilanciata: un nodo va in fiamme e gli altri dormono"
     - "Fare sharding come prima mossa invece che come ultima"
     - "Dimenticare che unique globali e auto-increment smettono di funzionare"
-  follow_up_questions:
-    - "Come faresti resharding senza downtime?"
-    - "Perché il consistent hashing riduce il rimescolamento dei dati?"
+    - "Shard key monotona nel tempo: tutte le scritture nuove finiscono sullo stesso nodo"
+    - "Non prevedere il tenant fuori scala e trattarlo come tutti gli altri"
+  follow_ups:
+    - question: Come faresti resharding senza downtime?
+      answer: >-
+        A fasi reversibili. Primo: scrittura doppia su vecchio e nuovo layout, con il
+        vecchio ancora sorgente di verità. Secondo: backfill dello storico a lotti, con
+        rate limiting per non affondare la produzione. Terzo: verifica di consistenza a
+        campione e poi totale. Quarto: spostamento delle letture con un flag, prima una
+        percentuale poi tutto. Quinto: rimozione della scrittura sul vecchio, dopo un
+        periodo di sicurezza. Se qualcosa va storto, si torna indietro invertendo il flag.
+    - question: Perché il consistent hashing riduce il rimescolamento dei dati?
+      answer: >-
+        Perché la posizione di una chiave non dipende dal numero di nodi. Chiavi e nodi
+        sono su un anello e ogni chiave appartiene al primo nodo che incontra in senso
+        orario: aggiungere un nodo cattura solo le chiavi dell'arco che gli compete, in
+        media 1/N del totale. Con `hash % N` cambia invece il divisore, quindi cambia
+        l'assegnazione di quasi tutte le chiavi.
+    - question: Cosa succede alle query che non contengono la shard key?
+      answer: >-
+        Diventano scatter-gather: vengono inviate a tutti gli shard e i risultati
+        aggregati dall'applicazione o da un coordinatore. La latenza è quella del nodo
+        più lento e il costo cresce con il numero di shard, quindi vanno tenute rare.
+        Quando sono inevitabili - tipicamente ricerche e report - la risposta è
+        alimentare uno store secondario pensato per quello (un motore di ricerca, un
+        colonnare) invece di forzare il database transazionale.
+    - question: Come generi identificatori unici senza una sequenza centrale?
+      answer: >-
+        Con identificatori generabili localmente: UUIDv7 e ULID contengono un prefisso
+        temporale, quindi sono unici, ordinabili nel tempo e amichevoli per i B-tree, a
+        differenza di UUIDv4 che è casuale e frammenta gli indici. In alternativa lo
+        schema Snowflake: timestamp, identificatore della macchina e contatore, che dà
+        id numerici a 64 bit ordinati.
+  related: [db-18-read-replicas, db-11-sql-vs-nosql, dist-27-horizontal-vertical, rel-36-saga]
+  resources:
+    - title: "PostgreSQL - Table Partitioning"
+      url: "https://www.postgresql.org/docs/current/ddl-partitioning.html"
+      kind: doc
+    - title: "Karger et al. - Consistent Hashing and Random Trees"
+      url: "https://dl.acm.org/doi/10.1145/258533.258660"
+      kind: article
+    - title: "Vitess - Sharding"
+      url: "https://vitess.io/docs/concepts/shard/"
+      kind: doc
 
 - id: db-18-read-replicas
   title: Read replica e scalabilità delle scritture
@@ -253,29 +1307,172 @@
   estimated_minutes: 30
   summary: >-
     Le read replica scalano le letture copiando i dati dal primario. Non scalano le
-    scritture, che restano su un solo nodo, e introducono il replication lag: una lettura
-    subito dopo una scrittura può non vedere il dato appena scritto.
+    scritture, che restano su un solo nodo, e introducono il replication lag: una
+    lettura subito dopo una scrittura può non vedere il dato appena scritto.
+  deep_dive: |-
+    Il meccanismo, in Postgres, è la replica fisica via streaming: il primario spedisce
+    il flusso del WAL alle repliche, che lo riapplicano. Ogni posizione nel WAL ha un
+    identificatore monotono, l'LSN, e la differenza fra l'LSN scritto sul primario e
+    quello applicato su una replica *è* il replication lag. Non è un'astrazione: si
+    legge da `pg_stat_replication` e va messo in un grafico, perché è il numero che
+    spiega i bug più sconcertanti.
+
+    La scelta fra sincrono e asincrono è una scelta di RPO. Con la replica asincrona il
+    commit sul primario non aspetta nessuno: latenza minima, ma se il primario muore le
+    ultime transazioni non ancora spedite sono perse. Con la replica sincrona il commit
+    attende la conferma di almeno una replica: nessuna perdita, ma ogni commit paga il
+    round trip, e se la replica sincrona non risponde il primario si blocca - motivo per
+    cui in produzione si usa un quorum (`ANY 1 (r1, r2)`) invece di una replica sola.
+
+    Il problema pratico più comune è il *read-your-own-writes*: l'utente salva, la
+    pagina ricarica, la lettura va su una replica in ritardo e mostra i dati vecchi.
+    L'utente pensa che il salvataggio non abbia funzionato, riprova, e a volte crea un
+    duplicato. Le soluzioni, in ordine di precisione: instradare sul primario le letture
+    dello stesso utente per qualche secondo dopo una sua scrittura (semplice,
+    efficace); oppure la versione esatta, in cui dopo la scrittura si prende l'LSN del
+    commit, lo si porta nella sessione e si sceglie una replica che lo abbia già
+    applicato, aspettando se necessario.
+
+    Le repliche servono anche a due cose che spesso contano più della scalabilità:
+    l'alta disponibilità (una replica è il candidato alla promozione in caso di guasto)
+    e l'isolamento dei carichi analitici, in modo che un report pesante non rallenti il
+    traffico applicativo. In quest'ultimo caso attenzione al conflitto fra query lunghe
+    sulla replica e applicazione del WAL: la replica può dover cancellare la query
+    (`hot_standby_feedback` e `max_standby_streaming_delay` regolano questo compromesso).
+
+    Ciò che le repliche *non* fanno è scalare le scritture: ogni scrittura passa
+    comunque dal primario e viene riapplicata su ogni replica, quindi aggiungerne altre
+    non aumenta la capacità di scrittura di un byte. Quando il collo di bottiglia sono
+    le scritture le strade sono altre: ridurre il lavoro per transazione, accorpare in
+    lotti, assorbire i picchi con una coda, separare i comandi dalle letture (CQRS) e,
+    da ultimo, partizionare o fare sharding.
+
+    Un dettaglio operativo che al colloquio fa la differenza: il connection pooling.
+    Ogni connessione a Postgres è un processo, e qualche centinaio di connessioni
+    sature pesa più del carico vero. PgBouncer in modalità transaction permette a
+    migliaia di client applicativi di condividere poche decine di connessioni reali.
   key_points:
-    - "Replica asincrona: veloce, ma una failover può perdere le ultime transazioni"
-    - "Replica sincrona: nessuna perdita, ma ogni commit paga la latenza della replica"
-    - "Replication lag: tipicamente millisecondi, ma sotto carico può arrivare a secondi"
-    - "Read-your-own-writes: dopo una scrittura, instrada le letture di quell'utente sul primario per qualche secondo"
-    - "Per scalare le scritture servono altre strade: sharding, batching, CQRS, code"
-    - "Le replica servono anche per HA e per isolare i job analitici dal traffico applicativo"
+    - "Replica fisica in streaming: il primario spedisce il WAL, le repliche lo riapplicano. L'LSN misura il punto raggiunto"
+    - "Replica asincrona: veloce, ma una failover può perdere le ultime transazioni (RPO > 0)"
+    - "Replica sincrona: nessuna perdita, ma ogni commit paga la latenza della replica; in produzione si usa un quorum"
+    - "Replication lag: tipicamente millisecondi, ma sotto carico o con query lunghe può arrivare a secondi"
+    - "Read-your-own-writes: dopo una scrittura, instrada le letture di quell'utente sul primario per qualche secondo, o attendi l'LSN"
+    - "Per scalare le scritture servono altre strade: batching, code, CQRS, partizionamento, sharding"
+    - "Le repliche servono anche per HA e per isolare i job analitici dal traffico applicativo"
+    - "Query lunghe sulla replica e applicazione del WAL confliggono: hot_standby_feedback e max_standby_streaming_delay regolano il compromesso"
+    - "Connection pooling (PgBouncer in transaction mode) è spesso la prima ottimizzazione, prima di aggiungere repliche"
+  examples:
+    - title: Misurare il lag prima che lo segnali un utente
+      language: sql
+      code: |-
+        -- Sul primario: chi è connesso, a che punto è, quanto è indietro
+        SELECT client_addr,
+               state,
+               pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) AS byte_indietro,
+               write_lag, flush_lag, replay_lag
+          FROM pg_stat_replication;
+
+        -- Sulla replica: da quanti secondi non vede novità
+        SELECT now() - pg_last_xact_replay_timestamp() AS ritardo;
+      note: >-
+        `replay_lag` è quello che conta per l'utente: i dati possono essere arrivati
+        (write) e non ancora applicati (replay).
+    - title: Read-your-own-writes, due implementazioni
+      language: python
+      code: |-
+        # 1) Semplice: dopo una scrittura, per N secondi leggi dal primario.
+        async def dopo_scrittura(utente_id: str, redis: Redis):
+            await redis.setex(f"rw:{utente_id}", 5, "1")
+
+        async def scegli_connessione(utente_id: str, redis: Redis):
+            return primario if await redis.exists(f"rw:{utente_id}") else replica
+
+        # 2) Esatta: porta con te l'LSN del commit e aspetta che la replica lo raggiunga.
+        async def scrivi(conn):
+            await conn.execute("UPDATE profili SET bio = $1 WHERE id = $2", bio, uid)
+            return await conn.fetchval("SELECT pg_current_wal_insert_lsn()")
+
+        async def leggi(replica, lsn):
+            # true quando la replica ha già applicato quell'LSN
+            pronta = await replica.fetchval("SELECT pg_last_wal_replay_lsn() >= $1", lsn)
+            return replica if pronta else primario
+      note: >-
+        La prima costa una chiave in Redis e risolve il 95% dei casi; la seconda è esatta
+        ma richiede di propagare l'LSN fino al client (di solito in un cookie o header).
+  trade_offs:
+    - option: Replica asincrona
+      pros: Nessun costo sul commit, scala bene le letture
+      cons: RPO maggiore di zero, lag visibile agli utenti
+      when: Default per la maggior parte delle applicazioni
+    - option: Replica sincrona (quorum)
+      pros: Nessuna perdita alla failover
+      cons: Latenza di commit più alta, rischio di stallo se il quorum non risponde
+      when: Dati finanziari o dove perdere una transazione è inaccettabile
+    - option: Tutto sul primario
+      pros: Nessun problema di coerenza, architettura semplice
+      cons: Nessuna scalabilità in lettura, nessun candidato pronto per la failover
+      when: Carichi piccoli, prima di avere un problema misurato
+  numbers:
+    - "Lag tipico in streaming asincrono nello stesso datacenter: 1-50 ms; fra regioni: 50-200 ms"
+    - "Postgres: ogni connessione è un processo; oltre alcune centinaia il costo di contesa supera il beneficio, da cui PgBouncer"
+    - "Finestra tipica per il read-your-own-writes sul primario: 3-10 secondi"
+    - "RPO con replica asincrona = quanto lag c'era al momento del guasto: è il numero da mostrare al business"
   interview_answer: >-
     Le replica sono la prima leva quando il carico è sbilanciato sulle letture, che è il
     caso normale. Il punto da non sottovalutare è il lag: con replica asincrona l'utente
     che salva un profilo e ricarica la pagina può vedere ancora i dati vecchi. Lo gestisco
     con il read-your-own-writes, mandando al primario le letture dello stesso utente per
-    una breve finestra dopo una sua scrittura. Se invece il collo di bottiglia sono le
+    una breve finestra dopo una sua scrittura; dove serve precisione uso l'LSN del commit e
+    aspetto che la replica lo abbia applicato. Se invece il collo di bottiglia sono le
     scritture, le replica non aiutano per niente e devo guardare altrove: batching, code
-    per assorbire i picchi, o partizionare i dati.
+    per assorbire i picchi, o partizionare i dati. E prima di aggiungere repliche controllo
+    sempre il connection pooling, perché spesso il problema è lì.
+  senior_signals:
+    - "Dice esplicitamente che le repliche non scalano le scritture e spiega perché"
+    - "Conosce l'LSN e propone entrambe le strategie per il read-your-own-writes"
+    - "Lega la scelta sincrono/asincrono a RPO e RTO, cioè a una decisione di business"
+    - "Menziona il connection pooling come leva spesso più efficace di una replica in più"
   pitfalls:
     - "Mandare sulle replica le letture che seguono immediatamente una scrittura"
     - "Pensare che aggiungere replica risolva un problema di scritture"
     - "Non monitorare il replication lag e scoprirlo da un bug report"
-  follow_up_questions:
-    - "Come gestisci il read-your-own-writes con le replica?"
+    - "Replica sincrona singola senza quorum: se quella replica si blocca, si blocca il primario"
+    - "Job analitici sulla replica senza limiti: le query lunghe vengono cancellate o fanno crescere il lag"
+  follow_ups:
+    - question: Come gestisci il read-your-own-writes con le replica?
+      answer: >-
+        Due modi. Il pratico: dopo una scrittura marco l'utente per qualche secondo e in
+        quella finestra leggo dal primario. L'esatto: prendo l'LSN del commit, lo porto
+        nella sessione del client e prima di leggere verifico che la replica lo abbia
+        già applicato, altrimenti uso il primario. Il primo costa poco e copre quasi
+        tutto; il secondo lo riservo alle schermate dove l'incoerenza sarebbe grave.
+    - question: Cosa succede durante una failover e come limiti i danni?
+      answer: >-
+        Una replica viene promossa e il resto del sistema deve seguirla. I rischi sono
+        due: perdere le transazioni non replicate (RPO) e avere due primari se il
+        vecchio torna su (split brain). Si limitano con replica sincrona a quorum per
+        l'RPO e con fencing o un gestore di cluster affidabile per lo split brain, più
+        un endpoint stabile (proxy o record DNS con TTL basso) perché le applicazioni
+        non debbano essere riconfigurate a mano.
+    - question: Perché una query lunga sulla replica può fallire?
+      answer: >-
+        Perché l'applicazione del WAL può dover rimuovere versioni di riga che la query
+        sta ancora leggendo: la replica sceglie fra ritardare l'applicazione o
+        cancellare la query. `max_standby_streaming_delay` decide quanto può ritardare,
+        `hot_standby_feedback` dice al primario di non rimuovere le versioni ancora
+        servite - al prezzo di più bloat sul primario. È un compromesso da impostare
+        consapevolmente su una replica dedicata ai report.
+  related: [db-17-sharding-partitioning, db-13-acid, cache-23-consistency, dist-27-horizontal-vertical]
+  resources:
+    - title: "PostgreSQL - Hot Standby e replica in streaming"
+      url: "https://www.postgresql.org/docs/current/hot-standby.html"
+      kind: doc
+    - title: "PostgreSQL - Monitoring pg_stat_replication"
+      url: "https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-REPLICATION-VIEW"
+      kind: doc
+    - title: "PgBouncer - Connection pooling"
+      url: "https://www.pgbouncer.org/features.html"
+      kind: doc
 
 - id: db-19-duplicate-records
   title: Gestire i record duplicati
@@ -286,28 +1483,179 @@
   estimated_minutes: 25
   summary: >-
     I duplicati nascono quasi sempre da una race condition tra un controllo e una
-    scrittura, oppure da retry su operazioni non idempotenti. La difesa vera è un vincolo
-    nel database, non un if nel codice applicativo.
+    scrittura, oppure da retry su operazioni non idempotenti. La difesa vera è un
+    vincolo nel database, non un if nel codice applicativo.
+  deep_dive: |-
+    Il pattern `SELECT` poi `INSERT` è sbagliato per costruzione, e il motivo è
+    semplice: fra le due istruzioni esiste una finestra in cui un'altra transazione può
+    inserire la stessa riga. Non è una questione di livello di isolamento - nemmeno
+    SERIALIZABLE trasforma quel codice in corretto *senza* un vincolo, perché due
+    transazioni che non hanno letto la stessa riga esistente non hanno conflitto: il
+    problema è che la riga non c'era. L'unico arbitro affidabile è un indice unico:
+    quando due INSERT concorrenti arrivano, il database ne serializza una e fa fallire
+    l'altra.
+
+    Da qui la regola pratica: il vincolo nel database è la difesa, il controllo
+    applicativo è solo un modo per dare un messaggio di errore più gentile. Il codice
+    deve quindi gestire la violazione di unicità come un caso normale, non come un
+    errore 500 - in Postgres è SQLSTATE 23505.
+
+    Gran parte del lavoro reale non è tecnico ma di dominio: *cosa* significa
+    duplicato. Due email che differiscono per maiuscole sono lo stesso utente. Due
+    partite IVA con spazi diversi pure. La soluzione è normalizzare prima di
+    confrontare e mettere il vincolo sulla forma normalizzata - un indice unico su
+    `lower(email)`, o una colonna generata che contiene la forma canonica. Senza
+    questo, il vincolo esiste ma non serve a niente.
+
+    Per l'inserimento "crea se non esiste" esistono costrutti atomici: `INSERT ... ON
+    CONFLICT DO NOTHING/UPDATE` in Postgres, `INSERT IGNORE` e `ON DUPLICATE KEY
+    UPDATE` in MySQL, `MERGE` nello standard SQL. Sono preferibili a qualunque
+    controllo a mano, con un'avvertenza: `ON CONFLICT DO NOTHING` non restituisce la
+    riga esistente, quindi se serve l'id bisogna aggiungere una SELECT successiva o
+    usare `DO UPDATE` con un aggiornamento innocuo.
+
+    Per ripulire i duplicati già presenti lo strumento è la funzione finestra
+    `ROW_NUMBER() OVER (PARTITION BY chiave ORDER BY ...)`: si numerano le righe dentro
+    ogni gruppo e si cancella tutto ciò che ha numero maggiore di uno. Va fatto a lotti
+    su tabelle grandi, e *dopo* aver creato il vincolo in modo che non ne arrivino di
+    nuovi nel frattempo (in Postgres si può creare l'indice unico CONCURRENTLY e poi
+    promuoverlo a constraint).
+
+    Infine i sistemi a messaggi, dove i duplicati non sono un incidente ma la norma:
+    la consegna è at-least-once, quindi il consumatore deve essere idempotente o
+    deduplicare. La forma più semplice è una tabella dei messaggi processati con chiave
+    l'identificatore del messaggio, scritta nella stessa transazione dell'effetto: se
+    il messaggio ritorna, l'inserimento fallisce e il consumatore salta.
   key_points:
     - "Il pattern SELECT-then-INSERT è una race: due richieste parallele passano entrambe il controllo"
     - "UNIQUE constraint è l'unica difesa affidabile: è il database a serializzare"
+    - "La violazione di unicità va gestita come caso normale (SQLSTATE 23505 in Postgres), non come errore 500"
     - "INSERT ... ON CONFLICT DO NOTHING/UPDATE (Postgres) o INSERT IGNORE / ON DUPLICATE KEY (MySQL) risolvono elegantemente l'upsert"
-    - "Per la deduplicazione logica serve una chiave naturale: email normalizzata, hash del contenuto, idempotency key"
-    - "Per ripulire duplicati esistenti: finestra ROW_NUMBER() OVER (PARTITION BY chiave ORDER BY id) e cancella dove rn > 1"
+    - "ON CONFLICT DO NOTHING non restituisce la riga esistente: se serve l'id, va previsto"
+    - "Per la deduplicazione logica serve una chiave naturale normalizzata: email in minuscolo, spazi rimossi, hash del contenuto"
+    - "Per ripulire duplicati esistenti: ROW_NUMBER() OVER (PARTITION BY chiave ORDER BY id) e cancella dove rn > 1, a lotti"
     - "Nei sistemi a messaggi la consegna è at-least-once: la deduplicazione a valle è obbligatoria"
+    - "Il registro dei messaggi processati va scritto nella stessa transazione dell'effetto, altrimenti non garantisce niente"
+  examples:
+    - title: Upsert atomico e vincolo sulla forma normalizzata
+      language: sql
+      code: |-
+        -- Il vincolo deve stare sulla forma canonica, non sul testo grezzo
+        CREATE UNIQUE INDEX idx_users_email_lower ON users (lower(btrim(email)));
+
+        -- Upsert: nessuna finestra di race, restituisce sempre la riga
+        INSERT INTO users (id, email, nome)
+        VALUES (:id, :email, :nome)
+        ON CONFLICT (lower(btrim(email)))
+        DO UPDATE SET nome = EXCLUDED.nome          -- aggiornamento innocuo per avere RETURNING
+        RETURNING id, (xmax = 0) AS creato_ora;
+      note: >-
+        Il trucco di `xmax = 0` distingue una vera INSERT da un UPDATE: utile quando il
+        chiamante deve sapere se ha creato o trovato.
+    - title: Ripulire i duplicati esistenti, in sicurezza
+      language: sql
+      code: |-
+        -- 1) Guarda cosa cancelleresti PRIMA di cancellare
+        WITH numerati AS (
+          SELECT id, lower(btrim(email)) AS chiave,
+                 row_number() OVER (PARTITION BY lower(btrim(email))
+                                    ORDER BY created_at, id) AS rn
+            FROM users
+        )
+        SELECT chiave, count(*) FROM numerati WHERE rn > 1 GROUP BY chiave ORDER BY 2 DESC;
+
+        -- 2) Cancella a lotti, per non tenere un lock enorme
+        DELETE FROM users u USING (
+          SELECT id FROM numerati WHERE rn > 1 LIMIT 5000
+        ) d WHERE u.id = d.id;
+      note: >-
+        L'ordine dentro PARTITION BY decide quale riga sopravvive: qui la più vecchia.
+        Prima di cancellare va deciso cosa fare delle righe collegate ai duplicati.
+    - title: Consumatore di coda idempotente
+      language: python
+      code: |-
+        async def consuma(messaggio, conn):
+            async with conn.transaction():
+                try:
+                    await conn.execute(
+                        "INSERT INTO messaggi_processati (id, processato_il) VALUES ($1, now())",
+                        messaggio.id,
+                    )
+                except asyncpg.UniqueViolationError:
+                    return                      # già visto: salta, non è un errore
+                await applica_effetto(conn, messaggio)   # stessa transazione
+      note: >-
+        Registro ed effetto nella stessa transazione: se separati, il processo può morire
+        in mezzo e si ottiene o un effetto doppio o un messaggio perso.
+  trade_offs:
+    - option: Vincolo unique + gestione dell'eccezione
+      pros: Difesa reale, semplice, funziona sotto qualunque concorrenza
+      cons: Richiede di normalizzare la chiave e di gestire l'errore
+      when: Sempre, come base
+    - option: Upsert (ON CONFLICT)
+      pros: Atomico, una sola andata e ritorno, nessun errore da gestire
+      cons: Semantica di aggiornamento da decidere, RETURNING con qualche accortezza
+      when: Quando la logica voluta è creare se non esiste
+    - option: Deduplicazione applicativa (cache dei visti)
+      pros: Protegge anche da duplicati non rappresentabili come vincolo
+      cons: Non è una garanzia, la cache scade e può perdere voci
+      when: Filtro preliminare, mai come unica difesa
+  numbers:
+    - "SQLSTATE 23505 = unique_violation: è l'errore da intercettare"
+    - "Pulizia a lotti: 1.000-10.000 righe per transazione tengono i lock corti e il WAL sotto controllo"
+    - "Una tabella di messaggi processati con TTL di 7 giorni copre praticamente tutti i replay di un broker"
   interview_answer: >-
     Parto dal presupposto che il controllo applicativo non basti: tra la SELECT che verifica
     l'assenza e la INSERT c'è una finestra in cui un'altra richiesta può inserire lo stesso
     record. Quindi metto un vincolo UNIQUE sulla chiave naturale e gestisco l'eccezione,
     oppure uso direttamente un upsert con ON CONFLICT. Il lavoro vero di solito è definire
     cosa significa duplicato: se è l'email, va normalizzata prima, altrimenti Mario@x.it e
-    mario@x.it convivono e il vincolo non serve a niente.
+    mario@x.it convivono e il vincolo non serve a niente. Sui consumatori di code il
+    ragionamento è lo stesso ma più stringente, perché la consegna è at-least-once per
+    progetto: tengo un registro dei messaggi già processati e lo scrivo nella stessa
+    transazione dell'effetto.
+  senior_signals:
+    - "Dice che il vincolo è la difesa e il controllo applicativo è solo cortesia"
+    - "Porta subito il tema della normalizzazione della chiave naturale"
+    - "Gestisce la violazione di unicità come flusso normale, con il suo SQLSTATE"
+    - "Sulla pulizia propone lotti e ordine esplicito di quale riga sopravvive"
   pitfalls:
     - "Fidarsi del SELECT-then-INSERT sotto concorrenza"
     - "Vincolo unique su un campo non normalizzato"
     - "Consumatori di code senza deduplicazione, con consegna at-least-once"
-  follow_up_questions:
-    - "Come deduplichi messaggi in un consumer Kafka?"
+    - "Cancellare i duplicati senza decidere che fine fanno le righe che li referenziano"
+    - "Registrare il messaggio come processato in una transazione diversa da quella dell'effetto"
+  follow_ups:
+    - question: Come deduplichi messaggi in un consumer Kafka?
+      answer: >-
+        Uso una chiave di deduplicazione stabile - l'id del messaggio o una chiave di
+        business - e la scrivo in una tabella con vincolo unico nella stessa transazione
+        dell'effetto: se il messaggio ritorna, la INSERT fallisce e salto. Se l'effetto è
+        su un sistema esterno non transazionale, sposto il confine usando l'outbox o
+        rendendo idempotente l'operazione remota. Il registro ha un TTL più lungo della
+        finestra di replay del broker.
+    - question: Un vincolo unique su tre colonne rallenta le scritture?
+      answer: >-
+        Come qualunque indice, sì, di poco: una scrittura in più su un B-tree. Il costo
+        reale da guardare è un altro: sotto alta concorrenza sulla stessa chiave, le
+        transazioni si serializzano su quella voce dell'indice. È il comportamento
+        voluto - è proprio ciò che impedisce il duplicato - ma va tenuto presente se
+        quella chiave è molto calda.
+    - question: E se il duplicato è "logico" e non esprimibile come vincolo?
+      answer: >-
+        Per esempio due ordini identici a un minuto di distanza. Allora si costruisce una
+        chiave artificiale che catturi la regola - hash dei campi rilevanti più una
+        finestra temporale arrotondata - e si mette il vincolo su quella. Se la regola è
+        davvero sfumata, si accetta il duplicato e si dà agli operatori uno strumento di
+        merge: è meglio di un vincolo che a volte blocca ordini legittimi.
+  related: [core-10-idempotency, db-14-transactions-isolation, rel-31-delivery-semantics, db-20-locking]
+  resources:
+    - title: "PostgreSQL - INSERT ... ON CONFLICT"
+      url: "https://www.postgresql.org/docs/current/sql-insert.html#SQL-ON-CONFLICT"
+      kind: doc
+    - title: "PostgreSQL - Codici di errore (classe 23)"
+      url: "https://www.postgresql.org/docs/current/errcodes-appendix.html"
+      kind: doc
 
 - id: db-20-locking
   title: Locking ottimistico vs pessimistico
@@ -320,26 +1668,182 @@
     Il locking pessimistico blocca la risorsa prima di modificarla, assumendo che il
     conflitto sia probabile. Quello ottimistico non blocca nulla e verifica al momento
     della scrittura che nessuno abbia modificato il dato nel frattempo.
+  deep_dive: |-
+    La scelta dipende da un numero: la probabilità di conflitto. Se due transazioni si
+    contendono la stessa riga di rado, bloccare in anticipo costa contesa inutile, e
+    conviene l'approccio ottimistico: si legge, si lavora, e al momento della scrittura
+    si verifica che la versione sia ancora quella letta. Se invece il conflitto è la
+    norma - l'ultimo posto disponibile, il contatore caldo - l'ottimistico degenera in
+    una tempesta di retry, e conviene serializzare esplicitamente con un lock.
+
+    L'ottimistico si implementa con una colonna `version` (o `updated_at`, meno
+    robusto) inclusa nella clausola WHERE: `UPDATE ... SET ..., version = version + 1
+    WHERE id = :id AND version = :version_letta`. Se il conteggio delle righe aggiornate
+    è zero, qualcuno ha scritto prima: si segnala il conflitto all'utente invece di
+    sovrascriverlo in silenzio. È la stessa idea di `If-Match`/ETag in HTTP, ed è
+    l'unica strategia praticabile quando la modifica si estende su più richieste - un
+    form aperto in una scheda del browser per dieci minuti non può tenere una
+    transazione aperta.
+
+    Il pessimistico in SQL è `SELECT ... FOR UPDATE`, che blocca le righe lette fino al
+    termine della transazione. Due varianti sono molto utili e poco conosciute:
+    `NOWAIT`, che fallisce subito invece di attendere (utile per dare all'utente un
+    messaggio immediato), e soprattutto `SKIP LOCKED`, che salta le righe già bloccate.
+    Quest'ultima trasforma una tabella in una coda di lavoro efficiente: N worker
+    prendono ciascuno righe diverse senza mettersi in fila, senza bisogno di un broker.
+
+    I deadlock nascono quando due transazioni acquisiscono gli stessi lock in ordine
+    opposto. Il database li rileva e ne aborta una (in Postgres SQLSTATE 40P01), quindi
+    non bloccano il sistema, ma vanno ridotti: la regola è acquisire i lock sempre nello
+    stesso ordine - per esempio ordinando gli id prima di aggiornarli - e tenere le
+    transazioni corte. Un'alternativa per la mutua esclusione applicativa sono gli
+    advisory lock, che bloccano un numero scelto da noi invece che una riga: comodi per
+    garantire che un certo job giri una volta sola.
+
+    Due regole operative valgono più di tutta la teoria. Primo: mai tenere un lock
+    durante una chiamata di rete, perché la latenza di qualcun altro diventa contesa
+    sul proprio database. Secondo: bloccare l'insieme di righe più piccolo possibile e
+    per il tempo più breve possibile: la contesa cresce con il prodotto fra durata e
+    numero di righe coinvolte.
   key_points:
     - "Pessimistico: SELECT ... FOR UPDATE. Sicuro, ma serializza gli accessi e può generare deadlock"
-    - "Ottimistico: colonna version o updated_at, UPDATE ... WHERE id=? AND version=?. Se aggiorna 0 righe c'è stato conflitto"
+    - "Ottimistico: colonna version, UPDATE ... WHERE id=? AND version=?. Se aggiorna 0 righe c'è stato conflitto"
     - "Ottimistico conviene con pochi conflitti: nessun lock tenuto, throughput alto"
     - "Pessimistico conviene con molti conflitti: il retry continuo dell'ottimistico costerebbe di più"
     - "Con l'ottimistico serve sempre una politica di retry e un messaggio sensato per l'utente"
-    - "L'ottimistico è anche l'unica opzione realistica quando la transazione attraversa più richieste HTTP (lost update su form web)"
+    - "L'ottimistico è l'unica opzione realistica quando la transazione attraversa più richieste HTTP (lost update su form web)"
+    - "FOR UPDATE SKIP LOCKED trasforma una tabella in una coda di lavoro: N worker, nessuna fila"
+    - "FOR UPDATE NOWAIT fallisce subito invece di attendere: utile per rispondere all'utente senza bloccarlo"
+    - "I deadlock vengono rilevati e abortiti dal database (SQLSTATE 40P01): si prevengono con un ordine di acquisizione coerente"
+    - "Gli advisory lock bloccano un identificatore scelto dall'applicazione, non una riga: utili per i job singleton"
+  examples:
+    - title: Locking ottimistico, con il conflitto che arriva all'utente
+      language: sql
+      code: |-
+        -- La versione letta viaggia fino al client (in un campo nascosto o in un ETag)
+        SELECT id, bio, version FROM profili WHERE id = :id;
+
+        -- Al salvataggio: se qualcuno ha scritto prima, zero righe aggiornate
+        UPDATE profili
+           SET bio = :bio, version = version + 1
+         WHERE id = :id AND version = :version_letta;
+        -- rowcount = 0  ->  409 Conflict: "qualcun altro ha modificato questo profilo"
+      note: >-
+        Senza la condizione sulla versione si ha il lost update classico: l'ultimo che
+        salva cancella il lavoro dell'altro, e nessuno dei due se ne accorge.
+    - title: "Coda di lavoro con SKIP LOCKED: niente broker, niente fila"
+      language: sql
+      code: |-
+        -- Ogni worker prende righe diverse: le già bloccate vengono saltate
+        WITH prossimo AS (
+          SELECT id FROM jobs
+           WHERE stato = 'pending' AND esegui_dopo <= now()
+           ORDER BY priorita DESC, id
+           FOR UPDATE SKIP LOCKED
+           LIMIT 10
+        )
+        UPDATE jobs j
+           SET stato = 'running', preso_da = :worker, preso_il = now()
+          FROM prossimo p
+         WHERE j.id = p.id
+        RETURNING j.*;
+      note: >-
+        Con un indice parziale su (esegui_dopo) WHERE stato='pending' questa query resta
+        veloce anche con milioni di job archiviati. È il pattern dietro molte code
+        "senza Kafka".
+    - title: Deadlock e come si evita
+      language: python
+      code: |-
+        # A rischio: due trasferimenti incrociati bloccano in ordine opposto.
+        async def trasferisci(conn, da: int, a: int, importo: int):
+            async with conn.transaction():
+                await conn.execute("SELECT * FROM conti WHERE id = $1 FOR UPDATE", da)
+                await conn.execute("SELECT * FROM conti WHERE id = $1 FOR UPDATE", a)
+                ...
+
+        # Sicuro: ordine di acquisizione coerente (sempre per id crescente).
+        async def trasferisci(conn, da: int, a: int, importo: int):
+            primo, secondo = sorted((da, a))
+            async with conn.transaction():
+                await conn.execute(
+                    "SELECT * FROM conti WHERE id = ANY($1) ORDER BY id FOR UPDATE",
+                    [primo, secondo],
+                )
+                ...
+      note: >-
+        Il deadlock non è un guasto: il database lo rileva e aborta una transazione. Ma
+        ogni abort è lavoro buttato, e sotto carico si vede.
+  trade_offs:
+    - option: Ottimistico (colonna version)
+      pros: Nessun lock tenuto, ottimo throughput, funziona fra più richieste HTTP
+      cons: Serve retry o messaggio di conflitto; inefficiente se i conflitti sono frequenti
+      when: Modifiche da interfaccia utente, conflitti rari
+    - option: Pessimistico (FOR UPDATE)
+      pros: Nessun retry, semantica semplice da ragionare
+      cons: Serializza, rischio deadlock, pessimo se la transazione è lunga
+      when: Contesa alta su poche righe (stock, posti, saldi)
+    - option: FOR UPDATE SKIP LOCKED
+      pros: Parallelismo reale su una coda, nessun broker aggiuntivo
+      cons: Solo per pattern a coda, richiede indice adatto e gestione dei job bloccati
+      when: Job queue dentro il database relazionale
+    - option: Advisory lock
+      pros: Mutua esclusione su un concetto, non su una riga; economico
+      cons: Non legato ai dati, va rilasciato con attenzione
+      when: Job singleton, migrazioni, sezioni critiche applicative
+  numbers:
+    - "SQLSTATE 40P01 = deadlock_detected; Postgres controlla dopo deadlock_timeout, di default 1 secondo"
+    - "Con l'ottimistico, un tasso di conflitto sopra il 10-20% è il segnale che conviene passare al pessimistico"
+    - "lock_timeout impostato a pochi secondi evita che una richiesta resti appesa indefinitamente in attesa di un lock"
   interview_answer: >-
     Scelgo in base alla probabilità di conflitto. Su un form di modifica profilo uso
-    l'ottimistico con un numero di versione: l'update ha la versione nella clausola WHERE e
-    se torna zero righe so che qualcun altro ha salvato nel frattempo, quindi avviso
+    l'ottimistico con un numero di versione: l'update ha la versione nella clausola WHERE
+    e se torna zero righe so che qualcun altro ha salvato nel frattempo, quindi avviso
     l'utente invece di sovrascrivere silenziosamente. Su qualcosa come la prenotazione
     dell'ultimo posto disponibile, dove i conflitti sono la norma, uso il pessimistico con
     SELECT FOR UPDATE, perché con l'ottimistico avrei una tempesta di retry. L'ottimistico
     è comunque l'unica opzione quando la modifica si estende su più richieste HTTP, perché
-    non posso tenere una transazione aperta mentre l'utente compila un form.
+    non posso tenere una transazione aperta mentre l'utente compila un form. E se il
+    problema è una coda di lavoro uso FOR UPDATE SKIP LOCKED, che mi dà N worker paralleli
+    senza aggiungere un broker.
+  senior_signals:
+    - "Sceglie in base al tasso di conflitto atteso e lo dice esplicitamente"
+    - "Conosce SKIP LOCKED e NOWAIT, non solo FOR UPDATE"
+    - "Collega il locking ottimistico a If-Match/ETag lato HTTP"
+    - "Previene i deadlock con l'ordine di acquisizione invece di limitarsi a ritentare"
   pitfalls:
     - "Lock pessimistici tenuti durante chiamate di rete: latenza altrui che diventa contesa tua"
     - "Ottimistico senza gestione del conflitto: l'update fallisce in silenzio"
     - "Ordine di acquisizione dei lock non coerente tra transazioni: deadlock"
-  follow_up_questions:
-    - "Come previeni i deadlock con il locking pessimistico?"
-    - "Cos'è il lost update e quale strategia lo previene?"
+    - "Usare updated_at come versione: due scritture nello stesso millisecondo e il controllo salta"
+    - "Coda implementata con SELECT ... LIMIT 1 senza SKIP LOCKED: i worker si mettono in fila e il parallelismo sparisce"
+  follow_ups:
+    - question: Come previeni i deadlock con il locking pessimistico?
+      answer: >-
+        Acquisendo i lock sempre nello stesso ordine - il modo più semplice è ordinare
+        gli identificatori prima di bloccarli - tenendo le transazioni corte e
+        bloccando il minor numero possibile di righe. Aggiungo `lock_timeout` così una
+        richiesta non resta appesa, e tratto il deadlock rilevato come un errore
+        ritentabile, perché anche con tutte le precauzioni può capitare.
+    - question: Cos'è il lost update e quale strategia lo previene?
+      answer: >-
+        È quando due transazioni leggono lo stesso valore, lo modificano entrambe e la
+        seconda sovrascrive la prima senza accorgersene: il lavoro del primo sparisce
+        in silenzio. Lo previene il locking ottimistico con controllo di versione, che
+        fa fallire la seconda scrittura, oppure il pessimistico con FOR UPDATE, che
+        impedisce la lettura concorrente. In HTTP l'equivalente è `If-Match` con ETag e
+        la risposta 412.
+    - question: Meglio una coda nel database o un broker dedicato?
+      answer: >-
+        Se il volume è moderato e voglio transazionalità con i dati applicativi, la coda
+        nel database con SKIP LOCKED è imbattibile per semplicità: stessa transazione,
+        stesso backup, nessun componente in più. Passo a un broker quando servono
+        throughput molto alti, fan-out verso più consumatori, ritenzione e replay, o
+        quando i consumatori sono servizi diversi che non devono condividere il database.
+  related: [db-14-transactions-isolation, rel-33-race-conditions, rel-34-distributed-locking, core-03-http-methods]
+  resources:
+    - title: "PostgreSQL - SELECT FOR UPDATE, SKIP LOCKED"
+      url: "https://www.postgresql.org/docs/current/sql-select.html#SQL-FOR-UPDATE-SHARE"
+      kind: doc
+    - title: "PostgreSQL - Advisory Locks"
+      url: "https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS"
+      kind: doc
