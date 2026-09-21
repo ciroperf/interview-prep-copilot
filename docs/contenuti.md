@@ -133,13 +133,44 @@ storage per evitare duplicati.
 ### A mano, direttamente nei file
 
 I file sono caricati per glob: `topics_*.yaml` per gli argomenti,
-`questions_*.yaml` per le domande, `problems.yaml` per gli esercizi. Puoi
-crearne di nuovi senza registrarli da nessuna parte.
+`questions_*.yaml` per le domande, `problems.yaml` per gli esercizi e
+`packs.yaml` per i percorsi. Puoi crearne di nuovi senza registrarli da nessuna
+parte.
 
 ```bash
 $EDITOR backend/app/content/topics_miei.yaml
 cd backend && pytest tests/test_knowledge.py -q
 ```
+
+## Aggiungere un percorso
+
+Un percorso raggruppa argomenti già esistenti su un macroargomento e ci
+aggiunge le fonti da cui approfondire. Vive in `packs.yaml`:
+
+```yaml
+- id: pack-kubernetes
+  title: Kubernetes da colloquio
+  subtitle: Pod, servizi, deploy e cosa si rompe davvero
+  summary: >-
+    Due o tre frasi su cosa copre il percorso e in che ordine.
+  for_whom: A chi serve e a chi no.
+  level: medium              # easy | medium | hard
+  tags: [kubernetes, cloud]
+  prerequisites:
+    - Fondamenti di container
+  topic_ids:                 # l'ordine è l'ordine di studio
+    - eng-03-cloud-basics
+  sources:
+    - title: Documentazione ufficiale di Kubernetes
+      url: https://kubernetes.io/docs/home/
+      kind: doc              # doc | book | repo | article | practice | video | course
+      note: >-
+        Il motivo per cui questa fonte vale il tempo che costa. Senza il
+        motivo la fonte è solo un link, e il percorso perde il suo scopo.
+```
+
+Un `topic_ids` che non esiste fa fallire il caricamento all'avvio: è voluto,
+così un refuso si scopre subito e non a pagina aperta.
 
 ## Collegare un termine a un argomento
 

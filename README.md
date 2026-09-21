@@ -24,6 +24,9 @@ hai davvero a disposizione.
   ci sta viene escluso, a partire da quello che conta meno.
 * **Prepara la scheda azienda** — settore, prodotti, processo di selezione
   tipico, punti da citare e domande intelligenti da fare.
+* **Ti dà un percorso** — 11 percorsi sui macroargomenti (i linguaggi, i dati,
+  i sistemi distribuiti, l'architettura…) con gli argomenti in ordine di studio
+  e le fonti da cui approfondire, ognuna motivata.
 * **Ti interroga** — 146 domande a risposta multipla sul catalogo, con le
   opzioni mescolate a ogni esecuzione e la spiegazione di ogni errore.
 * **Ti fa scrivere codice** — 14 problemi in stile colloquio con test, hint
@@ -36,19 +39,43 @@ hai davvero a disposizione.
 
 ## Contenuti
 
-**78 argomenti, 146 domande, 14 problemi di coding.**
+**93 argomenti, 11 percorsi di studio, 146 domande, 14 problemi di coding.**
 
 I 40 concetti backend fondamentali (API e HTTP, database, caching, sistemi
 distribuiti, affidabilità), 12 argomenti sui **pattern di strutturazione del
 codice** (layered, repository, service layer, DTO, dependency injection,
 esagonale, DDD, unit of work, GoF, organizzazione del progetto, CQRS, gestione
-degli errori), 14 di algoritmi e strutture dati, più system design,
-comportamentale, pratiche di ingegneria e linguaggi.
+degli errori), 14 di algoritmi e strutture dati, 15 dedicati ai **linguaggi**
+(Python e JavaScript/TypeScript, uno per macroargomento), più system design,
+comportamentale e pratiche di ingegneria.
 
-Ogni argomento ha una sintesi, i punti chiave, gli errori tipici, le possibili
-domande di approfondimento e — la parte che conta di più — una
-`interview_answer`: la risposta da dare a voce, in prima persona, con i
-compromessi espliciti.
+Ogni argomento ha una sintesi, la spiegazione lunga, i punti chiave, esempi
+commentati, una tabella di trade-off, numeri da citare, gli errori tipici, i
+segnali che distinguono un profilo senior, le domande di approfondimento con la
+risposta e — la parte che conta di più — una `interview_answer`: la risposta da
+dare a voce, in prima persona, con i compromessi espliciti.
+
+### Percorsi
+
+Un linguaggio, i dati o l'affidabilità non stanno in una scheda sola. Gli
+**11 percorsi** (`backend/app/content/packs.yaml`) mettono gli argomenti in
+ordine di studio e aggiungono le fonti da cui approfondire — documentazione
+ufficiale, libri di riferimento e repository di studio noti — ognuna con il
+motivo per cui vale il tempo che costa.
+
+| Percorso | Argomenti | Livello |
+| --- | --- | --- |
+| Fondamenti di API e backend | 10 | facile |
+| Dati, database e query | 10 | media |
+| Caching e prestazioni di lettura | 5 | media |
+| Sistemi distribuiti e affidabilità | 15 | difficile |
+| Architettura del codice | 12 | media |
+| Algoritmi e strutture dati | 14 | media |
+| System design | 11 | difficile |
+| Python da colloquio | 8 | media |
+| JavaScript e TypeScript da colloquio | 9 | media |
+| Pratica dell'ingegneria | 5 | media |
+| Colloquio, azienda e offerta | 3 | facile |
 
 ## Funziona anche senza AI
 

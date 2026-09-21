@@ -405,6 +405,33 @@ table.grid tbody tr:last-child th, table.grid tbody tr:last-child td { border-bo
 .followups details[open] summary { color: var(--accent); }
 .followups .prose { padding: 0 0 12px 22px; color: var(--text-muted); }
 
+/* Percorsi: la sequenza numerata è il contenuto, il numero va visto. */
+.pack-steps { list-style: none; counter-reset: passo; padding: 0; margin: 0; }
+.pack-steps > li {
+  counter-increment: passo;
+  position: relative;
+  padding: 0 0 16px 38px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.pack-steps > li:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.pack-steps > li::before {
+  content: counter(passo);
+  position: absolute; left: 0; top: 0;
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--bg-subtle); color: var(--accent);
+  font-size: 0.8rem; font-weight: 700;
+}
+.pack-steps > li > a { font-weight: 600; }
+
+.sources { list-style: none; padding: 0; margin: 0; }
+.source { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.source:first-child { padding-top: 0; }
+.source:last-child { border-bottom: none; padding-bottom: 0; }
+.source p { margin: 0; }
+
 @media (max-width: 680px) {
   table.grid { font-size: 0.86rem; }
   table.grid th, table.grid td { padding: 8px; }

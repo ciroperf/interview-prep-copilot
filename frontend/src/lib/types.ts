@@ -87,6 +87,40 @@ export interface Topic extends Omit<TopicSummary, 'question_count' | 'problem_co
   resources: Resource[]
 }
 
+/** Una fonte curata dentro un percorso: il `note` dice perché vale il tempo. */
+export interface PackSource {
+  title: string
+  url: string
+  kind: string
+  note: string
+}
+
+/** Un percorso in elenco: abbastanza per scegliere, senza scaricare tutto. */
+export interface PackSummary {
+  id: string
+  title: string
+  subtitle: string
+  summary: string
+  level: Difficulty
+  tags: string[]
+  topic_count: number
+  source_count: number
+  estimated_minutes: number
+}
+
+export interface KnowledgePack {
+  id: string
+  title: string
+  subtitle: string
+  summary: string
+  for_whom: string
+  level: Difficulty
+  tags: string[]
+  topic_ids: string[]
+  sources: PackSource[]
+  prerequisites: string[]
+}
+
 export interface TopicGap {
   term: string
   importance: number

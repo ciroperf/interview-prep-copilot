@@ -1,0 +1,787 @@
+# Percorsi di studio sui macroargomenti.
+#
+# Un linguaggio, i dati o l'affidabilità non stanno in una scheda sola: qui
+# ogni percorso mette gli argomenti in ordine di studio e ci aggiunge le fonti
+# da cui approfondire. Le fonti sono scelte, non elencate: per ognuna c'è il
+# motivo per cui vale il tempo che costa.
+
+- id: pack-python
+  title: Python da colloquio
+  subtitle: Dal modello a oggetti al GIL, fino a test e packaging
+  summary: >-
+    Il percorso che porta da "so scrivere Python" a "so spiegare perché Python si
+    comporta così". Parte dal modello a oggetti - tutto è un oggetto, i nomi sono
+    riferimenti - perché da lì discendono il default mutabile, l'identità, le copie
+    superficiali. Prosegue con memoria e garbage collection, poi con il GIL e la
+    scelta fra thread, processi e asyncio, che è la domanda più frequente su Python
+    a un colloquio backend. Chiude con typing, idiomi e prestazioni, test e
+    packaging: le cose che distinguono chi scrive script da chi manda codice in
+    produzione.
+  for_whom: >-
+    Per chi ha Python nell'annuncio come linguaggio principale. Se Python è solo uno
+    dei linguaggi citati, bastano i primi tre argomenti.
+  level: medium
+  tags: [python, linguaggi, backend, asyncio, performance]
+  prerequisites:
+    - Saper scrivere funzioni, classi e comprehension in Python
+  topic_ids:
+    - eng-06-python
+    - py-01-modello-oggetti
+    - py-02-memoria-gc
+    - py-03-gil-concorrenza
+    - py-04-asyncio
+    - py-05-tipi-e-typing
+    - py-06-idiomi-performance
+    - py-07-testing-packaging
+  sources:
+    - title: Documentazione ufficiale di Python - Language Reference
+      url: https://docs.python.org/3/reference/datamodel.html
+      kind: doc
+      note: >-
+        Il capitolo sul data model è la fonte per le domande sul modello a oggetti:
+        dice esattamente cosa fanno __eq__, __hash__, __slots__ e i descrittori. Da
+        leggere prima di qualsiasi articolo di terze parti.
+    - title: "Fluent Python, 2ª edizione (Luciano Ramalho, O'Reilly 2022)"
+      url: https://www.oreilly.com/library/view/fluent-python-2nd/9781492056348/
+      kind: book
+      note: >-
+        Il libro da leggere se ne leggi uno solo. Spiega il perché dietro gli idiomi,
+        non solo la sintassi; i capitoli su modello dati, sequenze e funzioni come
+        oggetti coprono da soli metà delle domande di un colloquio Python.
+    - title: "wtfpython (satwikkansal)"
+      url: https://github.com/satwikkansal/wtfpython
+      kind: repo
+      note: >-
+        Raccolta di frammenti che si comportano in modo inatteso, ognuno spiegato.
+        Vale come allenamento: molti sono esattamente i trabocchetti che si chiedono
+        al colloquio - default mutabili, interning degli interi, valutazione dei
+        default, chiusure nei cicli.
+    - title: "Il modulo asyncio nella documentazione ufficiale"
+      url: https://docs.python.org/3/library/asyncio-task.html
+      kind: doc
+      note: >-
+        La pagina su task e coroutine chiarisce i punti su cui si sbaglia in fretta:
+        create_task non trattiene un riferimento forte, la cancellazione passa per
+        CancelledError, gather e TaskGroup si comportano in modo diverso sugli errori.
+    - title: "High Performance Python, 2ª edizione (Gorelick e Ozsvald, O'Reilly)"
+      url: https://www.oreilly.com/library/view/high-performance-python/9781492055013/
+      kind: book
+      note: >-
+        Per le domande su prestazioni: profilare prima di ottimizzare, costo reale
+        delle strutture dati, quando uscire da Python puro. Utile soprattutto se
+        nell'annuncio compaiono dati o calcolo numerico.
+    - title: Documentazione di pytest
+      url: https://docs.pytest.org/en/stable/
+      kind: doc
+      note: >-
+        Le fixture con i loro scope sono l'argomento su cui si distingue chi ha
+        scritto davvero una suite di test. Leggere almeno la parte su fixture,
+        parametrizzazione e monkeypatch.
+    - title: Guida ufficiale di mypy
+      url: https://mypy.readthedocs.io/en/stable/
+      kind: doc
+      note: >-
+        Serve per rispondere con precisione sulla differenza fra tipi statici e
+        runtime: gli annotamenti non sono controllati dall'interprete, e la sezione
+        sul gradual typing spiega come introdurli in un progetto già esistente.
+
+- id: pack-javascript
+  title: JavaScript e TypeScript da colloquio
+  subtitle: Coercizione, closure, event loop, tipi e prestazioni
+  summary: >-
+    JavaScript viene chiesto quasi sempre sugli stessi punti: che cosa vale davvero
+    la coercizione, come funzionano closure e this, e in che ordine l'event loop
+    esegue le cose. Il percorso li affronta in quest'ordine e poi passa alla parte
+    che separa il frontend junior da quello senior: controllo della concorrenza sulle
+    promise, dimensione del bundle, confini di tipo con TypeScript e caccia alle
+    perdite di memoria. La sezione TypeScript insiste sul punto che conta a un
+    colloquio: i tipi sono strutturali e spariscono alla compilazione, quindi i dati
+    che arrivano da fuori vanno validati a runtime.
+  for_whom: >-
+    Per ruoli frontend, full stack o Node. Chi fa solo backend in un altro linguaggio
+    può fermarsi ai primi quattro argomenti.
+  level: medium
+  tags: [javascript, typescript, frontend, node, linguaggi]
+  prerequisites:
+    - Aver scritto almeno un'applicazione con JavaScript moderno
+  topic_ids:
+    - eng-07-javascript
+    - js-01-tipi-coercizione
+    - js-02-scope-closure-this
+    - js-03-prototipi-classi
+    - js-04-event-loop
+    - js-05-async-patterns
+    - js-06-moduli-bundling
+    - js-07-typescript
+    - js-08-performance-memoria
+  sources:
+    - title: "MDN Web Docs - JavaScript"
+      url: https://developer.mozilla.org/en-US/docs/Web/JavaScript
+      kind: doc
+      note: >-
+        La documentazione di riferimento, mantenuta e accurata. Le pagine su
+        uguaglianza, ereditarietà prototipale e modello di concorrenza sono quelle
+        da cui partire quando una risposta non convince.
+    - title: "You Don't Know JS Yet, 2ª edizione (Kyle Simpson)"
+      url: https://github.com/getify/You-Dont-Know-JS
+      kind: repo
+      note: >-
+        Serie di libri leggibile gratuitamente su GitHub. I volumi su scope e
+        closure e sui tipi sono il modo più rapido per smettere di considerare
+        "strano" il comportamento del linguaggio e iniziare a spiegarlo.
+    - title: "javascript-questions (Lydia Hallie)"
+      url: https://github.com/lydiahallie/javascript-questions
+      kind: repo
+      note: >-
+        Domande a scelta multipla con spiegazione, dal livello base a quello
+        avanzato. È l'allenamento più vicino a come le domande vengono poste
+        davvero in un colloquio: un frammento, e devi dire cosa stampa e perché.
+    - title: TypeScript Handbook
+      url: https://www.typescriptlang.org/docs/handbook/intro.html
+      kind: doc
+      note: >-
+        Il manuale ufficiale. I capitoli sul narrowing e sui tipi generici valgono
+        più di qualsiasi corso: coprono union discriminate, type guard e la
+        differenza fra unknown e any, che è una domanda ricorrente.
+    - title: "type-challenges"
+      url: https://github.com/type-challenges/type-challenges
+      kind: practice
+      note: >-
+        Esercizi risolvibili solo con il sistema di tipi. Bastano quelli di livello
+        easy e medium per arrivare a un colloquio sapendo scrivere una utility di
+        tipi invece di riconoscerla soltanto.
+    - title: "Node.js Best Practices (goldbergyoni)"
+      url: https://github.com/goldbergyoni/nodebestpractices
+      kind: repo
+      note: >-
+        Per i ruoli Node: gestione degli errori, struttura del progetto, sicurezza e
+        produzione, ogni voce con la motivazione. Utile per rispondere su come si
+        organizza un servizio, non solo su come si scrive una funzione.
+    - title: "Eloquent JavaScript, 4ª edizione (Marijn Haverbeke)"
+      url: https://eloquentjavascript.net/
+      kind: book
+      note: >-
+        Gratuito online. Serve a chi arriva da un altro linguaggio e ha bisogno di
+        una base ordinata prima di affrontare gli argomenti avanzati.
+
+- id: pack-api-backend
+  title: Fondamenti di API e backend
+  subtitle: HTTP, REST, autenticazione, idempotenza
+  summary: >-
+    Il nucleo di qualsiasi colloquio backend. Si parte da cosa sia davvero una API e
+    dalla scelta fra REST e GraphQL, si passa ai metodi e ai codici di stato - dove
+    le domande sono sempre sulle sfumature: PUT contro PATCH, 401 contro 403, 400
+    contro 422 - e si arriva al blocco su cui si gioca la differenza: stateless
+    contro stateful, sessioni contro JWT, OAuth 2.0 e OpenID Connect. Chiude con rate
+    limiting e idempotenza, cioè le due cose che vengono chieste appena la
+    conversazione tocca i pagamenti.
+  for_whom: >-
+    Per ogni ruolo backend o full stack, a qualsiasi livello. È il percorso da fare
+    per primo se l'annuncio parla di API.
+  level: easy
+  tags: [api, http, rest, autenticazione, backend]
+  prerequisites: []
+  topic_ids:
+    - core-01-what-is-an-api
+    - core-03-http-methods
+    - core-04-http-status-codes
+    - core-02-rest-vs-graphql
+    - core-05-stateless-vs-stateful
+    - core-06-authn-vs-authz
+    - core-07-sessions-vs-jwt
+    - core-08-oauth2
+    - core-09-rate-limiting-throttling
+    - core-10-idempotency
+  sources:
+    - title: "RFC 9110 - HTTP Semantics"
+      url: https://www.rfc-editor.org/rfc/rfc9110.html
+      kind: doc
+      note: >-
+        La specifica che ha sostituito le vecchie RFC 723x. È la fonte da citare
+        sulle proprietà dei metodi - sicuri, idempotenti, memorizzabili in cache - e
+        sul significato esatto dei codici di stato. Si consulta, non si legge tutta.
+    - title: "RFC 6749 - The OAuth 2.0 Authorization Framework"
+      url: https://www.rfc-editor.org/rfc/rfc6749.html
+      kind: doc
+      note: >-
+        Definisce i ruoli e i flussi. Va letta insieme a RFC 7636 (PKCE), perché il
+        flusso da citare oggi per applicazioni web e mobile è Authorization Code con
+        PKCE, non l'implicit flow che compare ancora nei tutorial vecchi.
+    - title: "RFC 7519 - JSON Web Token"
+      url: https://www.rfc-editor.org/rfc/rfc7519.html
+      kind: doc
+      note: >-
+        I claim registrati (iss, sub, aud, exp, nbf, iat, jti) e il loro significato.
+        Serve per rispondere sulla validazione corretta: algoritmo atteso, audience e
+        issuer verificati, non solo firma valida.
+    - title: "API Design Patterns (JJ Geewax, Manning)"
+      url: https://www.manning.com/books/api-design-patterns
+      kind: book
+      note: >-
+        Il libro più pratico su come si progetta una API che regge il tempo:
+        nomenclatura delle risorse, operazioni di lunga durata, paginazione,
+        versionamento. Utile per le domande aperte del tipo "come struttureresti
+        questa API".
+    - title: Stripe API - idempotenza
+      url: https://docs.stripe.com/api/idempotent_requests
+      kind: doc
+      note: >-
+        Un esempio reale e ben documentato di chiave di idempotenza: come viene
+        passata, per quanto vale, cosa succede se la stessa chiave arriva con un
+        corpo diverso. È l'esempio da portare quando la domanda riguarda i pagamenti.
+    - title: OWASP Cheat Sheet Series
+      url: https://cheatsheetseries.owasp.org/
+      kind: doc
+      note: >-
+        Le schede su autenticazione, gestione delle sessioni e REST security sono
+        brevi e concrete. Coprono la parte di risposta che gli intervistatori
+        apprezzano di più: cosa si sbaglia di solito e come si evita.
+
+- id: pack-dati
+  title: Dati, database e query
+  subtitle: Modellazione, indici, transazioni, scalabilità delle letture
+  summary: >-
+    Il percorso sul livello dove finiscono quasi tutti i problemi di prestazioni. Si
+    apre con la scelta fra SQL e NoSQL - che al colloquio va motivata sul modello di
+    accesso, non sulla moda - e con gli indici, l'argomento su cui si misura subito
+    se si è letto un piano di esecuzione o no. Poi ACID, isolamento e anomalie
+    (letture sporche, non ripetibili, phantom), perché "usiamo le transazioni" non è
+    una risposta finché non si dice a quale livello. Chiude con normalizzazione,
+    paginazione, sharding, repliche, duplicati e locking.
+  for_whom: >-
+    Per ruoli backend e data. Se nell'annuncio compaiono PostgreSQL, MySQL o
+    "ottimizzazione di query", è il percorso a priorità più alta.
+  level: medium
+  tags: [database, sql, indici, transazioni, scalabilità]
+  prerequisites:
+    - Saper scrivere una query con JOIN e GROUP BY
+  topic_ids:
+    - db-11-sql-vs-nosql
+    - db-13-acid
+    - db-12-indexes
+    - db-14-transactions-isolation
+    - db-20-locking
+    - db-15-normalization
+    - db-16-pagination
+    - db-19-duplicate-records
+    - db-18-read-replicas
+    - db-17-sharding-partitioning
+  sources:
+    - title: "Use The Index, Luke! (Markus Winand)"
+      url: https://use-the-index-luke.com/
+      kind: book
+      note: >-
+        Edizione web gratuita di "SQL Performance Explained". È la fonte migliore
+        sugli indici: spiega perché l'ordine delle colonne in un indice composito
+        conta, quando un indice viene ignorato, cosa cambia con LIKE e funzioni sulla
+        colonna. Vale per PostgreSQL, MySQL, Oracle, SQL Server e DB2.
+    - title: "Designing Data-Intensive Applications (Martin Kleppmann, O'Reilly)"
+      url: https://dataintensive.net/
+      kind: book
+      note: >-
+        Il riferimento su transazioni, isolamento e replica. Il capitolo 7 è la
+        spiegazione più chiara in circolazione delle anomalie di isolamento e della
+        differenza fra snapshot isolation e serializable.
+    - title: Documentazione di PostgreSQL - Performance Tips
+      url: https://www.postgresql.org/docs/current/performance-tips.html
+      kind: doc
+      note: >-
+        Come si legge davvero un EXPLAIN ANALYZE: righe stimate contro righe reali,
+        lavoro scartato dal filtro, quando un sequential scan è la scelta giusta.
+        Anche chi usa un altro database ci trova il modello mentale corretto.
+    - title: "Database Internals (Alex Petrov, O'Reilly 2019)"
+      url: https://www.databass.dev/
+      kind: book
+      note: >-
+        Per andare sotto la superficie: B-tree contro LSM-tree, come è fatto un
+        motore di storage, consenso e replica. Serve se si punta a ruoli senior dove
+        la domanda diventa "perché questo database si comporta così".
+    - title: "SQL Antipatterns (Bill Karwin, Pragmatic Bookshelf)"
+      url: https://pragprog.com/titles/bksap1/sql-antipatterns/
+      kind: book
+      note: >-
+        Catalogo degli errori di modellazione ricorrenti - liste in una colonna,
+        alberi gestiti male, chiavi naturali sbagliate - ognuno con la soluzione.
+        Utile per le domande su schema design.
+
+- id: pack-caching
+  title: Caching e prestazioni di lettura
+  subtitle: Dove mettere la cache, come invalidarla, quando fa danni
+  summary: >-
+    La cache è la risposta più data e meno motivata nei colloqui. Il percorso la
+    rimette in ordine: prima dove può stare - client, CDN, reverse proxy,
+    applicazione, database - perché ogni livello ha un costo di invalidazione
+    diverso; poi le politiche di eviction e la differenza pratica fra TTL, LRU e LFU.
+    La parte che fa la differenza è quella sulla coerenza: dati stantii, thundering
+    herd, cache stampede, e i casi in cui una cache non rende il sistema più lento ma
+    proprio sbagliato.
+  for_whom: >-
+    Per chiunque debba rispondere a "come lo rendi più veloce". Da fare dopo il
+    percorso sui dati, non prima.
+  level: medium
+  tags: [caching, prestazioni, cdn, redis]
+  prerequisites:
+    - Aver chiaro cosa fa un indice e dove nasce la lentezza di una query
+  topic_ids:
+    - cache-21-what-and-where
+    - cache-22-eviction
+    - cache-23-consistency
+    - cache-24-cdn
+    - cache-25-cache-danger
+  sources:
+    - title: "RFC 9111 - HTTP Caching"
+      url: https://www.rfc-editor.org/rfc/rfc9111.html
+      kind: doc
+      note: >-
+        La specifica delle direttive Cache-Control e della rivalidazione con ETag e
+        Last-Modified. Va consultata per rispondere con precisione su no-store contro
+        no-cache e su cosa significa davvero stale-while-revalidate.
+    - title: "MDN - HTTP caching"
+      url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching
+      kind: doc
+      note: >-
+        La stessa materia della RFC ma leggibile, con gli esempi di header. È il modo
+        più rapido per fissare la differenza fra cache privata e condivisa.
+    - title: "Scaling Memcache at Facebook (NSDI 2013)"
+      url: https://www.usenix.org/system/files/conference/nsdi13/nsdi13-final170_update.pdf
+      kind: article
+      note: >-
+        Il paper da citare sul thundering herd e sulle lease: descrive problemi reali
+        di una cache a quella scala e le soluzioni adottate. Bastano le prime sezioni
+        per avere esempi concreti da portare al colloquio.
+    - title: Documentazione di Redis - strategie di eviction
+      url: https://redis.io/docs/latest/develop/reference/eviction/
+      kind: doc
+      note: >-
+        Le policy reali (allkeys-lru, volatile-ttl, allkeys-lfu) e come funziona
+        l'approssimazione dell'LRU. Utile perché la domanda "LRU o LFU" si risolve
+        citando cosa offre davvero lo strumento che si userebbe.
+
+- id: pack-distribuiti
+  title: Sistemi distribuiti e affidabilità
+  subtitle: Scalare, comunicare fra servizi, sopravvivere ai guasti
+  summary: >-
+    Il percorso più lungo, e quello che pesa di più dal livello mid in su. Prima
+    parte: come si distribuisce il carico e come si comunica - load balancing,
+    scaling orizzontale, microservizi contro monolite, sincrono contro asincrono,
+    code di messaggi. Seconda parte: cosa succede quando qualcosa si rompe, che è il
+    vero contenuto di un colloquio senior - semantiche di consegna, retry con
+    timeout e circuit breaker, race condition, lock distribuiti, saga, degrado
+    graduale, observability, strategie di deploy e picchi di traffico.
+  for_whom: >-
+    Per ruoli mid e senior, e per chiunque abbia "microservizi", "Kafka" o "alta
+    disponibilità" nell'annuncio.
+  level: hard
+  tags: [distribuiti, affidabilità, microservizi, sre, code]
+  prerequisites:
+    - Fondamenti di API e backend
+    - Nozioni di transazioni e repliche
+  topic_ids:
+    - dist-27-horizontal-vertical
+    - dist-26-load-balancing
+    - dist-28-microservices-monolith
+    - dist-29-service-communication
+    - dist-30-message-queues
+    - rel-31-delivery-semantics
+    - rel-32-retries-timeouts-breakers
+    - rel-33-race-conditions
+    - rel-34-distributed-locking
+    - rel-35-event-driven
+    - rel-36-saga
+    - rel-37-graceful-degradation
+    - rel-38-observability
+    - rel-39-deployments
+    - rel-40-traffic-spikes
+  sources:
+    - title: "Designing Data-Intensive Applications (Martin Kleppmann, O'Reilly)"
+      url: https://dataintensive.net/
+      kind: book
+      note: >-
+        Il libro di riferimento del settore. I capitoli 8 e 9 - problemi dei sistemi
+        distribuiti, consistenza e consenso - contengono la maggior parte delle
+        risposte che un colloquio senior si aspetta, compreso perché "exactly-once"
+        vada riformulato prima di prometterlo.
+    - title: "Site Reliability Engineering (Google)"
+      url: https://sre.google/books/
+      kind: book
+      note: >-
+        Gratuito online, tutti e tre i volumi. I capitoli su SLO ed error budget, sul
+        carico in sovraccarico e sulle cascate di guasti danno il vocabolario giusto
+        per parlare di affidabilità senza restare sul generico.
+    - title: "Amazon Builders' Library"
+      url: https://aws.amazon.com/builders-library/
+      kind: article
+      note: >-
+        Articoli brevi scritti da ingegneri AWS su problemi concreti. Quello su
+        timeout, retry e backoff con jitter è il migliore in assoluto sul perché i
+        retry senza jitter sincronizzano i client e affondano un servizio che stava
+        riprendendosi.
+    - title: "Release It!, 2ª edizione (Michael Nygard, Pragmatic Bookshelf)"
+      url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+      kind: book
+      note: >-
+        Da qui vengono i nomi che si usano ai colloqui: circuit breaker, bulkhead,
+        fail fast. I capitoli su antipattern e pattern di stabilità sono la fonte
+        originale, non una rielaborazione.
+    - title: "microservices.io (Chris Richardson)"
+      url: https://microservices.io/patterns/index.html
+      kind: article
+      note: >-
+        Catalogo dei pattern per i microservizi con i trade-off espliciti: saga,
+        outbox transazionale, API composition, CQRS. Utile per rispondere con il nome
+        corretto del pattern e non solo con la descrizione.
+    - title: "Documentazione di Apache Kafka - Design"
+      url: https://kafka.apache.org/documentation/#design
+      kind: doc
+      note: >-
+        Spiega partizioni, offset, gruppi di consumatori e garanzie di ordinamento
+        alla fonte. Serve per la domanda ricorrente su come si ottiene l'ordine e
+        perché è garantito solo dentro una partizione.
+    - title: "Jepsen"
+      url: https://jepsen.io/analyses
+      kind: article
+      note: >-
+        Analisi che mettono alla prova le garanzie dichiarate dai database
+        distribuiti. Citarne una è il modo più rapido per mostrare che si distingue
+        fra ciò che un sistema promette e ciò che fa sotto partizione di rete.
+
+- id: pack-architettura
+  title: Architettura del codice
+  subtitle: Livelli, dipendenze, dominio e confini
+  summary: >-
+    Il percorso su come si organizza un'applicazione perché resti modificabile. Parte
+    dall'architettura a livelli e dai pattern che la compongono - repository, service
+    layer, DTO ed entity, dependency injection - e arriva ai modelli che invertono le
+    dipendenze: esagonale, Clean Architecture, DDD tattico. Poi Unit of Work e
+    confini transazionali, i design pattern che si usano davvero, l'organizzazione
+    delle cartelle, CQRS e la gestione degli errori. È il percorso che trasforma
+    "conosco i pattern" in "so dire quale problema risolve questo pattern e quale
+    prezzo fa pagare".
+  for_whom: >-
+    Per ruoli mid e senior, e per ogni colloquio in cui si chiede di commentare o
+    rivedere del codice.
+  level: medium
+  tags: [architettura, pattern, ddd, clean-code, design]
+  prerequisites:
+    - Aver lavorato su un progetto con più di qualche migliaio di righe
+  topic_ids:
+    - pat-01-layered-architecture
+    - pat-02-repository
+    - pat-03-service-layer
+    - pat-04-dto-entity-model
+    - pat-05-dependency-injection
+    - pat-08-unit-of-work
+    - pat-12-error-handling
+    - pat-06-hexagonal-clean
+    - pat-07-ddd-tactical
+    - pat-11-cqrs
+    - pat-09-gof-patterns
+    - pat-10-project-structure
+  sources:
+    - title: "Patterns of Enterprise Application Architecture (Martin Fowler)"
+      url: https://martinfowler.com/eaaCatalog/
+      kind: book
+      note: >-
+        Il catalogo da cui vengono i nomi Repository, Unit of Work, Service Layer,
+        Data Mapper. Le schede online sono gratuite e sufficienti per rispondere con
+        la definizione corretta invece che con l'uso che se ne fa nel proprio
+        framework.
+    - title: "Architecture Patterns with Python (Percival e Gregory)"
+      url: https://www.cosmicpython.com/
+      kind: book
+      note: >-
+        Gratuito online. Costruisce una sola applicazione passo dopo passo
+        introducendo repository, unit of work, message bus, CQRS e DDD: è il modo più
+        rapido per vedere i pattern come codice invece che come diagrammi.
+    - title: "Refactoring Guru - Design Patterns"
+      url: https://refactoring.guru/design-patterns
+      kind: article
+      note: >-
+        Spiegazione dei pattern GoF con esempi in più linguaggi e, soprattutto, con
+        il problema che ciascuno risolve. Utile per arrivare al colloquio sapendo
+        quali si usano davvero (strategy, adapter, factory, observer) e quali quasi
+        mai.
+    - title: "Domain-Driven Design (Eric Evans)"
+      url: https://www.domainlanguage.com/ddd/reference/
+      kind: book
+      note: >-
+        Il riferimento originale; la sintesi gratuita "DDD Reference" basta per
+        fissare entity, value object, aggregate e bounded context con le definizioni
+        giuste.
+    - title: "Clean Architecture (Robert C. Martin)"
+      url: https://www.pearson.com/en-us/subject-catalog/p/clean-architecture-a-craftsmans-guide-to-software-structure-and-design/P200000009528
+      kind: book
+      note: >-
+        Da leggere per la regola delle dipendenze, che punta sempre verso il dominio.
+        Le parti su SOLID sono quelle da avere pronte quando la domanda è sul perché
+        di un'interfaccia.
+    - title: "Software Engineering at Google (Winters, Manshreck, Wright)"
+      url: https://abseil.io/resources/swe-book
+      kind: book
+      note: >-
+        Gratuito online. Non parla di pattern ma di cosa succede al codice con il
+        tempo e con molte persone: è la fonte migliore per le domande su code review,
+        deprecazioni e manutenibilità.
+
+- id: pack-dsa
+  title: Algoritmi e strutture dati
+  subtitle: Il minimo che serve per superare il live coding
+  summary: >-
+    Percorso ordinato per rendimento, non per programma scolastico. Prima la
+    complessità, perché ogni risposta va accompagnata dal suo costo; poi le strutture
+    che compaiono nella maggior parte dei problemi da colloquio - array con due
+    puntatori, hash map, stringhe - e le tecniche che risolvono famiglie intere di
+    esercizi: ricerca binaria, sliding window, ricorsione con backtracking. Le
+    strutture più pesanti (alberi, grafi, heap) e la programmazione dinamica vengono
+    dopo, perché rendono meno per ora di studio ma restano indispensabili per le
+    aziende che fanno colloqui algoritmici seri.
+  for_whom: >-
+    Per chiunque affronti un live coding. Con poco tempo, i primi sei argomenti
+    coprono la maggior parte dei problemi di livello easy e medium.
+  level: medium
+  tags: [algoritmi, strutture-dati, coding, leetcode]
+  prerequisites:
+    - Saper programmare in almeno un linguaggio
+  topic_ids:
+    - dsa-01-complexity
+    - dsa-03-hash-maps
+    - dsa-02-arrays-two-pointers
+    - dsa-04-strings
+    - dsa-05-binary-search
+    - dsa-12-sliding-window
+    - dsa-07-stacks-queues
+    - dsa-06-linked-lists
+    - dsa-14-sorting
+    - dsa-13-recursion-backtracking
+    - dsa-08-trees
+    - dsa-10-heaps
+    - dsa-09-graphs
+    - dsa-11-dynamic-programming
+  sources:
+    - title: "NeetCode 150"
+      url: https://neetcode.io/practice
+      kind: practice
+      note: >-
+        Lista di problemi raggruppati per schema risolutivo, con soluzioni spiegate a
+        video. È la scelta migliore quando il tempo è poco: studiare centocinquanta
+        problemi organizzati per pattern rende molto più che risolverne cinquecento a
+        caso.
+    - title: "Cracking the Coding Interview (Gayle Laakmann McDowell)"
+      url: https://www.crackingthecodinginterview.com/
+      kind: book
+      note: >-
+        Il libro storico sul formato del colloquio. Vale soprattutto per come si
+        conduce la conversazione: chiarire i vincoli, ragionare ad alta voce,
+        discutere i casi limite prima di scrivere.
+    - title: "Grokking Algorithms (Aditya Bhargava, Manning)"
+      url: https://www.manning.com/books/grokking-algorithms-second-edition
+      kind: book
+      note: >-
+        Illustrato e breve. È la via più veloce per chi parte da zero sugli algoritmi
+        e ha bisogno di capire ricorsione, divide et impera e grafi prima di mettersi
+        a risolvere problemi.
+    - title: "Introduction to Algorithms, 4ª edizione (CLRS, MIT Press)"
+      url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+      kind: book
+      note: >-
+        Il testo di riferimento accademico. Non si legge per prepararsi a un
+        colloquio, si consulta quando serve la dimostrazione o il caso peggiore
+        esatto di un algoritmo.
+    - title: "VisuAlgo"
+      url: https://visualgo.net/en
+      kind: practice
+      note: >-
+        Visualizzazioni animate di strutture e algoritmi. Utile per fissare
+        rotazioni degli alberi bilanciati, comportamento dello heap e percorsi di
+        BFS e DFS, che sono difficili da tenere a mente solo dal codice.
+    - title: "The Algorithms - Python"
+      url: https://github.com/TheAlgorithms/Python
+      kind: repo
+      note: >-
+        Implementazioni di riferimento leggibili. Serve per confrontare la propria
+        soluzione con una scritta bene, non per copiarla: il valore è nel notare le
+        differenze.
+
+- id: pack-system-design
+  title: System design
+  subtitle: Impostare il colloquio e reggere le domande di approfondimento
+  summary: >-
+    Il colloquio di system design non si supera sapendo molte tecnologie, ma avendo
+    un metodo: chiarire i requisiti, stimare gli ordini di grandezza, disegnare un
+    sistema semplice che funziona e poi farlo crescere spiegando cosa si rompe e
+    perché. Il percorso parte dal metodo e dai design classici, poi attraversa i
+    mattoni di cui l'intervistatore chiederà conto - scalare, bilanciare, mettere in
+    coda, mettere in cache, partizionare, replicare - e chiude con osservabilità e
+    picchi di traffico, cioè le domande che arrivano quando il disegno è finito.
+  for_whom: >-
+    Per ruoli mid, senior e staff. Per un junior basta il primo argomento, giusto per
+    non trovarsi impreparati se la domanda arriva comunque.
+  level: hard
+  tags: [system-design, architettura, scalabilità, colloquio]
+  prerequisites:
+    - Fondamenti di API e backend
+    - Dati, database e query
+  topic_ids:
+    - sd-01-interview-framework
+    - dist-27-horizontal-vertical
+    - dist-26-load-balancing
+    - cache-21-what-and-where
+    - db-17-sharding-partitioning
+    - db-18-read-replicas
+    - dist-30-message-queues
+    - cache-24-cdn
+    - rel-38-observability
+    - rel-40-traffic-spikes
+    - sd-02-classic-designs
+  sources:
+    - title: "The System Design Primer (Donne Martin)"
+      url: https://github.com/donnemartin/system-design-primer
+      kind: repo
+      note: >-
+        Il repository più usato al mondo per questa preparazione. Contiene il metodo,
+        i numeri di riferimento da tenere a mente per le stime e una serie di
+        esercizi svolti con la soluzione ragionata.
+    - title: "System Design 101 (ByteByteGo)"
+      url: https://github.com/ByteByteGoHq/system-design-101
+      kind: repo
+      note: >-
+        Spiegazioni visuali brevi su argomenti che si confondono facilmente - reverse
+        proxy contro API gateway contro load balancer, B-tree contro LSM-tree. Ottimo
+        per il ripasso dell'ultima settimana.
+    - title: "System Design Interview, volume 1 e 2 (Alex Xu)"
+      url: https://bytebytego.com/
+      kind: book
+      note: >-
+        Casi svolti con lo stesso schema del colloquio reale. Il valore è nel vedere
+        come si passa dalla versione semplice a quella scalata giustificando ogni
+        passaggio.
+    - title: "Designing Data-Intensive Applications (Martin Kleppmann)"
+      url: https://dataintensive.net/
+      kind: book
+      note: >-
+        Serve per la parte in cui l'intervistatore chiede il perché: è la differenza
+        fra dire "aggiungo una replica" e spiegare che cosa si sta scambiando in
+        termini di consistenza e ritardo di replica.
+    - title: "Amazon Builders' Library"
+      url: https://aws.amazon.com/builders-library/
+      kind: article
+      note: >-
+        Utile per gli esempi reali da citare durante il disegno: come si gestisce il
+        sovraccarico, perché lo shuffle sharding limita il raggio di un guasto, come
+        si evitano le cascate di retry.
+
+- id: pack-engineering
+  title: Pratica dell'ingegneria
+  subtitle: Test, Git, cloud, sicurezza, qualità del codice
+  summary: >-
+    Gli argomenti che non stanno in nessuna categoria ma vengono chiesti in ogni
+    colloquio, di solito nella seconda metà. Come si testa - e soprattutto cosa vale
+    la pena testare - come si usa Git in gruppo senza rovinare la storia, che cosa
+    sono davvero container e servizi gestiti, quali vulnerabilità sono attuali oggi e
+    come si riconosce (e si scrive) del codice che altri dovranno mantenere. È la
+    parte in cui si dimostra di avere esperienza vera, non solo studio.
+  for_whom: >-
+    Per tutti i ruoli e tutti i livelli. Da ripassare sempre, anche quando l'annuncio
+    non ne parla.
+  level: medium
+  tags: [testing, git, cloud, sicurezza, code-review]
+  prerequisites: []
+  topic_ids:
+    - eng-01-testing
+    - eng-02-git
+    - eng-05-code-quality
+    - eng-04-security
+    - eng-03-cloud-basics
+  sources:
+    - title: "OWASP Top 10:2025"
+      url: https://owasp.org/Top10/
+      kind: doc
+      note: >-
+        L'edizione 2025 è quella corrente e va citata al posto della 2021: introduce
+        Software Supply Chain Failures e Mishandling of Exceptional Conditions,
+        sposta Security Misconfiguration al secondo posto e assorbe l'SSRF dentro
+        Broken Access Control, che resta al primo posto.
+    - title: "Pro Git (Chacon e Straub)"
+      url: https://git-scm.com/book/en/v2
+      kind: book
+      note: >-
+        Gratuito e ufficiale. I capitoli su branching e rewriting history rispondono
+        alla domanda classica su merge contro rebase spiegando cosa succede davvero
+        ai commit, che è la risposta che si distingue.
+    - title: "Software Engineering at Google"
+      url: https://abseil.io/resources/swe-book
+      kind: book
+      note: >-
+        I capitoli sul testing - dimensioni dei test invece della piramide classica,
+        test fragili, flakiness - e quello sulla code review sono la fonte più
+        concreta su come si lavora in un gruppo grande.
+    - title: "The Twelve-Factor App"
+      url: https://12factor.net/
+      kind: article
+      note: >-
+        Breve e ancora attuale: configurazione nell'ambiente, processi senza stato,
+        parità fra sviluppo e produzione. È il vocabolario che serve per le domande
+        su come si porta un'applicazione in cloud.
+    - title: "OWASP Cheat Sheet Series"
+      url: https://cheatsheetseries.owasp.org/
+      kind: doc
+      note: >-
+        Schede operative per argomento: memorizzazione delle password, validazione
+        dell'input, prevenzione di SQL injection e XSS. Rispondono alla parte
+        "e come lo eviti" meglio di qualsiasi elenco di vulnerabilità.
+    - title: "The Pragmatic Programmer, edizione del ventennale"
+      url: https://pragprog.com/titles/tpp20/the-pragmatic-programmer-20th-anniversary-edition/
+      kind: book
+      note: >-
+        Per le domande aperte sulla qualità del codice e sul metodo di lavoro.
+        Fornisce esempi e principi da citare senza scadere nel generico.
+
+- id: pack-colloquio
+  title: Colloquio, azienda e offerta
+  subtitle: Domande comportamentali, ricerca sull'azienda, negoziazione
+  summary: >-
+    La parte non tecnica decide più colloqui di quanto si creda, e si prepara come le
+    altre. Il percorso copre il metodo STAR per le domande comportamentali - con il
+    dettaglio che quasi tutti trascurano, il risultato misurabile - la ricerca
+    sull'azienda, che è ciò che rende credibile la risposta al "perché noi", e la
+    conversazione su retribuzione e offerta, dove poche frasi preparate valgono più
+    di qualsiasi improvvisazione.
+  for_whom: >-
+    Per tutti, a ogni livello. Da fare presto, perché richiede di ripensare alle
+    proprie esperienze passate e non si improvvisa la sera prima.
+  level: easy
+  tags: [comportamentale, star, azienda, negoziazione]
+  prerequisites: []
+  topic_ids:
+    - beh-01-star-method
+    - beh-02-company-research
+    - beh-03-negotiation
+  sources:
+    - title: "Salary Negotiation: Make More Money, Be More Valued (Patrick McKenzie)"
+      url: https://www.kalzumeus.com/2012/01/23/salary-negotiation/
+      kind: article
+      note: >-
+        L'articolo più citato del settore sulla negoziazione. Spiega perché non si
+        dà per primi un numero, perché la trattativa inizia solo dopo l'offerta e
+        come si risponde alla domanda sulle aspettative economiche.
+    - title: "Cracking the Coding Interview - capitolo sulle domande comportamentali"
+      url: https://www.crackingthecodinginterview.com/
+      kind: book
+      note: >-
+        La griglia per preparare le storie prima del colloquio: una tabella di
+        progetti per sfide, errori e cose imparate, così le risposte non vengono
+        inventate sul momento.
+    - title: "reverse-interview (viraptor)"
+      url: https://github.com/viraptor/reverse-interview
+      kind: repo
+      note: >-
+        Le domande da fare all'azienda, divise per area: processo di rilascio, oncall,
+        gestione del debito tecnico, crescita. Servono a valutare davvero il posto e
+        fanno un'ottima impressione a fine colloquio.
+    - title: "levels.fyi"
+      url: https://www.levels.fyi/
+      kind: article
+      note: >-
+        Dati di retribuzione per livello e azienda. Serve per entrare nella
+        conversazione sull'offerta con un intervallo motivato invece che con una
+        sensazione.

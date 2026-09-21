@@ -8,7 +8,9 @@ import type {
   CvReview,
   JobPosting,
   JobSummary,
+  KnowledgePack,
   Meta,
+  PackSummary,
   PlanResponse,
   PlanSummary,
   ProblemSummary,
@@ -137,6 +139,12 @@ export const api = {
     ),
   categories: () =>
     request<{ categories: { id: string; count: number }[] }>('/knowledge/categories'),
+
+  listPacks: () => request<{ total: number; packs: PackSummary[] }>('/knowledge/packs'),
+  getPack: (id: string) =>
+    request<{ pack: KnowledgePack; estimated_minutes: number; topics: Topic[] }>(
+      `/knowledge/packs/${id}`,
+    ),
 
   findGaps: (jobId: string) =>
     request<{ job_id: string; gaps: TopicGap[]; missing: number }>(

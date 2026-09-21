@@ -181,7 +181,8 @@ export default function KnowledgePage() {
           <h1>Argomenti</h1>
           <p>
             {meta?.content.topics ?? 0} argomenti, {meta?.content.questions ?? 0} domande,{' '}
-            {meta?.content.problems ?? 0} problemi di coding.
+            {meta?.content.problems ?? 0} problemi di coding. Per studiare in ordine, parti dai{' '}
+            <Link to="/percorsi">percorsi</Link>.
           </p>
         </div>
         <div className="row">

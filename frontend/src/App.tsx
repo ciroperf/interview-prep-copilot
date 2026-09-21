@@ -11,6 +11,8 @@ import Dashboard from './pages/Dashboard'
 import JobDetail from './pages/JobDetail'
 import KnowledgePage from './pages/KnowledgePage'
 import NewJob from './pages/NewJob'
+import PackDetail from './pages/PackDetail'
+import PacksPage from './pages/PacksPage'
 import PlanPage from './pages/PlanPage'
 import ProblemDetail from './pages/ProblemDetail'
 import QuizPage from './pages/QuizPage'
@@ -197,6 +199,7 @@ export default function App() {
             </NavLink>
             <NavLink to="/jobs/new">Nuovo annuncio</NavLink>
             <NavLink to="/knowledge">Argomenti</NavLink>
+            <NavLink to="/percorsi">Percorsi</NavLink>
             <NavLink to="/coding">Coding</NavLink>
             <NavLink to="/quiz">Quiz</NavLink>
             <NavLink to="/cv">CV</NavLink>
@@ -227,6 +230,8 @@ export default function App() {
           <Route path="/plans/:planId" element={<PlanPage />} />
           <Route path="/knowledge" element={<KnowledgePage />} />
           <Route path="/knowledge/:topicId" element={<TopicDetail />} />
+          <Route path="/percorsi" element={<PacksPage />} />
+          <Route path="/percorsi/:packId" element={<PackDetail />} />
           <Route path="/coding" element={<CodingPage />} />
           <Route path="/coding/:problemId" element={<ProblemDetail />} />
           <Route path="/quiz" element={<QuizPage />} />

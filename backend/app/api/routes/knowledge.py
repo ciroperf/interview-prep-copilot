@@ -74,6 +74,7 @@ async def get_topic(topic_id: str, kb: KnowledgeDep) -> dict:
 async def list_packs(kb: KnowledgeDep) -> dict:
     """Elenco dei percorsi, con il tempo di studio che ciascuno richiede."""
     return {
+        "total": len(kb.packs),
         "packs": [
             {
                 "id": pack.id,
