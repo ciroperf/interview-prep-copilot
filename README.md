@@ -191,7 +191,7 @@ Il ragionamento dietro le scelte, e il funzionamento del generatore di piani:
 ## Test
 
 ```bash
-cd backend && pytest        # 149 test
+cd backend && pytest        # 207 test
 ```
 
 Girano senza AI e senza rete: le fixture forzano il client non configurato, il
@@ -199,6 +199,13 @@ percorso AI si prova con un finto client. Fra le cose verificate: ogni
 soluzione di riferimento supera i propri test, il piano sta nel budget, non
 contiene quiz su argomenti che non ha in programma di studiare, e le opzioni
 dei quiz sono davvero mescolate.
+
+Sotto test c'è anche il contenuto, non solo il codice: `test_content_depth.py`
+impone le soglie minime a ogni scheda del repository — spiegazione lunga,
+punti chiave, esempi, trade-off, segnali senior e domande di approfondimento
+con la risposta — e `test_packs.py` verifica che i percorsi puntino ad
+argomenti esistenti, che nessun argomento resti fuori da ogni percorso e che
+ogni fonte porti il motivo per cui è consigliata.
 
 ## Struttura
 

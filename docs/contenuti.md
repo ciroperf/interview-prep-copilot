@@ -16,12 +16,31 @@ generato benissimo, ma se dietro non c'è materiale serio non serve a niente.
 | `dsa` | 14 | Complessità, array, hash map, stringhe, ricerca binaria, liste, stack, alberi, grafi, heap, DP, sliding window, backtracking, ordinamento |
 | `system-design` | 2 | Metodo per il colloquio, design ricorrenti |
 | `behavioral` + `company` | 3 | Metodo STAR, ricerca sull'azienda, negoziazione |
-| `engineering` + `languages` | 7 | Testing, git, cloud, sicurezza, qualità, Python, JavaScript/TypeScript |
+| `engineering` | 5 | Testing, git, cloud, sicurezza applicativa, qualità del codice |
+| `languages` | 17 | Due schede introduttive più i percorsi dedicati a Python (7) e a JavaScript/TypeScript (8) |
 
-Totale: **78 argomenti, 146 domande a risposta multipla, 14 problemi di coding**.
+Totale: **93 argomenti, 11 percorsi, 146 domande a risposta multipla, 14
+problemi di coding**.
 
 Le prime cinque categorie ricalcano esattamente la checklist dei 40 concetti
 backend da cui è nato il progetto.
+
+## Quanto deve essere approfondito un argomento
+
+`tests/test_content_depth.py` impone le soglie minime ai contenuti versionati
+(non a quelli generati dall'AI da un annuncio, che nascono più magri):
+
+| Campo | Minimo |
+|---|---|
+| `deep_dive` | 900 caratteri |
+| `key_points` | 6 voci |
+| `examples` | almeno uno |
+| `follow_ups` | 3, ognuna con la sua `answer` |
+| `interview_answer` | 200 caratteri |
+| `senior_signals`, `trade_offs`, `pitfalls`, `related` | non vuoti |
+
+I `related` devono puntare a id esistenti e gli URL delle risorse devono essere
+`https://`. Sono soglie, non obiettivi: un argomento può e deve andare oltre.
 
 ## Struttura di un argomento
 
@@ -37,12 +56,36 @@ backend da cui è nato il progetto.
     Un'operazione è idempotente se eseguirla più volte lascia il sistema…
   key_points:
     - "Il problema reale: il client va in timeout e non sa se…"
+  deep_dive: |-
+    La spiegazione lunga: è la parte che si studia, non che si ripassa.
+    Almeno 900 caratteri, in paragrafi.
+  key_points:
+    - "Almeno sei, ognuno una cosa sola"
+  examples:
+    - title: Il caso che si porta al colloquio
+      language: python                 # o text, sql, bash, javascript…
+      code: |
+        # Commenti in italiano, come nel resto del progetto.
+      note: >-
+        Perché questo esempio conta.
+  trade_offs:
+    - option: La scelta
+      pros: Cosa dà
+      cons: Cosa costa
+      when: Quando conviene
+  numbers:
+    - "I numeri da citare a voce: soglie, ordini di grandezza, costi"
   interview_answer: >-
     Il caso che uso per spiegarlo è il pagamento: il client manda…
+  senior_signals:
+    - "Cosa distingue chi ha esperienza vera su questo tema"
   pitfalls:
     - "Controllare l'esistenza della chiave PRIMA della transazione…"
-  follow_up_questions:
-    - "Cosa succede se due richieste con la stessa idempotency key…"
+  follow_ups:
+    - question: Cosa succede se due richieste con la stessa idempotency key…
+      answer: >-
+        La risposta, perché una domanda senza risposta lascia il lavoro a metà.
+  related: [core-09-rate-limiting-throttling, db-19-duplicate-records]
   resources:
     - title: "Stripe - Idempotent requests"
       url: "https://docs.stripe.com/api/idempotent_requests"

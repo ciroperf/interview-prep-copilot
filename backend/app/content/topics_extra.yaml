@@ -11,6 +11,40 @@
     Un colloquio di system design non valuta la risposta giusta, che non esiste, ma il
     metodo: come raccogli i requisiti, come giustifichi i compromessi e come reagisci ai
     vincoli che l'intervistatore aggiunge strada facendo.
+  deep_dive: |-
+    La struttura di quarantacinque minuti è più o meno fissa, e seguirla è già metà del
+    punteggio. Cinque-dieci minuti per i requisiti, cinque per le stime, dieci per API e
+    modello dati, dieci per il disegno ad alto livello, dieci per l'approfondimento su un
+    componente e cinque per colli di bottiglia e monitoraggio. Chi salta direttamente al
+    disegno perde la parte in cui si dimostra di saper capire un problema prima di
+    risolverlo.
+
+    I requisiti si dividono in funzionali - cosa fa il sistema - e non funzionali, che
+    sono quelli che determinano l'architettura: quanti utenti, che latenza è accettabile,
+    quale consistenza serve, quale disponibilità. Il vincolo più importante è la scala,
+    e va chiesta prima di disegnare: centomila utenti e cento milioni portano a sistemi
+    completamente diversi, e proporre Kafka e il partizionamento per un'applicazione che
+    ne ha mille è un errore tanto quanto proporre una sola istanza per un servizio
+    globale.
+
+    Le stime a spanne servono a orientare le scelte, non a essere esatte. Si parte dagli
+    utenti attivi giornalieri, si ricava un ordine di grandezza delle richieste al
+    secondo ricordando che il picco vale due o tre volte la media, si stima la dimensione
+    di un record e si moltiplica per il volume e per la crescita annua. Il risultato dice
+    se si parla di gigabyte o di petabyte, e quindi se un singolo database basta.
+
+    Il disegno parte semplice e cresce sotto pressione. Prima la versione minima che
+    funziona, poi si aggiunge quello che serve man mano che l'intervistatore alza i
+    numeri: cache quando le letture dominano, repliche quando la lettura non regge,
+    partizionamento quando la scrittura non regge, code quando serve disaccoppiare. Ogni
+    passo va accompagnato dal prezzo che si paga, perché il contenuto dell'esercizio sono
+    i compromessi: una cache introduce dati stantii, una replica introduce ritardo di
+    replica, il partizionamento rende costose le query che attraversano le partizioni.
+
+    Il finale conta. Chiudere indicando i colli di bottiglia rimasti, i punti singoli di
+    guasto e cosa si metterebbe sotto monitoraggio dimostra che si pensa al sistema in
+    produzione e non solo sulla lavagna. E per tutta la durata bisogna parlare: il
+    ragionamento che resta in testa, per l'intervistatore, non esiste.
   key_points:
     - "Struttura in 45 minuti: requisiti 5-10, stime 5, API e modello dati 10, disegno ad alto livello 10, approfondimento 10, colli di bottiglia 5"
     - "Requisiti funzionali (cosa fa) e non funzionali (quanti utenti, che latenza, quale consistenza, quale disponibilità)"
@@ -19,19 +53,112 @@
     - "Parti semplice e scala sotto pressione: monolite, poi cache, poi replica, poi sharding"
     - "Dichiara i compromessi ad alta voce: ogni scelta toglie qualcosa, dire cosa è il punto dell'esercizio"
     - "Chiudi con colli di bottiglia, single point of failure e cosa monitoreresti"
+  examples:
+    - title: Una stima a spanne, fatta in due minuti
+      language: text
+      code: |
+        Accorciatore di URL, 100 milioni di link nuovi al mese.
+
+        SCRITTURE   100M / (30 · 86.400 s) ≈ 40 al secondo, picco ≈ 100/s
+        LETTURE     rapporto lettura/scrittura tipico 100:1 -> ≈ 4.000/s, picco ≈ 10.000/s
+        STORAGE     ~500 byte per record (url lungo, codice, owner, date)
+                    100M · 500 B = 50 GB al mese -> 600 GB all'anno -> 3 TB in 5 anni
+        CACHE       regola 80/20: il 20% dei link fa l'80% del traffico
+                    20% di 100M · 500 B ≈ 10 GB al mese di dati caldi: sta in memoria
+
+        CONCLUSIONI  40 scritture/s le regge un singolo database relazionale.
+                     Le letture no: servono cache e repliche, ed è lì che va il disegno.
+      note: >-
+        Il valore non è la precisione ma la conclusione: i numeri dicono dove sta il
+        problema e quindi su cosa spendere i minuti successivi.
+    - title: Un ordine di lavoro che si può dire ad alta voce
+      language: text
+      code: |
+        1. "Prima di disegnare: chi sono gli utenti e quanti sono? Che latenza è
+            accettabile? I dati possono essere leggermente stantii o serve
+            consistenza forte?"
+        2. "Faccio due conti veloci per capire se parliamo di un database o di cento."
+        3. "Definisco le due o tre API principali e il modello dei dati."
+        4. "Disegno la versione più semplice che funziona: client, servizio, database."
+        5. "Ora la scalo: il collo di bottiglia qui sono le letture, quindi cache.
+            Il prezzo è che i dati possono essere stantii fino al TTL - accettabile?"
+        6. "Colli di bottiglia rimasti, cosa monitorerei, dove si romperebbe per primo."
+      note: >-
+        Dire i passaggi mentre si fanno è parte dell'esercizio: l'intervistatore valuta il
+        metodo, e può correggere la rotta solo se sa dove si sta andando.
+  trade_offs:
+    - option: Partire semplice e scalare sotto pressione
+      pros: Mostra il ragionamento, evita complessità ingiustificata, lascia spazio ai vincoli
+      cons: Rischia di sembrare poco ambizioso se non si esplicita che è una scelta
+      when: Sempre; basta dire "parto dalla versione minima e la faccio crescere"
+    - option: Disegnare subito l'architettura completa
+      pros: Copre molti componenti in poco tempo
+      cons: Nessuna giustificazione, e l'intervistatore non vede il ragionamento
+      when: Mai; è l'errore più comune in questo formato
+    - option: Approfondire un componente
+      pros: Dimostra profondità reale, è quello che si cerca dai profili senior
+      cons: Toglie tempo alla larghezza del disegno
+      when: Dopo il disegno di alto livello, sul componente che l'intervistatore indica
+  numbers:
+    - "Un giorno ha 86.400 secondi: il numero da tenere a mente per passare da eventi al giorno a richieste al secondo"
+    - "Rapporti da ricordare: picco 2-3x la media, lettura/scrittura spesso 100:1, regola 80/20 per i dati caldi in cache"
   interview_answer: >-
     Non parto mai disegnando. Prima chiarisco cosa deve fare il sistema e a che scala, perché la
     scala cambia tutto: se sono centomila utenti una Postgres con una replica regge, se sono
     cento milioni devo ragionare su partizionamento e cache dal primo minuto. Poi faccio due
     stime veloci di richieste al secondo e volume di dati, definisco le API e il modello, e solo
     allora disegno la versione più semplice che funziona. Da lì la scalo man mano che
-    l'intervistatore aggiunge vincoli, dicendo esplicitamente cosa sto sacrificando a ogni passo.
+    l'intervistatore aggiunge vincoli, dicendo esplicitamente cosa sto sacrificando a ogni passo,
+    e chiudo con i colli di bottiglia rimasti e cosa metterei sotto monitoraggio.
+  senior_signals:
+    - "Chiede i requisiti non funzionali, non solo quelli funzionali"
+    - "Usa le stime per decidere dove concentrare il tempo, non come esercizio di calcolo"
+    - "Nomina il prezzo di ogni scelta senza che glielo chiedano"
+    - "Chiude con i punti singoli di guasto e il monitoraggio"
   pitfalls:
     - "Disegnare subito Kafka e microservizi senza aver chiesto la scala"
     - "Non fare stime e non sapere se il sistema serve 10 o 10.000 richieste al secondo"
     - "Restare in silenzio: l'intervistatore valuta il ragionamento, e se non lo dici non esiste"
-  follow_up_questions:
-    - "Come stimeresti lo storage necessario per un accorciatore di URL con 100M di link al mese?"
+    - "Difendere la propria soluzione invece di adattarla quando arriva un vincolo nuovo"
+  follow_ups:
+    - question: Come stimeresti lo storage necessario per un accorciatore di URL con 100M di link al mese?
+      answer: >-
+        Stimo il record a circa 500 byte fra URL lungo, codice breve, proprietario e date.
+        Cento milioni al mese fanno 50 GB al mese, cioè 600 GB all'anno e circa 3 TB su
+        cinque anni, che è una dimensione gestibile da un singolo database relazionale con
+        una buona strategia di indicizzazione. La conclusione utile è che il problema non è
+        lo storage ma le letture: con un rapporto 100:1 si arriva a diecimila letture al
+        secondo di picco, e lì servono cache e repliche.
+    - question: Come decidi quanto approfondire un componente?
+      answer: >-
+        Lo chiedo. Dopo il disegno di alto livello propongo due o tre punti che meritano
+        approfondimento - tipicamente quello dove ho appena dichiarato un compromesso - e
+        lascio scegliere all'intervistatore, perché ha in mente cosa vuole valutare.
+        Se non sceglie, approfondisco il componente sul percorso critico o quello dove la
+        scala rompe per prima, spiegando perché ho scelto quello.
+    - question: Che cosa rispondi se l'intervistatore contesta la tua scelta?
+      answer: >-
+        Prima capisco l'obiezione: spesso sta introducendo un vincolo nuovo più che
+        dicendo che ho sbagliato. Poi confronto esplicitamente le due opzioni sui criteri
+        che contano in quel contesto e, se la sua è migliore sotto il nuovo vincolo, cambio
+        e dico perché. Difendere la propria soluzione a oltranza è un segnale negativo;
+        cambiarla senza saper dire cosa è cambiato nel ragionamento lo è altrettanto.
+    - question: Quanto conta disegnare bene lo schema del database?
+      answer: >-
+        Abbastanza: le entità principali, le chiavi e le relazioni vanno definite, perché
+        da lì discendono le query e quindi gli indici e le decisioni di partizionamento.
+        Non serve la normalizzazione completa né i tipi esatti di ogni colonna: quello
+        toglie tempo al disegno del sistema. Il livello giusto è quello che permette di
+        rispondere alla domanda "come recuperi il feed di un utente" indicando la query e
+        l'indice che la sostiene.
+  related: [sd-02-classic-designs, dist-27-horizontal-vertical, cache-21-what-and-where, db-17-sharding-partitioning]
+  resources:
+    - title: "The System Design Primer"
+      url: https://github.com/donnemartin/system-design-primer
+      kind: repo
+    - title: "System Design 101 (ByteByteGo)"
+      url: https://github.com/ByteByteGoHq/system-design-101
+      kind: repo
 
 - id: sd-02-classic-designs
   title: Design classici da colloquio
@@ -43,6 +170,42 @@
   summary: >-
     Un gruppo ristretto di sistemi torna in quasi tutti i colloqui. Conoscerne gli snodi
     decisionali permette di concentrarsi sul ragionamento invece che sull'invenzione.
+  deep_dive: |-
+    Non si tratta di imparare soluzioni a memoria ma di riconoscere lo snodo: in ciascuno
+    di questi sistemi c'è una decisione che determina tutto il resto, e l'intervistatore
+    vuole vedere che la si individua e che se ne discutono le conseguenze.
+
+    Nell'accorciatore di URL lo snodo è la generazione dell'identificativo. Un contatore
+    globale convertito in base62 dà codici brevi e garantisce l'unicità, ma richiede un
+    punto di coordinamento e rende gli id prevedibili; un hash dell'URL evita il
+    coordinamento ma richiede di gestire le collisioni. Il sistema è dominato dalle
+    letture, quindi cache aggressiva; e il redirect va scelto con criterio: 301 è
+    permanente e viene memorizzato dal browser, il che risparmia traffico ma impedisce di
+    contare i click, mentre 302 passa sempre dal servizio.
+
+    Nel feed social lo snodo è quando comporre il feed. Il fan-out in scrittura
+    precalcola il feed di ogni follower al momento del post: lettura immediata, ma un
+    account con dieci milioni di follower genera dieci milioni di scritture. Il fan-out in
+    lettura compone al volo: scrittura banale, lettura costosa. La soluzione reale è
+    ibrida - precalcolo per la maggioranza, composizione al volo per i pochi account
+    enormi, uniti in lettura - ed è proprio la risposta che si vuole sentire.
+
+    Nella chat lo snodo è la connessione persistente: WebSocket per il tempo reale,
+    con tutto quello che comporta in termini di stato sul server, presenza, e consegna ai
+    destinatari offline tramite una coda. L'ordinamento dei messaggi dentro una
+    conversazione richiede una sequenza, e il partizionamento naturale dello storage è per
+    conversazione.
+
+    Nel rate limiter lo snodo è l'atomicità: leggere il contatore, decidere e scrivere
+    devono essere un'unica operazione, altrimenti sotto concorrenza il limite si buca.
+    Con Redis si risolve con uno script Lua o con i comandi atomici. La scelta della
+    chiave - per utente, per IP, per API key - è l'altra decisione che cambia il
+    comportamento del sistema.
+
+    Nell'upload di file lo snodo è non far passare i byte dal backend: si genera una URL
+    prefirmata e il client carica direttamente sull'object storage, che notifica il
+    servizio a caricamento avvenuto. Far transitare i file dall'applicazione è l'errore
+    che si vede più spesso e non regge alla prima crescita.
   key_points:
     - "URL shortener: generazione dell'id (contatore in base62 vs hash), lettura dominante, cache alta, redirect 301 vs 302"
     - "Feed social: fan-out on write (veloce in lettura, esplode con gli account molto seguiti) vs fan-out on read (calcolo al volo). In pratica ibrido"
@@ -51,6 +214,66 @@
     - "Sistema di notifiche: coda, fan-out, deduplicazione, preferenze utente, retry con dead letter"
     - "Ricerca: inverted index, sharding per documento, ranking, aggiornamento asincrono dell'indice"
     - "Upload di file: presigned URL verso object storage, mai far transitare i byte dal backend"
+    - "In ogni design c'è uno snodo che decide tutto il resto: individuarlo è l'esercizio"
+  examples:
+    - title: Feed - i due estremi e la soluzione reale
+      language: text
+      code: |
+        FAN-OUT IN SCRITTURA          Al post, scrivo nel feed di ogni follower.
+          lettura   O(1): già pronto
+          scrittura O(follower): 10M di follower = 10M di scritture per un post
+          adatto a  utenti normali (centinaia o migliaia di follower)
+
+        FAN-OUT IN LETTURA            Al post scrivo una riga; compongo all'apertura.
+          lettura   O(seguiti): aggregazione a ogni apertura dell'app
+          scrittura O(1)
+          adatto a  account con moltissimi follower
+
+        IBRIDO (la risposta attesa)
+          precalcolo per gli utenti sotto una soglia di follower;
+          per gli account "celebrità" non precalcolo nulla e li unisco in lettura,
+          sui pochi seguiti di quel tipo che l'utente ha.
+      note: >-
+        La soglia è un parametro operativo, non una costante universale: dirlo mostra che
+        si pensa al sistema come qualcosa che verrà messo a punto in produzione.
+    - title: Rate limiter - dove si buca se non è atomico
+      language: python
+      code: |
+        # SBAGLIATO: fra la lettura e la scrittura ci passano altre richieste.
+        contatore = redis.get(chiave) or 0
+        if int(contatore) >= limite:
+            rifiuta()
+        redis.set(chiave, int(contatore) + 1)     # due processi leggono lo stesso valore
+
+        # CORRETTO: una sola operazione atomica, con la scadenza impostata alla prima.
+        nuovo = redis.incr(chiave)
+        if nuovo == 1:
+            redis.expire(chiave, finestra_secondi)
+        if nuovo > limite:
+            rifiuta()
+      note: >-
+        Per finestre scorrevoli o token bucket serve più logica, e lì si usa uno script
+        Lua, che Redis esegue atomicamente.
+  trade_offs:
+    - option: Contatore in base62 per gli id brevi
+      pros: Codici minimi, nessuna collisione, ordinabili
+      cons: Punto di coordinamento centrale, id prevedibili ed enumerabili
+      when: Serve il codice più corto possibile e l'enumerabilità non è un problema
+    - option: Hash dell'URL
+      pros: Nessun coordinamento, stesso URL dà lo stesso codice
+      cons: Collisioni da gestire, codici più lunghi a parità di sicurezza
+      when: Si vuole evitare un servizio di sequenze centralizzato
+    - option: Redirect 301
+      pros: Il browser memorizza il redirect, quindi meno traffico sul servizio
+      cons: Non si contano più i click e non si può cambiare la destinazione
+      when: Link permanenti senza bisogno di analitiche
+    - option: Redirect 302
+      pros: Ogni click passa dal servizio, quindi analitiche e destinazione modificabile
+      cons: Tutto il traffico resta a carico del sistema
+      when: Servono statistiche o link modificabili; è il default in questo dominio
+  numbers:
+    - "Base62 su 7 caratteri dà circa 3.500 miliardi di combinazioni: sufficienti per qualunque accorciatore reale"
+    - "Un account con 10 milioni di follower, con fan-out in scrittura, genera 10 milioni di scritture per ogni post: è il numero che motiva la soluzione ibrida"
   interview_answer: >-
     Prendendo il feed come esempio, lo snodo è se precalcolare il feed alla scrittura o
     comporlo alla lettura. Con fan-out on write la lettura è immediata perché il feed è già
@@ -58,12 +281,60 @@
     ogni post. Con fan-out on read il post costa una scrittura sola ma ogni apertura dell'app
     costa un'aggregazione. La soluzione reale è ibrida: fan-out on write per la maggioranza
     degli utenti e composizione al volo per i pochi account enormi, che vengono uniti al feed in
-    lettura.
+    lettura. La soglia fra i due regimi è un parametro da tarare in produzione.
+  senior_signals:
+    - "Individua lo snodo decisionale invece di elencare componenti"
+    - "Propone la soluzione ibrida e sa dire quale parametro la governa"
+    - "Nomina l'atomicità come requisito del rate limiter, non come dettaglio"
+    - "Tiene i byte dei file fuori dal backend usando URL prefirmate"
   pitfalls:
     - "Proporre fan-out on write senza affrontare il problema degli account con milioni di follower"
     - "Far passare gli upload dei file attraverso il backend invece di usare presigned URL"
-  follow_up_questions:
-    - "Progetta un accorciatore di URL: come generi gli identificativi?"
+    - "Rate limiter con lettura e scrittura separate: sotto carico il limite non tiene"
+    - "Scegliere il 301 senza accorgersi che rende impossibili le analitiche"
+  follow_ups:
+    - question: "Progetta un accorciatore di URL: come generi gli identificativi?"
+      answer: >-
+        Le due strade sono un contatore globale convertito in base62 e un hash dell'URL
+        troncato. Il contatore dà i codici più corti e nessuna collisione, ma richiede un
+        servizio di sequenze e rende gli id enumerabili, il che è un problema se i link
+        sono riservati. L'hash evita il coordinamento e fa sì che lo stesso URL produca
+        sempre lo stesso codice, ma va gestita la collisione, tipicamente aggiungendo un
+        suffisso e riprovando. Con sette caratteri base62 si hanno circa 3.500 miliardi di
+        combinazioni, abbondanti in entrambi i casi.
+    - question: Come gestiresti la consegna dei messaggi a un utente offline in una chat?
+      answer: >-
+        Il messaggio viene sempre persistito per primo, poi si tenta la consegna sulla
+        connessione WebSocket se esiste. Se il destinatario è offline, il messaggio resta
+        nello storage con uno stato di non consegnato e viene recuperato alla
+        riconnessione, chiedendo tutto ciò che è successo dopo l'ultimo identificativo
+        ricevuto. In parallelo si invia una notifica push. La chiave è che la persistenza
+        precede la consegna: al contrario, un crash del server perde il messaggio.
+    - question: Come implementeresti un rate limiter distribuito?
+      answer: >-
+        Con uno store condiviso, tipicamente Redis, e un algoritmo a token bucket o
+        finestra scorrevole. Il punto critico è l'atomicità: leggere il contatore,
+        decidere e aggiornare devono essere un'unica operazione, altrimenti sotto
+        concorrenza due richieste leggono lo stesso valore e il limite si buca. Si usa
+        INCR con scadenza per i casi semplici e uno script Lua per gli algoritmi più
+        precisi. Va poi deciso su cosa limitare - utente, IP o chiave API - e cosa
+        restituire: 429 con l'header Retry-After.
+    - question: Perché non far passare gli upload dal backend?
+      answer: >-
+        Perché i byte occupano banda, memoria e connessioni dell'applicazione per tutto il
+        tempo del caricamento, e un file grande da un client lento tiene impegnato un
+        worker per minuti. Con una URL prefirmata il servizio genera un permesso a tempo
+        e il client carica direttamente sull'object storage, che poi notifica il backend a
+        caricamento completato. Il servizio resta sul percorso di controllo e fuori da
+        quello dei dati, che è la regola generale per tutto ciò che è voluminoso.
+  related: [sd-01-interview-framework, cache-24-cdn, core-09-rate-limiting-throttling, rel-35-event-driven]
+  resources:
+    - title: "The System Design Primer - esercizi svolti"
+      url: https://github.com/donnemartin/system-design-primer
+      kind: repo
+    - title: "Amazon Builders' Library"
+      url: https://aws.amazon.com/builders-library/
+      kind: article
 
 - id: beh-01-star-method
   title: Domande comportamentali e metodo STAR
@@ -76,14 +347,106 @@
     Le domande comportamentali verificano come ti comporti davvero, partendo dal
     presupposto che il passato predice il futuro. Il metodo STAR dà una struttura:
     Situazione, Task, Azione, Risultato.
+  deep_dive: |-
+    Il presupposto di queste domande è che il comportamento passato sia il miglior
+    indicatore di quello futuro. Per questo chiedono sempre di raccontare qualcosa di
+    accaduto, non cosa faresti in teoria: se la risposta scivola nell'ipotetico - "di
+    solito cerco di..." - il segnale è che la storia non c'è, e l'intervistatore lo nota.
+
+    STAR distribuisce male il tempo se applicato alla lettera. Nella pratica la
+    situazione va tenuta in due frasi, il compito in una, e il settanta per cento del
+    tempo deve stare sull'azione, perché è l'unica parte che parla di te. Il risultato
+    chiude, meglio se con un numero: "abbiamo ridotto la latenza del 40%" è verificabile,
+    "è andata molto meglio" no. Se il numero non c'è si può usare un esito osservabile:
+    il servizio ha smesso di svegliare le persone di notte, il rilascio è passato da
+    mensile a settimanale.
+
+    Il pronome conta più di quanto sembri. "Abbiamo deciso, abbiamo implementato" non
+    dice quale parte fosse tua, e l'intervistatore sta valutando te. Usare "io" per la
+    propria parte e "noi" per il contesto è il compromesso onesto: non ci si appropria
+    del lavoro altrui e si rende visibile il proprio.
+
+    Le storie vanno preparate prima, perché sul momento non si inventano. Sei o otto
+    coprono quasi tutte le domande, perché le domande sono poche famiglie ripetute:
+    conflitto con un collega, fallimento o errore, leadership senza autorità formale,
+    scadenza impossibile, feedback negativo ricevuto, decisione tecnica controversa,
+    qualcosa imparato in fretta. Una stessa storia può servire a più domande cambiando
+    l'angolo con cui la si racconta, ed è utile sapere in anticipo qual è il punto che
+    si vuole far passare in ciascun caso.
+
+    La domanda sul fallimento merita un discorso a parte perché è quella dove si sbaglia
+    di più. Rispondere con un finto difetto - "sono troppo perfezionista", "mi impegno
+    troppo" - è trasparente e viene letto come mancanza di autoconsapevolezza. La
+    risposta forte racconta un errore vero, di cui si assume la responsabilità senza
+    scaricarla sul contesto, e si concentra su cosa è cambiato dopo: quale controllo è
+    stato aggiunto, quale abitudine è cambiata. È esattamente l'informazione che la
+    domanda cerca.
   key_points:
     - "Situation: contesto in due frasi. Task: quale era la tua responsabilità. Action: cosa hai fatto TU. Result: esito, possibilmente misurabile"
     - "Il 70% del tempo va sulla Action: è la parte che interessa davvero"
     - "Usa io, non noi: l'intervistatore valuta te, non il tuo team"
+    - "Racconta fatti accaduti, non ipotesi: 'di solito cerco di' segnala che la storia non c'è"
     - "Prepara 6-8 storie riutilizzabili: conflitto, fallimento, leadership senza autorità, scadenza difficile, feedback ricevuto, decisione tecnica controversa"
     - "Una buona storia di fallimento è quella in cui ammetti l'errore e spieghi cosa hai cambiato dopo"
     - "Numeri dove ci sono: -40% di latenza è più credibile di molto più veloce"
     - "Prepara le storie in italiano e in inglese se l'azienda è internazionale"
+  examples:
+    - title: La stessa storia, raccontata male e raccontata bene
+      language: text
+      code: |
+        DEBOLE
+          "Avevamo un problema di performance sul servizio degli ordini. Abbiamo
+           analizzato la situazione, abbiamo fatto delle ottimizzazioni e alla fine
+           è andata molto meglio. È stato un bel lavoro di squadra."
+          -> nessun "io", nessuna decisione, nessun numero, nessun compromesso.
+
+        FORTE
+          S: "Il servizio ordini aveva picchi di latenza a 4 secondi nelle ore di punta,
+              con reclami dei clienti."                                      (2 frasi)
+          T: "Ero responsabile di riportarlo sotto il secondo entro lo sprint."  (1 frase)
+          A: "Ho profilato invece di tirare a indovinare: il 70% del tempo era in una
+              query N+1 sul catalogo. Ho valutato due strade, una cache e una join
+              eager. Ho scelto la join perché la cache avrebbe introdotto dati stantii
+              sui prezzi, che per noi non era accettabile. Ho aggiunto un test di
+              regressione sul numero di query per non tornare indietro."      (il 70%)
+          R: "P95 da 4s a 600ms, reclami azzerati, e il test ha già intercettato due
+              regressioni nei mesi successivi."                              (numeri)
+      note: >-
+        La parte che convince è il "perché ho scelto quella strada e non l'altra": è lì
+        che si vede il ragionamento, non nell'elenco delle attività svolte.
+    - title: Le famiglie di domande e le storie che le coprono
+      language: text
+      code: |
+        conflitto con un collega        -> decisione tecnica controversa
+        fallimento / errore             -> incidente in produzione causato da te
+        leadership senza autorità       -> hai convinto il team a cambiare approccio
+        scadenza impossibile            -> hai negoziato lo scope invece della qualità
+        feedback negativo ricevuto      -> una review dura e cosa hai cambiato
+        ambiguità / poche informazioni  -> requisiti vaghi e come li hai chiariti
+        imparare in fretta              -> tecnologia nuova sotto pressione
+        disaccordo con il capo          -> hai portato dati invece di opinioni
+
+        Sei storie ben preparate coprono tutte queste righe: la stessa vicenda
+        cambia famiglia a seconda dell'angolo con cui la si racconta.
+      note: >-
+        Utile scrivere per ogni storia una riga sola con il punto che si vuole far
+        passare: aiuta a non divagare e a chiudere quando si è detto ciò che serve.
+  trade_offs:
+    - option: Storie preparate in anticipo
+      pros: Struttura chiara, numeri pronti, nessuna divagazione
+      cons: Rischio di sembrare recitate se si imparano a memoria parola per parola
+      when: Sempre; si prepara la struttura e i fatti, non il testo
+    - option: Rispondere improvvisando
+      pros: Suona naturale e spontaneo
+      cons: Si divaga sul contesto, si dimenticano i numeri, si finisce senza esito
+      when: Solo se la domanda è davvero inattesa; e allora si prende qualche secondo
+    - option: Raccontare un fallimento reale
+      pros: Credibile, mostra autoconsapevolezza, risponde a ciò che la domanda cerca
+      cons: Richiede di esporsi, e va scelto un errore non squalificante
+      when: Sempre, alla domanda sul fallimento; il finto difetto è trasparente
+  numbers:
+    - "Regola pratica sui tempi: 2 frasi di situazione, 1 di compito, il 70% sull'azione, 1-2 di risultato, per un totale di 2-3 minuti"
+    - "Sei-otto storie preparate coprono la quasi totalità delle domande comportamentali, perché le famiglie di domande sono poche e ricorrenti"
   interview_answer: >-
     Rispondo con STAR ma tenendo la situazione breve, due frasi al massimo, e dedicando la
     maggior parte del tempo a cosa ho fatto io e perché ho scelto quella strada invece di
@@ -92,14 +455,56 @@
     ognuna ho chiaro qual è il punto che voglio far passare. Sulla domanda del fallimento non
     uso trucchi tipo sono troppo perfezionista: racconto un errore vero e cosa ho cambiato
     dopo, perché è esattamente quello che l'intervistatore sta cercando di capire.
+  senior_signals:
+    - "Spiega perché ha scelto un'opzione invece di un'altra, non solo cosa ha fatto"
+    - "Distingue il proprio contributo da quello del team senza sminuire nessuno"
+    - "Porta numeri o esiti osservabili invece di aggettivi"
+    - "Sulla domanda del fallimento espone un errore vero e il cambiamento che ne è seguito"
   pitfalls:
     - "Parlare al plurale e non far capire il proprio contributo"
     - "Storie senza esito, o senza cosa si è imparato"
     - "Finto difetto alla domanda sul fallimento"
     - "Divagare per cinque minuti sul contesto"
-  follow_up_questions:
-    - "Raccontami di un disaccordo tecnico con un collega e come si è risolto"
-    - "Parlami di una volta in cui hai fatto un errore in produzione"
+  follow_ups:
+    - question: Raccontami di un disaccordo tecnico con un collega e come si è risolto
+      answer: >-
+        La struttura che funziona è: qual era la posizione di entrambi e perché ciascuna
+        aveva senso, che cosa ho fatto per uscire dall'opinione - di solito misurare,
+        prototipare o cercare un precedente - e come si è chiusa, anche se la decisione
+        finale non è stata la mia. Una storia in cui si accetta la soluzione altrui
+        perché i dati le davano ragione è più forte di una in cui si ha vinto, perché
+        mostra che l'obiettivo era la decisione giusta e non l'affermazione personale.
+    - question: Parlami di una volta in cui hai fatto un errore in produzione
+      answer: >-
+        Si racconta cosa è successo, senza attenuare la propria responsabilità, come è
+        stato rilevato, quanto ci è voluto a rimediare e soprattutto cosa è cambiato dopo:
+        un controllo automatico, un allarme, una modifica al processo di rilascio. La
+        parte che conta è l'ultima. Scaricare la colpa sul processo o sui colleghi
+        capovolge l'impressione, mentre ammettere l'errore e mostrare il cambiamento
+        strutturale che ne è seguito è esattamente la risposta cercata.
+    - question: Come rispondi se non hai una storia per quella domanda?
+      answer: >-
+        Non si inventa. Si dice con franchezza che quella situazione specifica non è
+        capitata e si propone la cosa più vicina che si è vissuta, spiegando in che cosa
+        differisce. Se proprio non c'è nulla, si può dire come ci si comporterebbe
+        motivandolo con un principio applicato altrove, ma dichiarando che è un'ipotesi.
+        Una storia inventata crolla alla prima domanda di dettaglio, e a quel punto il
+        danno è molto maggiore.
+    - question: Quanto devono essere recenti le storie?
+      answer: >-
+        Meglio degli ultimi due o tre anni, perché raccontano chi si è adesso e il
+        contesto è più simile a quello del ruolo. Una storia più vecchia va bene se è
+        particolarmente significativa o se copre una famiglia di domande per cui non c'è
+        altro, ma conviene dirlo - "è successo qualche anno fa, quando..." - invece di
+        lasciare che l'intervistatore lo scopra dalle date del curriculum.
+  related: [beh-02-company-research, beh-03-negotiation, eng-05-code-quality, rel-38-observability]
+  resources:
+    - title: "Cracking the Coding Interview - capitolo sulle domande comportamentali"
+      url: https://www.crackingthecodinginterview.com/
+      kind: book
+    - title: "Amazon Leadership Principles"
+      url: https://www.amazon.jobs/content/en/our-workplace/leadership-principles
+      kind: article
 
 - id: beh-02-company-research
   title: Prepararsi sull'azienda
@@ -112,6 +517,38 @@
     Presentarsi informati sull'azienda è uno dei pochi vantaggi completamente sotto il tuo
     controllo. Serve a rispondere bene al perché noi e a fare domande che ti distinguano
     dagli altri candidati.
+  deep_dive: |-
+    Quattro fronti bastano, e si coprono in un'ora. Il prodotto: va usato davvero, non
+    letto sul sito, perché un'osservazione concreta - un passaggio dell'onboarding che
+    non torna, una funzione che manca rispetto a un concorrente - vale più di qualunque
+    complimento generico. Il modello di business: chi paga, per cosa, con quale
+    marginalità, perché da lì discende cosa conta per l'engineering. In un'azienda che
+    vende abbonamenti la ritenzione è tutto e quindi l'affidabilità pesa più della
+    velocità di rilascio; in una che vive di pubblicità contano volume e latenza; in una
+    B2B con pochi clienti grandi contano integrazioni e personalizzazioni.
+
+    Il terzo fronte è lo stack, e le fonti sono più di quante si creda: la pagina delle
+    posizioni aperte, il blog di ingegneria, i repository pubblici, i talk dei
+    dipendenti alle conferenze, le loro risposte su Stack Overflow. Il quarto sono le
+    notizie degli ultimi sei-dodici mesi: round di finanziamento, acquisizioni, lanci,
+    riduzioni di personale. Sapere che hanno appena chiuso un round e stanno aprendo un
+    mercato nuovo cambia il tono delle domande che si fanno.
+
+    Il "perché noi" va preparato con due motivi specifici, non uno generico. Uno può
+    riguardare il prodotto o il problema che risolvono, l'altro il modo in cui lavorano
+    o la tecnologia. La prova del nove è semplice: se la stessa risposta funzionerebbe
+    per un'altra azienda del settore, non è una risposta.
+
+    Le domande da fare contano quanto le risposte, perché dicono a cosa si dà valore. Le
+    domande utili riguardano come nascono le priorità, com'è il ciclo di rilascio, cosa
+    è andato storto di recente e cosa ne è seguito, come è organizzato l'oncall, come si
+    gestisce il debito tecnico, che cosa distingue chi va bene in quel ruolo. Le domande
+    su ferie e smart working sono legittime ma vanno al colloquio con HR o alla fine del
+    processo, non al primo incontro tecnico.
+
+    Un ultimo elemento spesso trascurato: chi conduce il colloquio. Sapere che cosa ha
+    costruito, su cosa scrive o parla, permette di fare una domanda mirata che nessun
+    altro candidato farà, e costa cinque minuti.
   key_points:
     - "Prodotto: usalo davvero prima del colloquio, e arriva con un'osservazione concreta"
     - "Modello di business: chi paga e perché. Determina cosa conta per l'engineering"
@@ -119,20 +556,117 @@
     - "Notizie recenti: round, acquisizioni, lanci, layoff. Gli ultimi 6-12 mesi"
     - "Persone: chi ti intervista, cosa ha costruito, su cosa scrive"
     - "Prepara la risposta a perché questa azienda con due motivi specifici, non generici"
+    - "La prova del nove: se la risposta varrebbe per un concorrente, non è una risposta"
     - "Prepara 3-5 domande da fare: dicono di te più di molte risposte"
+  examples:
+    - title: Il perché noi, versione generica e versione specifica
+      language: text
+      code: |
+        GENERICA (vale per chiunque, quindi non vale)
+          "Siete un'azienda innovativa in forte crescita e mi piace il vostro prodotto.
+           Cerco un ambiente stimolante dove poter crescere."
+
+        SPECIFICA (due motivi, entrambi verificabili)
+          "Ho provato il flusso di import e mi ha colpito che gestiate la
+           riconciliazione degli ordini duplicati lato vostro invece di rimandarla
+           all'utente: è un problema che ho affrontato nel mio lavoro attuale e so
+           quanto sia scomodo. E dal vostro blog ho visto che avete migrato a
+           un'architettura a eventi l'anno scorso raccontando anche cosa è andato
+           storto - è il tipo di trasparenza tecnica su cui mi trovo bene."
+      note: >-
+        La versione specifica richiede un'ora di preparazione e non si può improvvisare:
+        è esattamente il motivo per cui distingue.
+    - title: Domande da fare, in ordine di quanto dicono di te
+      language: text
+      code: |
+        FORTI
+          "Come nascono le priorità del team? Da dove arriva quello che finisce in sprint?"
+          "Qual è stato l'ultimo incidente significativo e cosa è cambiato dopo?"
+          "Come è organizzato l'oncall e con che frequenza si viene chiamati di notte?"
+          "Come gestite il debito tecnico: c'è spazio dedicato o si negozia volta per volta?"
+          "Che cosa distingue chi va molto bene in questo ruolo da chi va discretamente?"
+
+        DEBOLI AL PRIMO COLLOQUIO (legittime, ma più avanti nel processo)
+          "Quanti giorni di smart working ci sono?"
+          "Come funzionano le ferie?"
+          "Quando si fanno gli aumenti?"
+      note: >-
+        Le domande forti hanno in comune che servono a capire se il posto va bene per te:
+        è questo che le rende credibili, non il fatto di sembrare interessato.
+  trade_offs:
+    - option: Preparazione approfondita (un'ora o più)
+      pros: Risposte specifiche, domande mirate, si distingue dalla maggior parte
+      cons: Tempo, e va ripetuta per ogni azienda del processo
+      when: Colloqui a cui si tiene davvero; non si può fare per venti candidature
+    - option: Preparazione veloce (quindici minuti)
+      pros: Copre prodotto e notizie recenti, evita le figure peggiori
+      cons: Non basta per un "perché noi" convincente
+      when: Primo screening o processi in parallelo
+    - option: Nessuna preparazione
+      pros: Nessuno
+      cons: La domanda sul perché arriva sempre, e la risposta generica si sente
+      when: Mai
+  numbers:
+    - "Un'ora di preparazione copre prodotto, modello di business, stack e notizie: è il rapporto sforzo-risultato migliore di tutto il processo"
+    - "Tre-cinque domande preparate bastano: se ne faranno due o tre, ma qualcuna verrà già risposta durante il colloquio"
   interview_answer: >-
     Mi preparo su quattro fronti: cosa fa il prodotto e come lo userei, come l'azienda guadagna,
     che stack usa e cosa è successo negli ultimi mesi. Il prodotto lo provo davvero, così posso
     portare un'osservazione concreta invece di un complimento generico. Poi preparo tre o quattro
     domande da fare, che scelgo per capire cose che mi servono davvero: come nascono le priorità,
-    com'è il ciclo di rilascio, cosa è andato storto di recente e cosa ne è seguito.
+    com'è il ciclo di rilascio, cosa è andato storto di recente e cosa ne è seguito. La prova
+    che ho preparato abbastanza è che la mia risposta al perché voi non funzionerebbe per un
+    vostro concorrente.
+  senior_signals:
+    - "Collega il modello di business a cosa conta per l'ingegneria"
+    - "Porta un'osservazione concreta sul prodotto, non un complimento"
+    - "Fa domande su incidenti, oncall e debito tecnico, cioè su come si lavora davvero"
+    - "Si informa su chi conduce il colloquio e fa una domanda mirata"
   pitfalls:
     - "Rispondere al perché noi con frasi che varrebbero per qualunque azienda"
     - "Non avere domande da fare: segnala disinteresse"
     - "Fare domande solo su ferie e smart working al primo colloquio"
-  follow_up_questions:
-    - "Perché vuoi lavorare proprio qui?"
-    - "Che domande hai per noi?"
+    - "Criticare il prodotto in modo netto invece di porlo come osservazione o domanda"
+  follow_ups:
+    - question: Perché vuoi lavorare proprio qui?
+      answer: >-
+        Si risponde con due motivi specifici e verificabili: uno sul prodotto o sul
+        problema che l'azienda risolve, meglio se legato a qualcosa che si è vissuto
+        direttamente, e uno sul modo di lavorare o sulla tecnologia, ricavato dal blog di
+        ingegneria, dai repository pubblici o da un talk. Il criterio di qualità è che la
+        risposta non deve poter funzionare per un concorrente: se funziona, è generica e
+        l'intervistatore lo sente immediatamente.
+    - question: Che domande hai per noi?
+      answer: >-
+        Ne porto tre o quattro, scelte su cose che mi servono davvero per decidere: come
+        nascono le priorità, com'è fatto il ciclo di rilascio, qual è stato l'ultimo
+        incidente rilevante e cosa è cambiato dopo, come si gestisce il debito tecnico.
+        Sono domande che dicono a cosa do valore e allo stesso tempo mi danno informazioni
+        reali sul posto. Se durante il colloquio hanno già risposto a una, lo dico e passo
+        alla successiva: mostra che stavo ascoltando.
+    - question: Come ti informi sullo stack di un'azienda che non lo pubblica?
+      answer: >-
+        Le annunci di lavoro sono la fonte migliore, anche quelli per ruoli diversi dal
+        mio, perché elencano tecnologie in modo esplicito. Poi i repository pubblici
+        dell'organizzazione, i profili dei dipendenti, le loro presentazioni a conferenze
+        e, se il prodotto è web, quello che si vede dagli strumenti per sviluppatori del
+        browser. E in ogni caso è una domanda perfettamente legittima da fare durante il
+        colloquio, formulata come curiosità sull'architettura.
+    - question: Vale la pena preparare così tanto per ogni candidatura?
+      answer: >-
+        No, e conviene essere strategici: per le aziende a cui si tiene davvero si fa
+        l'ora piena, per gli screening iniziali bastano quindici minuti su prodotto e
+        notizie recenti. Preparare a fondo venti candidature non è sostenibile e porta a
+        farlo male ovunque. Meglio poche candidature preparate bene, anche perché la
+        preparazione approfondita serve anche a decidere se quel posto interessa davvero.
+  related: [beh-01-star-method, beh-03-negotiation, eng-03-cloud-basics, rel-39-deployments]
+  resources:
+    - title: "reverse-interview - domande da fare all'azienda"
+      url: https://github.com/viraptor/reverse-interview
+      kind: repo
+    - title: "levels.fyi"
+      url: https://www.levels.fyi/
+      kind: article
 
 - id: beh-03-negotiation
   title: Domande su retribuzione e negoziazione
@@ -145,27 +679,168 @@
     La negoziazione inizia molto prima dell'offerta: comincia da come rispondi alla domanda
     sulle aspettative economiche. Informarsi sulle fasce di mercato è la parte che pesa di
     più.
+  deep_dive: |-
+    Il principio di fondo è che chi dà per primo un numero fissa il riferimento attorno a
+    cui ruota tutta la conversazione. Per questo conviene rimandare finché è possibile,
+    educatamente: si può rispondere chiedendo quale fascia è prevista per il ruolo,
+    spiegando che interessa capire se si è allineati. Molte aziende la dicono, e in
+    diversi Paesi - e per alcune posizioni in Italia - la fascia è pubblicata per legge o
+    per policy.
+
+    Se insistono, si dà una fascia costruita su dati di mercato per quel ruolo, quella
+    seniority e quella zona, con il proprio obiettivo vicino all'estremo inferiore: così
+    qualunque valore dentro la fascia resta accettabile. Dare un numero secco troppo
+    presto è il modo più efficace per lasciare soldi sul tavolo, e dare una fascia troppo
+    ampia segnala che non ci si è informati.
+
+    La negoziazione vera inizia dopo l'offerta, non prima. Fino a quel momento l'azienda
+    sta valutando se ti vuole; dopo, ha già investito nel processo, ha scartato altri
+    candidati e il costo di ricominciare è alto: è il momento in cui il margine esiste.
+    Negoziare educatamente è la norma e nella maggior parte dei casi produce un
+    miglioramento; non negoziare affatto è l'opzione che costa di più, e su un intero
+    percorso professionale la differenza si compone.
+
+    Va valutato il pacchetto intero, non solo la retribuzione lorda annua. In Italia il
+    primo numero da chiarire è su quante mensilità è distribuita la RAL, perché tredici o
+    quattordici cambiano sensibilmente il netto mensile. Poi bonus - garantito o
+    variabile, e legato a quali obiettivi - eventuale equity con il suo periodo di
+    maturazione, buoni pasto, welfare, budget di formazione, giorni di lavoro da remoto,
+    e il valore economico reale di quest'ultimo se comporta trasferte.
+
+    Sulle leve: un'offerta concorrente è la più forte, ma non va mai inventata. Le
+    aziende a volte chiedono conferma, e una bugia scoperta fa saltare tutto. Se non c'è
+    un'offerta concorrente restano argomenti validi: competenze specifiche che servono a
+    loro, la fascia di mercato documentata, la responsabilità effettiva del ruolo. E se
+    la retribuzione non si muove, si può negoziare su altro: giorni da remoto, budget di
+    formazione, una revisione anticipata a sei mesi messa per iscritto.
   key_points:
     - "Rimanda il numero finché puoi: prima l'azienda conosce il tuo valore, meglio negozi"
     - "Se insistono, dai una fascia basata su dati reali, con il tuo obiettivo vicino al minimo della fascia"
+    - "La negoziazione vera inizia dopo l'offerta: prima ti stanno valutando, dopo hanno investito"
     - "Fonti per l'Italia: Levels.fyi, Glassdoor, report retributivi di Hays e Michael Page, sondaggi di community"
     - "Valuta il pacchetto intero: RAL, bonus, equity, ticket, welfare, formazione, giorni di smart working"
     - "Negozia sempre, educatamente: nella maggior parte dei casi la prima offerta ha margine"
     - "Un'offerta concorrente è la leva più forte, ma non bluffare mai"
     - "In Italia la RAL è su 13 o 14 mensilità: verifica sempre quante, cambia parecchio il netto"
+  examples:
+    - title: Come si rimanda il numero, senza sembrare evasivi
+      language: text
+      code: |
+        LORO  "Quali sono le sue aspettative economiche?"
+
+        TU    "Mi interesserebbe prima capire meglio la responsabilità del ruolo.
+               Avete una fascia prevista per questa posizione? Così vedo subito se
+               siamo allineati e non facciamo perdere tempo a nessuno."
+
+        SE INSISTONO
+              "Per un ruolo di questo tipo, con questa seniority e in questa zona,
+               i riferimenti di mercato che ho visto vanno da X a Y. Il mio obiettivo
+               è nella parte bassa di quella fascia, ma la cifra dipende anche dal
+               resto del pacchetto: mensilità, bonus, formazione, giorni da remoto."
+
+        ERRORE  "Attualmente prendo X e mi accontenterei di X + 5%."
+                -> ancora la trattativa allo stipendio attuale invece che al valore
+                   del ruolo. In alcuni Paesi chiedere lo storico è anche vietato.
+      note: >-
+        La frase "così non facciamo perdere tempo a nessuno" è quella che rende la
+        richiesta collaborativa invece che difensiva.
+    - title: Il pacchetto, non la RAL
+      language: text
+      code: |
+        OFFERTA A            RAL 45.000 su 14 mensilità
+                             bonus 10% legato a obiettivi aziendali (non garantito)
+                             buoni pasto 8 EUR/giorno  ->  ~1.700 EUR/anno esentasse
+                             2 giorni da remoto
+                             nessun budget di formazione
+
+        OFFERTA B            RAL 47.000 su 13 mensilità
+                             nessun bonus
+                             nessun buono pasto
+                             full remote        ->  risparmio reale su trasporti e tempo
+                             2.000 EUR/anno di formazione e conferenze
+
+        La RAL più alta non è automaticamente l'offerta migliore: mensilità, benefit
+        esentasse e il valore economico del remoto cambiano il confronto.
+      note: >-
+        Mettere le due offerte in colonna prima di rispondere evita di farsi guidare dal
+        numero più grande, che è l'unico che si ricorda a memoria.
+  trade_offs:
+    - option: Rimandare il numero
+      pros: Non si fissa un riferimento basso, si negozia sul valore del ruolo
+      cons: Qualche azienda insiste e può leggerlo come poca chiarezza
+      when: Sempre come prima mossa, con la formula collaborativa
+    - option: Dare subito una fascia documentata
+      pros: Sblocca il processo, evita di arrivare in fondo con aspettative incompatibili
+      cons: Il riferimento è fissato, difficile alzarlo dopo
+      when: Insistono, o il processo è lungo e si vuole filtrare presto
+    - option: Negoziare dopo l'offerta
+      pros: È il momento di massimo margine, l'azienda ha già investito
+      cons: Richiede di sostenere qualche minuto di conversazione scomoda
+      when: Sempre; non negoziare è l'unica opzione che costa con certezza
+  numbers:
+    - "In Italia la RAL si divide su 13 o 14 mensilità: a parità di RAL, la differenza sul netto mensile è di circa il 7%"
+    - "I buoni pasto sono esentasse fino a 8 euro al giorno in formato elettronico: circa 1.700 euro all'anno netti che non compaiono nella RAL"
   interview_answer: >-
     Quando arriva la domanda sulle aspettative cerco prima di capire la fascia prevista per il
     ruolo, dicendo che mi interesserebbe conoscerla per capire se siamo allineati. Se devo dare
     un numero do una fascia costruita su dati di mercato per quel ruolo e quella seniority, e
     metto il mio obiettivo vicino all'estremo inferiore, così ogni valore della fascia resta
     accettabile. Quando arriva l'offerta la valuto intera, non solo la RAL, e verifico il numero
-    di mensilità perché in Italia cambia sensibilmente il netto.
+    di mensilità perché in Italia cambia sensibilmente il netto. E negozio sempre, con garbo:
+    nella maggior parte dei casi la prima offerta ha un margine, e non chiederlo lo lascia lì.
+  senior_signals:
+    - "Sposta la conversazione dal proprio stipendio attuale al valore del ruolo"
+    - "Confronta i pacchetti interi, mensilità e benefit compresi, non le sole RAL"
+    - "Negozia su leve diverse dalla retribuzione quando quella è bloccata"
+    - "Non inventa offerte concorrenti"
   pitfalls:
     - "Dare un numero troppo presto e troppo basso"
     - "Guardare solo la RAL ignorando bonus, mensilità e benefit"
     - "Accettare al volo per paura di perdere l'offerta"
-  follow_up_questions:
-    - "Quali sono le tue aspettative economiche?"
+    - "Bluffare su un'offerta concorrente che non esiste"
+  follow_ups:
+    - question: Quali sono le tue aspettative economiche?
+      answer: >-
+        Prima provo a far dire a loro la fascia prevista, motivandolo come un modo per
+        verificare subito se siamo allineati. Se insistono do una fascia costruita sui dati
+        di mercato per quel ruolo, quella seniority e quella zona, mettendo il mio
+        obiettivo nella parte bassa, e aggiungo che la cifra dipende anche dal resto del
+        pacchetto. Quello che evito è ancorare la trattativa al mio stipendio attuale:
+        sposta la conversazione da quanto vale il ruolo a quanto guadagno adesso.
+    - question: Come negozi se non hai un'offerta concorrente?
+      answer: >-
+        Con gli argomenti che restano, che non sono pochi: i riferimenti di mercato
+        documentati per quel ruolo, le competenze specifiche che servono a loro e che
+        hanno cercato a lungo, la responsabilità effettiva della posizione rispetto al
+        livello proposto. E se la retribuzione è davvero bloccata, sposto la richiesta su
+        altre leve: giorni da remoto, budget di formazione, un titolo diverso, una
+        revisione anticipata a sei mesi messa per iscritto. Quello che non faccio mai è
+        inventare un'offerta che non ho.
+    - question: Quando è il momento giusto per negoziare?
+      answer: >-
+        Dopo aver ricevuto l'offerta formale, non prima. Fino a quel momento l'azienda sta
+        ancora decidendo se mi vuole, e discutere di soldi indebolisce la posizione. Una
+        volta che l'offerta c'è, hanno investito nel processo, hanno scartato altri
+        candidati e ricominciare costa loro tempo e denaro: è lì che il margine esiste. Si
+        ringrazia, si chiede un paio di giorni per valutare, e si torna con una richiesta
+        motivata.
+    - question: Che cosa guardi in un'offerta oltre alla RAL?
+      answer: >-
+        Il numero di mensilità, che in Italia è la prima cosa da chiarire perché cambia il
+        netto mensile di circa il sette per cento. Poi se il bonus è garantito o variabile
+        e a quali obiettivi è legato - un bonus su obiettivi aziendali su cui non ho
+        influenza vale poco. L'eventuale equity con il suo piano di maturazione e le
+        condizioni di uscita. I benefit esentasse come i buoni pasto, che non compaiono
+        nella RAL ma valgono più di mille euro netti all'anno. E il valore economico reale
+        dei giorni da remoto, in trasporti e tempo.
+  related: [beh-02-company-research, beh-01-star-method, eng-03-cloud-basics, core-06-authn-vs-authz]
+  resources:
+    - title: "Salary Negotiation: Make More Money, Be More Valued (Patrick McKenzie)"
+      url: https://www.kalzumeus.com/2012/01/23/salary-negotiation/
+      kind: article
+    - title: "levels.fyi"
+      url: https://www.levels.fyi/
+      kind: article
 
 - id: eng-01-testing
   title: "Testing: piramide, doppi e cosa testare"
@@ -178,14 +853,113 @@
     I test servono a poter cambiare il codice senza paura. La piramide suggerisce molti test
     veloci e isolati alla base e pochi test lenti end-to-end in cima, perché il costo di
     manutenzione cresce salendo.
+  deep_dive: |-
+    Lo scopo dei test non è dimostrare che il codice funziona ma poterlo cambiare senza
+    paura. Da questo discende il criterio di scelta: fiducia guadagnata per unità di
+    tempo di esecuzione e di manutenzione. Un test che gira in un millisecondo e non si
+    rompe mai a sproposito vale molto; uno che impiega due minuti, fallisce a caso una
+    volta su dieci e va aggiornato a ogni refactor vale meno di zero, perché insegna a
+    ignorare i fallimenti.
+
+    La piramide classica - molti unitari, meno di integrazione, pochissimi end-to-end -
+    resta una buona euristica, anche se in Google il modello preferito parla di
+    dimensioni: test piccoli, che girano in un processo senza rete né disco; medi, che
+    usano un database o un servizio locale; grandi, che coprono il sistema. Il vantaggio
+    di questo vocabolario è che descrive il costo, che è ciò che conta, invece del
+    livello architetturale.
+
+    I doppi di test vanno saputi distinguere perché la domanda arriva. Un dummy riempie
+    un parametro e non fa nulla; uno stub restituisce risposte predefinite; uno spy
+    registra le chiamate per poterle ispezionare dopo; un mock verifica le interazioni
+    attese e fallisce se non avvengono; un fake è un'implementazione leggera ma
+    funzionante, per esempio un repository in memoria. La differenza pratica che conta è
+    fra stub e mock: lo stub serve a far funzionare il test, il mock è esso stesso
+    l'asserzione.
+
+    La regola che evita la maggior parte dei problemi è testare il comportamento
+    osservabile e non l'implementazione. Un test che verifica che sia stato chiamato un
+    certo metodo privato si rompe al primo refactor pur non essendoci nessuna regressione:
+    il test sta misurando come il codice è scritto invece di cosa fa. Lo stesso vale per
+    il mockare tutto: una suite di soli test unitari con ogni dipendenza sostituita può
+    essere completamente verde mentre il sistema non funziona, perché nessuno ha mai
+    verificato che i pezzi si parlino davvero. Oggi Testcontainers rende praticabile
+    usare un database reale nei test di integrazione, che è dove si annidano i bug veri:
+    query sbagliate, migrazioni dimenticate, vincoli violati.
+
+    Sulla copertura: è un indicatore, non un obiettivo. Il cento per cento con asserzioni
+    deboli non dice nulla, mentre un settanta per cento concentrato sulla logica di
+    dominio è ottimo. Utile guardare la copertura per individuare le zone dimenticate,
+    dannoso trasformarla in una soglia da superare. E i test intermittenti vanno risolti
+    o rimossi: tenerli erode la fiducia nell'intera suite, che è l'unica cosa che la
+    rende utile.
   key_points:
     - "Unit: veloci, isolati, sul comportamento di una unità. Integration: componenti reali insieme, tipicamente con database vero. E2E: flusso utente completo"
     - "Doppi di test: dummy, stub (risposte predefinite), spy (registra), mock (verifica interazioni), fake (implementazione leggera funzionante)"
+    - "Stub contro mock: lo stub fa funzionare il test, il mock è l'asserzione"
     - "Testa il comportamento pubblico, non l'implementazione: altrimenti ogni refactor rompe i test"
     - "Testcontainers rende i test di integrazione con database reali praticabili"
     - "La coverage è un indicatore, non un obiettivo: il 100% con assert deboli non dice nulla"
     - "Test flaky: vanno risolti o rimossi, perché erodono la fiducia in tutta la suite"
     - "TDD: red, green, refactor. Utile soprattutto su logica con regole complesse"
+  examples:
+    - title: Testare il comportamento, non l'implementazione
+      language: python
+      code: |
+        # FRAGILE: verifica COME è fatto. Un refactor interno lo rompe senza regressioni.
+        def test_fragile(mocker):
+            repo = mocker.Mock()
+            servizio = ServizioOrdini(repo)
+            servizio.conferma(ordine_id=7)
+            repo.carica.assert_called_once_with(7)      # dettaglio interno
+            repo.salva.assert_called_once()             # dettaglio interno
+
+        # ROBUSTO: verifica COSA fa, con un fake che si comporta davvero.
+        def test_robusto():
+            repo = RepositoryInMemoria([Ordine(id=7, stato="in_attesa")])
+            servizio = ServizioOrdini(repo)
+            servizio.conferma(ordine_id=7)
+            assert repo.per_id(7).stato == "confermato"  # effetto osservabile
+      note: >-
+        Il secondo test continua a passare se il servizio cambia il modo di caricare
+        l'ordine, e fallisce se smette di confermarlo: è esattamente il comportamento voluto.
+    - title: Il confine giusto per un'API esterna
+      language: python
+      code: |
+        # La dipendenza esterna sta dietro un'interfaccia del MIO dominio.
+        class ClientPagamenti(Protocol):
+            def addebita(self, importo: int, token: str) -> str: ...
+
+        class PagamentiFinti:
+            """Fake: implementazione leggera ma funzionante, non un mock."""
+            def __init__(self) -> None:
+                self.addebiti: list[tuple[int, str]] = []
+            def addebita(self, importo: int, token: str) -> str:
+                if importo <= 0:
+                    raise ValueError("importo non valido")
+                self.addebiti.append((importo, token))
+                return f"txn_{len(self.addebiti)}"
+
+        # Il contratto con il vero fornitore si verifica a parte, con pochi test
+        # di integrazione contro il loro ambiente di prova: non in ogni test unitario.
+      note: >-
+        Mockare l'HTTP direttamente lega i test alla forma delle richieste; mettere
+        l'interfaccia al confine del dominio li lega solo al comportamento che serve.
+  trade_offs:
+    - option: Molti test unitari
+      pros: Millisecondi, isolano il difetto, si lanciano a ogni salvataggio
+      cons: Verdi anche quando i pezzi non si parlano; invitano a mockare troppo
+      when: Logica di dominio, regole di calcolo, casi limite
+    - option: Test di integrazione con dipendenze reali
+      pros: Trovano i bug veri - query, migrazioni, vincoli, serializzazione
+      cons: Più lenti, richiedono infrastruttura (oggi Testcontainers la rende facile)
+      when: Confini con database e servizi esterni
+    - option: End-to-end
+      pros: L'unica verifica che il percorso utente funzioni davvero
+      cons: Lentissimi, fragili, difficili da diagnosticare quando falliscono
+      when: Pochi, solo sui percorsi critici come registrazione e pagamento
+  numbers:
+    - "Un test unitario si misura in millisecondi, uno di integrazione in centinaia di millisecondi, un end-to-end in decine di secondi: da qui la forma della piramide"
+    - "Un test intermittente che fallisce una volta su dieci, in una suite lanciata cinquanta volte al giorno, produce cinque falsi allarmi quotidiani: è il motivo per cui la fiducia si perde in fretta"
   interview_answer: >-
     Il criterio che uso è la fiducia per unità di tempo di esecuzione. Molti test unitari sulla
     logica di dominio, perché girano in millisecondi e li lancio a ogni salvataggio. Test di
@@ -194,13 +968,60 @@
     end sui percorsi critici come registrazione e pagamento. La regola che seguo è testare il
     comportamento osservabile e non l'implementazione, altrimenti mi ritrovo test che si rompono
     a ogni refactor senza che nulla sia effettivamente rotto.
+  senior_signals:
+    - "Motiva la forma della suite con il costo, non con una regola imparata"
+    - "Preferisce i fake ai mock quando deve sostituire una dipendenza"
+    - "Tratta i test intermittenti come bug da risolvere, non come rumore"
+    - "Usa la copertura per trovare le zone dimenticate, non come soglia"
   pitfalls:
     - "Mockare tutto e ritrovarsi test che passano su codice che non funziona"
     - "Inseguire la coverage come obiettivo"
     - "Convivere con test flaky"
-  follow_up_questions:
-    - "Che differenza c'è fra mock e stub?"
-    - "Come testeresti codice che chiama un'API esterna?"
+    - "Asserire su metodi privati o su chiamate interne invece che sull'effetto"
+  follow_ups:
+    - question: Che differenza c'è fra mock e stub?
+      answer: >-
+        Lo stub fornisce risposte predefinite perché il codice sotto test possa proseguire:
+        è un supporto, e l'asserzione sta altrove, sull'effetto osservabile. Il mock invece
+        è esso stesso l'asserzione: verifica che certe interazioni siano avvenute, con
+        certi argomenti e magari in un certo ordine, e fallisce se non è così. La
+        conseguenza pratica è che i mock legano il test all'implementazione, quindi vanno
+        usati con parsimonia e solo quando l'interazione è davvero ciò che si vuole
+        garantire - per esempio che un pagamento non venga addebitato due volte.
+    - question: Come testeresti codice che chiama un'API esterna?
+      answer: >-
+        Metto la dipendenza dietro un'interfaccia definita nel mio dominio e nei test uso
+        un fake, cioè un'implementazione leggera ma funzionante, invece di mockare le
+        chiamate HTTP: così i test non si legano alla forma delle richieste. In parallelo
+        tengo pochi test di integrazione contro l'ambiente di prova del fornitore, o
+        contro un server registrato, per verificare che il contratto regga davvero. E
+        aggiungo test sui casi che il fornitore produrrà prima o poi: timeout, 500, risposte
+        malformate.
+    - question: Che cosa fai con un test intermittente?
+      answer: >-
+        Lo tratto come un bug, perché quasi sempre lo è: dietro un test flaky c'è una
+        dipendenza dal tempo, un ordine di esecuzione non garantito, una risorsa condivisa
+        o una vera race condition nel codice di produzione. Lo isolo e lo risolvo; se non
+        posso farlo subito lo rimuovo o lo quaranteno esplicitamente, con un compito
+        tracciato. Quello che non faccio è lasciarlo lì e riavviare la pipeline, perché
+        quell'abitudine insegna a ignorare i fallimenti e rende inutile tutta la suite.
+    - question: Che copertura di test ti aspetti in un progetto?
+      answer: >-
+        Non do un numero come obiettivo. Guardo dove sta la copertura: sulla logica di
+        dominio e sui casi limite la voglio alta, sul codice di collegamento e sui
+        getter conta poco. Un settanta per cento concentrato nei punti giusti vale più di
+        un novanta ottenuto testando tutto superficialmente. La copertura la uso come
+        strumento di esplorazione - quali rami non ha mai toccato nessuno - non come
+        soglia da superare per far passare la pipeline, perché quella pressione produce
+        test scritti per la metrica.
+  related: [eng-05-code-quality, pat-05-dependency-injection, pat-12-error-handling, py-07-testing-packaging]
+  resources:
+    - title: "Software Engineering at Google - capitoli sul testing"
+      url: https://abseil.io/resources/swe-book
+      kind: book
+    - title: "Martin Fowler - Test Double"
+      url: https://martinfowler.com/bliki/TestDouble.html
+      kind: article
 
 - id: eng-02-git
   title: "Git: branching, merge, rebase"
@@ -213,7 +1034,43 @@
     Git è uno strumento quotidiano ma poche domande da colloquio lo toccano in profondità.
     Quelle che arrivano riguardano merge contro rebase e come uscire da una situazione
     sbagliata.
+  deep_dive: |-
+    Il modello mentale che rende tutto comprensibile è che un commit è immutabile e
+    identificato dall'hash del suo contenuto, che include il riferimento al commit
+    genitore. Da qui discende ogni regola: se si cambia un commit - con amend, rebase o
+    reset - non lo si sta modificando, se ne sta creando uno nuovo con un hash diverso,
+    e tutti i commit successivi cambiano a loro volta perché il genitore è cambiato. Un
+    branch è solo un puntatore a un commit, e spostarlo costa nulla.
+
+    Merge e rebase producono lo stesso contenuto e storie diverse. Il merge crea un
+    commit con due genitori e conserva la storia reale, comprese le sovrapposizioni fra
+    rami; il rebase riapplica i commit su una nuova base, producendo una storia lineare
+    più leggibile ma che non è mai accaduta in quel modo. La regola d'oro è non fare
+    rebase di commit già pubblicati e condivisi: chi li ha già scaricati si ritrova con
+    una storia divergente, e l'unica via d'uscita è un reset sul suo lato. Sul proprio
+    branch, prima di aprire una richiesta di merge, il rebase è invece comodissimo.
+
+    Annullare qualcosa ha due strade con conseguenze opposte. `git revert` crea un nuovo
+    commit che applica le modifiche inverse: non riscrive nulla, è sicuro su un branch
+    condiviso ed è ciò che si usa in produzione. `git reset` sposta il puntatore del
+    branch e riscrive la storia: va bene solo in locale, su commit che nessuno ha ancora
+    visto. La distinzione fra reset soft, mixed e hard riguarda cosa succede all'area di
+    staging e alla copia di lavoro, ed è utile saperla: soft tiene tutto pronto per un
+    nuovo commit, mixed tiene le modifiche ma non lo staging, hard butta via tutto.
+
+    Sul flusso di lavoro, il trunk-based development con branch che vivono ore o giorni
+    riduce i conflitti quasi a zero, perché i punti di divergenza restano piccoli.
+    GitFlow, con branch di release e hotfix separati, ha senso quando si mantengono più
+    versioni in parallelo, ma per un servizio che rilascia in continuo è sovrastruttura.
+    I conflitti, quando arrivano, nascono sempre dalla stessa causa: due modifiche alle
+    stesse righe, e la cura è merge frequenti dal branch principale.
+
+    Due strumenti che vale la pena nominare: `git bisect` trova con una ricerca binaria
+    il commit che ha introdotto un bug, ed è potentissimo su storie lunghe; `--force-with-lease`
+    è la versione sicura del push forzato, perché rifiuta di sovrascrivere se qualcuno
+    ha pubblicato qualcosa che non abbiamo visto.
   key_points:
+    - "Un commit è immutabile e identificato dall'hash: modificarlo significa crearne uno nuovo, e cambia tutta la catena successiva"
     - "Merge conserva la storia reale e crea un commit di unione; rebase riscrive i commit su una nuova base e produce una storia lineare"
     - "Regola d'oro: mai fare rebase di commit già pubblicati e condivisi"
     - "git revert crea un commit inverso ed è sicuro sui branch condivisi; git reset riscrive la storia e va usato solo in locale"
@@ -221,19 +1078,118 @@
     - "Conflitti: nascono quando due branch toccano le stesse righe. Si riducono con branch corti e merge frequenti dal main"
     - "git bisect trova il commit che ha introdotto un bug con una ricerca binaria sulla storia"
     - "Commit piccoli e messaggi che spiegano il perché, non il cosa"
+  examples:
+    - title: Annullare, con e senza riscrivere la storia
+      language: bash
+      code: |
+        # Branch CONDIVISO: si annulla aggiungendo, mai togliendo.
+        git revert a1b2c3d            # nuovo commit che inverte le modifiche
+        git revert -m 1 <merge_sha>   # per annullare un merge: -m 1 = tieni il main
+
+        # Branch LOCALE non ancora pubblicato: si può riscrivere.
+        git reset --soft HEAD~1       # annulla il commit, tiene tutto in staging
+        git reset --mixed HEAD~1      # annulla il commit e lo staging, tiene i file
+        git reset --hard HEAD~1       # annulla tutto: le modifiche sono perse
+
+        # Rete di sicurezza: reflog ricorda dove stava HEAD anche dopo un reset --hard.
+        git reflog
+        git reset --hard HEAD@{2}     # si torna indietro
+      note: >-
+        Il reflog è la ragione per cui quasi nulla è davvero perso in git: i commit
+        restano raggiungibili per settimane prima della garbage collection.
+    - title: Il push forzato, nella versione che non distrugge il lavoro altrui
+      language: bash
+      code: |
+        git rebase -i origin/main     # riordino e pulisco i miei commit
+        # git push --force            # PERICOLOSO: sovrascrive tutto ciò che c'è
+        git push --force-with-lease   # rifiuta se qualcuno ha pubblicato nel frattempo
+
+        # Segreto committato e già pubblicato: rimuoverlo dal codice NON basta.
+        # 1. RUOTARE subito la credenziale: è già compromessa, resta nella storia
+        #    e nei fork, nelle cache e nei mirror.
+        # 2. Solo dopo, riscrivere la storia con git filter-repo e coordinarsi
+        #    con tutti quelli che hanno il repository.
+      note: >-
+        L'ordine conta: la rotazione è l'unica azione che chiude davvero l'esposizione,
+        la riscrittura della storia è pulizia successiva.
+  trade_offs:
+    - option: Merge
+      pros: Non riscrive nulla, sicuro sempre, conserva il contesto reale
+      cons: Storia con molte diramazioni, più difficile da leggere
+      when: Portare un branch nel principale, e su qualunque branch condiviso
+    - option: Rebase
+      pros: Storia lineare e leggibile, bisect e blame più utili
+      cons: Riscrive gli hash; su branch condivisi rompe i cloni altrui
+      when: Sul proprio branch locale, prima di aprire la richiesta di merge
+    - option: Squash al merge
+      pros: Un commit per funzionalità, storia principale pulitissima
+      cons: Si perdono i passaggi intermedi, revert più grossolani
+      when: Branch di funzionalità con molti commit di lavoro in corso
+  numbers:
+    - "Un branch che vive un giorno ha conflitti rari; uno che vive tre settimane li ha quasi garantiti: la probabilità cresce con la finestra di divergenza"
+    - "git bisect trova il commit colpevole in log2(n) passi: su mille commit sono dieci verifiche"
   interview_answer: >-
     Uso il rebase sul mio branch locale prima di aprire una PR, per avere una storia lineare e
     commit puliti, e uso il merge per portare il branch nel main, perché voglio che resti
     traccia di quando quel lavoro è entrato. La regola che non violo è non fare rebase su commit
     già condivisi, perché cambiare gli hash sotto i piedi a un collega gli rompe il branch. Per
     annullare qualcosa già pubblicato uso revert e non reset, proprio per non riscrivere una
-    storia che altri hanno già.
+    storia che altri hanno già. E tengo i branch corti: la maggior parte dei conflitti si
+    previene così, non si risolve.
+  senior_signals:
+    - "Spiega merge e rebase a partire dall'immutabilità dei commit, non come due comandi alternativi"
+    - "Usa --force-with-lease invece di --force"
+    - "Sul segreto esposto mette la rotazione prima della riscrittura della storia"
+    - "Previene i conflitti con branch brevi invece di limitarsi a risolverli"
   pitfalls:
     - "Rebase su un branch condiviso"
     - "git push --force invece di --force-with-lease"
     - "Branch lunghi settimane, con merge dolorosi garantiti"
-  follow_up_questions:
-    - "Hai committato un segreto e hai già pushato. Cosa fai?"
+    - "Credere che rimuovere un segreto dal codice lo renda non più esposto"
+  follow_ups:
+    - question: Hai committato un segreto e hai già pushato. Cosa fai?
+      answer: >-
+        La prima cosa è ruotare la credenziale, subito: dal momento in cui è stata
+        pubblicata va considerata compromessa, perché resta nella storia, nei cloni, nei
+        fork, nelle cache delle piattaforme e nei bot che scansionano i repository
+        pubblici in continuo. Solo dopo la rotazione ha senso ripulire: si riscrive la
+        storia con git filter-repo o con lo strumento offerto dalla piattaforma, e ci si
+        coordina con chiunque abbia il repository, perché tutti dovranno riallinearsi.
+        Infine si aggiunge una scansione dei segreti nella pipeline, così non ricapita.
+    - question: Che differenza c'è fra reset soft, mixed e hard?
+      answer: >-
+        Tutti e tre spostano il puntatore del branch; cambiano nel cosa fanno al resto.
+        Soft lascia le modifiche nell'area di staging, pronte per un nuovo commit, ed è
+        quello che si usa per rifare un commit mal scritto. Mixed, che è il default,
+        toglie anche lo staging ma tiene i file modificati nella copia di lavoro. Hard
+        allinea tutto, staging e copia di lavoro comprese, quindi le modifiche non
+        committate vanno perse. Il reflog permette comunque di tornare indietro sui
+        commit, ma non recupera il lavoro mai committato.
+    - question: Quando useresti git bisect?
+      answer: >-
+        Quando un bug esiste adesso, so che tempo fa non c'era, e ho un modo rapido per
+        verificarne la presenza. Indico un commit buono e uno cattivo, e git fa una ricerca
+        binaria sulla storia facendomi verificare un commit alla volta: su mille commit
+        bastano dieci verifiche. Se il test è automatizzabile si usa `git bisect run` e
+        trova il colpevole da solo. È il caso in cui avere commit piccoli ripaga
+        enormemente, perché il commit trovato è piccolo abbastanza da leggerlo.
+    - question: Meglio trunk-based o GitFlow?
+      answer: >-
+        Dipende da quante versioni si mantengono. Per un servizio che rilascia in continuo
+        il trunk-based con branch che vivono ore o giorni è nettamente migliore: i
+        conflitti quasi spariscono, l'integrazione è costante e le funzionalità incomplete
+        si nascondono dietro feature flag. GitFlow, con i suoi branch di release e hotfix,
+        ha senso quando si devono supportare più versioni rilasciate in parallelo, come in
+        un prodotto installato dai clienti. Applicarlo a un servizio web è quasi sempre
+        una complicazione senza contropartita.
+  related: [eng-05-code-quality, rel-39-deployments, eng-04-security, eng-01-testing]
+  resources:
+    - title: "Pro Git (Chacon e Straub)"
+      url: https://git-scm.com/book/en/v2
+      kind: book
+    - title: "Martin Fowler - Patterns for Managing Source Code Branches"
+      url: https://martinfowler.com/articles/branching-patterns.html
+      kind: article
 
 - id: eng-03-cloud-basics
   title: Fondamenti di cloud e container
@@ -245,29 +1201,183 @@
   summary: >-
     Quasi tutte le posizioni backend oggi presuppongono container e cloud. Serve sapere
     cosa risolvono e quali sono i modelli di costo, più che conoscere tutti i servizi.
+  deep_dive: |-
+    Un container non è una macchina virtuale leggera: è un processo del sistema
+    operativo ospite, isolato tramite namespace - per vista del filesystem, rete,
+    processi - e limitato tramite cgroup per CPU e memoria. Il kernel è condiviso, ed è
+    questo a renderlo leggero: si avvia in millisecondi invece che in decine di secondi,
+    e il costo in memoria è quello del processo. Il rovescio è che l'isolamento è più
+    debole di quello di una VM, che ha un kernel proprio: per carichi non fidati si usano
+    runtime con isolamento rafforzato.
+
+    Un'immagine è un filesystem a strati più i metadati. Ogni istruzione del Dockerfile
+    crea uno strato, gli strati sono condivisi fra immagini e memorizzati in cache: da
+    qui la regola di mettere le istruzioni che cambiano raramente - installazione delle
+    dipendenze - prima di quelle che cambiano a ogni commit, cioè la copia del codice.
+    La build multi-stage risolve il problema opposto: si compila in uno stadio con tutti
+    gli strumenti e si copia solo il risultato in un'immagine finale minimale, che
+    riduce sia i tempi di trasferimento sia la superficie di attacco.
+
+    Kubernetes orchestra i container: dichiari lo stato desiderato e un ciclo di
+    riconciliazione lo mantiene, riavviando ciò che muore, scalando sui parametri
+    indicati, sostituendo gradualmente le versioni. È potente ed è anche un sistema
+    complesso che richiede competenza operativa. La valutazione onesta è che sopra una
+    certa soglia - molti servizi, un team che lo sa gestire - conviene, e sotto quella
+    soglia una piattaforma gestita come Container Apps, Cloud Run o App Runner dà la
+    maggior parte dei benefici con una frazione del carico operativo.
+
+    Lungo l'asse IaaS, PaaS, serverless il controllo scende e la velocità sale. Il
+    serverless con scale-to-zero fa pagare solo l'uso effettivo, che per carichi
+    intermittenti è imbattibile, al prezzo dell'avvio a freddo: la prima richiesta dopo
+    un periodo di inattività paga l'inizializzazione, che può andare da decine di
+    millisecondi a qualche secondo a seconda del runtime.
+
+    Sui costi, la voce sistematicamente sottovalutata è il traffico in uscita. Il
+    calcolo si preventiva perché è visibile, lo storage anche; l'egress no, e su
+    un'applicazione che serve file o immagini diventa rapidamente la voce principale -
+    è anche il motivo per cui una CDN davanti all'origine si ripaga da sola. L'altra
+    voce dimenticata sono le risorse allocate e non usate: ambienti di prova accesi di
+    notte, volumi orfani, indirizzi IP riservati.
+
+    Infine, due riferimenti che restano validi: il 12-factor app - configurazione
+    nell'ambiente, processi senza stato, log su stdout - e l'infrastruttura come codice,
+    con Terraform o Bicep, che rende l'ambiente versionato, revisionabile e
+    riproducibile invece che frutto di una sequenza di clic che nessuno ricorda.
   key_points:
     - "I container isolano le dipendenze condividendo il kernel: più leggeri delle VM, meno isolati"
+    - "Namespace per l'isolamento e cgroup per i limiti: è così che funziona, non è una VM piccola"
     - "Immagine = filesystem a layer + metadati. Multi-stage build per immagini piccole"
+    - "Ordina il Dockerfile dal meno al più variabile: le dipendenze prima del codice, per sfruttare la cache"
     - "Kubernetes orchestra i container: deployment, service, ingress, autoscaling, self-healing. Utile sopra una certa scala, sovradimensionato sotto"
     - "Serverless e scale-to-zero: paghi l'uso, al prezzo del cold start"
     - "IaaS, PaaS, serverless: il controllo scende, la velocità sale"
     - "Infrastructure as Code (Terraform, Bicep): l'infrastruttura è versionata e riproducibile"
     - "Modello di costo: compute a ore o a richieste, storage a GB, traffico in uscita spesso sottovalutato"
     - "Il 12-factor app resta il riferimento: configurazione nell'ambiente, processi stateless, log su stdout"
+  examples:
+    - title: Dockerfile - cache degli strati e build multi-stage
+      language: dockerfile
+      code: |
+        # --- stadio di build: ha compilatori e strumenti, non finisce in produzione ---
+        FROM python:3.12-slim AS build
+        WORKDIR /app
+        # Le dipendenze prima del codice: cambiano raramente, lo strato resta in cache.
+        COPY requirements.txt .
+        RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+        COPY . .
+
+        # --- immagine finale: solo ciò che serve a eseguire ---
+        FROM python:3.12-slim
+        WORKDIR /app
+        COPY --from=build /install /usr/local
+        COPY --from=build /app .
+        USER 1000                      # non root: l'immagine gira con privilegi minimi
+        CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+        # I segreti NON vanno qui: né in ENV né in ARG, restano negli strati.
+      note: >-
+        Invertire le due COPY basta a invalidare la cache delle dipendenze a ogni commit,
+        trasformando una build di venti secondi in una di tre minuti.
+    - title: Dove vanno davvero i soldi
+      language: text
+      code: |
+        VOCE                        SI PREVENTIVA?   NOTE
+        compute (istanze, ore)      sì               visibile e prevedibile
+        storage (GB al mese)        sì               cresce lentamente
+        traffico in USCITA          quasi mai        la voce che sorprende
+        richieste a servizi gestiti a volte          conta il volume, non la dimensione
+        ambienti di prova accesi    no               spesso 24/7 senza motivo
+        volumi e IP orfani          no               si pagano senza essere usati
+
+        Mitigazioni tipiche: CDN davanti all'origine (l'egress dall'origine crolla),
+        spegnimento programmato degli ambienti non produttivi, budget e allarmi di
+        spesa configurati il primo giorno, non dopo la prima fattura.
+      note: >-
+        La domanda "come terresti sotto controllo i costi" arriva spesso ai colloqui per
+        ruoli con responsabilità, e la risposta migliore parte dall'egress.
+  trade_offs:
+    - option: Kubernetes
+      pros: Standard di fatto, portabile, ecosistema enorme, controllo totale
+      cons: Complessità operativa alta, richiede competenza dedicata
+      when: Molti servizi e un team in grado di gestirlo
+    - option: Piattaforma gestita (Container Apps, Cloud Run)
+      pros: Il 90% dei benefici con una frazione del carico operativo, scale-to-zero
+      cons: Meno controllo, qualche vincolo del fornitore
+      when: Pochi servizi, team piccolo; è il default ragionevole
+    - option: Funzioni serverless
+      pros: Si paga solo l'uso, nessun server da gestire, scala automaticamente
+      cons: Avvio a freddo, limiti di durata, test locali più scomodi
+      when: Carichi intermittenti o guidati da eventi
+    - option: Macchine virtuali
+      pros: Controllo completo, nessuna astrazione da imparare
+      cons: Aggiornamenti, patch e disponibilità restano a carico tuo
+      when: Vincoli particolari di rete, licenze o conformità
+  numbers:
+    - "Un container si avvia in millisecondi, una macchina virtuale in decine di secondi: è la differenza che rende praticabile lo scale-to-zero"
+    - "Il traffico in uscita dai principali cloud costa nell'ordine di qualche centesimo per GB: irrilevante finché non si servono file, poi diventa la voce principale"
   interview_answer: >-
     I container mi danno la stessa immagine dal portatile alla produzione, che è il vero valore.
-    Per l'orchestrazione la mia posizione è che Kubernetes conviene quando ho molti servizi e un
-    team che lo sa gestire: sotto quella soglia una piattaforma gestita tipo Container Apps o
-    Cloud Run dà il 90% dei benefici con una frazione del carico operativo. Per il costo, la
-    voce che si sottovaluta di più è il traffico in uscita: il compute lo si preventiva, l'egress
-    quasi mai, e su un'app che serve file diventa la voce principale.
+    Tecnicamente sono processi isolati con namespace e limitati con cgroup, non macchine virtuali
+    piccole: condividono il kernel, e per questo si avviano in millisecondi. Per l'orchestrazione
+    la mia posizione è che Kubernetes conviene quando ho molti servizi e un team che lo sa
+    gestire: sotto quella soglia una piattaforma gestita tipo Container Apps o Cloud Run dà il
+    90% dei benefici con una frazione del carico operativo. Per il costo, la voce che si
+    sottovaluta di più è il traffico in uscita: il compute lo si preventiva, l'egress quasi mai.
+  senior_signals:
+    - "Spiega i container con namespace e cgroup invece di chiamarli VM leggere"
+    - "Ordina il Dockerfile per sfruttare la cache degli strati"
+    - "Valuta Kubernetes sul carico operativo, non sulle funzionalità"
+    - "Parte dall'egress quando parla di controllo dei costi"
   pitfalls:
     - "Immagini enormi perché si builda dentro il container finale"
     - "Segreti dentro l'immagine o nelle variabili del Dockerfile"
     - "Kubernetes per due servizi e cinquanta utenti"
-  follow_up_questions:
-    - "Differenza fra container e macchina virtuale?"
-    - "Cos'è un multi-stage build e perché conviene?"
+    - "Nessun budget né allarme di spesa configurato prima del primo rilascio"
+  follow_ups:
+    - question: Differenza fra container e macchina virtuale?
+      answer: >-
+        Una macchina virtuale emula un computer completo e ha un proprio kernel, quindi
+        l'isolamento è forte ma il costo è alto: decine di secondi per l'avvio e
+        gigabyte di memoria. Un container è un processo dell'ospite isolato con i
+        namespace del kernel e limitato con i cgroup, quindi condivide il kernel: si avvia
+        in millisecondi e pesa quanto il processo. La conseguenza pratica è che i container
+        sono ideali per scalare in orizzontale servizi fidati, mentre per eseguire codice
+        non fidato o per isolare a livello di sicurezza si preferisce ancora la VM, o un
+        runtime con isolamento rafforzato.
+    - question: Cos'è un multi-stage build e perché conviene?
+      answer: >-
+        È un Dockerfile con più stadi, dove gli stadi iniziali contengono tutto il
+        necessario per compilare - compilatori, strumenti, dipendenze di sviluppo - e
+        l'immagine finale copia solo gli artefatti prodotti. Conviene per due ragioni: la
+        dimensione, perché un'immagine da qualche decina di megabyte si trasferisce e si
+        avvia molto più in fretta di una da un gigabyte, e la sicurezza, perché ogni
+        strumento che non c'è è uno strumento che un eventuale attaccante non trova
+        dentro il container.
+    - question: Perché i segreti non vanno nel Dockerfile?
+      answer: >-
+        Perché ogni istruzione crea uno strato, e gli strati restano nell'immagine anche se
+        un'istruzione successiva cancella il file: chiunque possa scaricare l'immagine può
+        ispezionarne la storia e recuperare il valore. Lo stesso vale per ARG ed ENV, che
+        finiscono nei metadati. I segreti si iniettano a runtime come variabili
+        d'ambiente fornite dalla piattaforma, o si leggono da un servizio dedicato di
+        gestione dei segreti, così l'immagine resta la stessa fra ambienti diversi.
+    - question: Che cos'è il cold start e quando è un problema?
+      answer: >-
+        È il tempo che passa fra l'arrivo di una richiesta e la disponibilità di
+        un'istanza pronta a servirla, quando non ce n'è nessuna attiva: comprende
+        l'avvio del runtime, il caricamento delle dipendenze e l'inizializzazione
+        dell'applicazione. È irrilevante per carichi costanti, dove le istanze restano
+        calde, e diventa un problema su API interattive con traffico sporadico. Si
+        mitiga tenendo un'istanza minima sempre accesa, riducendo le dipendenze caricate
+        all'avvio e spostando le inizializzazioni pesanti fuori dal percorso critico.
+  related: [rel-39-deployments, dist-27-horizontal-vertical, eng-04-security, cache-24-cdn]
+  resources:
+    - title: "The Twelve-Factor App"
+      url: https://12factor.net/
+      kind: article
+    - title: "Documentazione di Docker - buone pratiche per il Dockerfile"
+      url: https://docs.docker.com/build/building/best-practices/
+      kind: doc
 
 - id: eng-04-security
   title: Sicurezza applicativa (OWASP Top 10)
@@ -280,15 +1390,112 @@
     Le domande di sicurezza in colloquio backend ruotano quasi sempre attorno alle stesse
     famiglie: injection, controlli di accesso mancanti, gestione delle credenziali e
     configurazioni insicure.
+  deep_dive: |-
+    L'edizione corrente della OWASP Top 10 è quella del 2025, pubblicata nella versione
+    definitiva a inizio 2026, e citare ancora la 2021 è un segnale di non essersi
+    aggiornati. Broken Access Control resta al primo posto e ha assorbito il Server-Side
+    Request Forgery, che non è più una categoria a sé: la logica è che l'SSRF è in
+    fondo un mancato controllo su quali risorse una richiesta può raggiungere. Security
+    Misconfiguration sale al secondo posto. Le due categorie nuove sono Software Supply
+    Chain Failures - le dipendenze e la catena di build, che sono diventate il vettore
+    più sfruttato - e Mishandling of Exceptional Conditions, cioè la gestione sbagliata
+    degli errori e i sistemi che in caso di guasto si aprono invece di chiudersi.
+
+    Il controllo di accesso è la famiglia che si incontra più spesso nel codice reale, e
+    il problema non è l'endpoint senza autenticazione, che si nota subito: è l'endpoint
+    autenticato che non verifica la proprietà della risorsa. Chiunque sia loggato può
+    cambiare l'identificativo nell'URL e leggere i dati di un altro - è l'IDOR. La difesa
+    strutturale è filtrare per proprietario dentro la query, non controllare dopo aver
+    caricato: così non si può dimenticare in un ramo.
+
+    L'injection si risolve con le query parametrizzate, sempre, anche per valori che
+    sembrano interni: la separazione fra codice e dati deve essere strutturale, perché
+    un'eccezione "solo qui" prima o poi finisce su un percorso raggiungibile
+    dall'esterno. La stessa logica vale per i comandi di sistema e per le query LDAP o
+    NoSQL. L'XSS si previene con l'escaping in uscita - che i framework moderni fanno
+    di default, finché non si usa l'equivalente di dangerouslySetInnerHTML - più una
+    Content-Security-Policy e i cookie HttpOnly, che impedisce a uno script di leggere
+    il token di sessione.
+
+    Sulle password: non si cifrano, si sottopongono a una funzione di hash lenta e
+    salata - argon2id è la scelta corrente, bcrypt e scrypt restano accettabili. La
+    lentezza è il punto: rende costoso il tentativo di forza bruta. MD5 e SHA-256 nudi
+    sono sbagliati non perché "deboli" ma perché velocissimi, quindi perfetti per chi
+    attacca.
+
+    I segreti non entrano mai nel repository, e se uno è stato esposto va ruotato e non
+    solo rimosso, perché resta nella storia di git, nei fork e nelle cache. Infine le
+    dipendenze: la maggior parte delle vulnerabilità di un'applicazione arriva da lì, e
+    la difesa è una scansione automatica nella pipeline più un aggiornamento regolare,
+    non una revisione manuale che nessuno farà.
   key_points:
-    - "Broken access control è la prima voce OWASP: IDOR, escalation, controlli solo lato client"
+    - "L'edizione corrente è la OWASP Top 10:2025: citare la 2021 segnala di non essersi aggiornati"
+    - "Broken access control resta al primo posto e ha assorbito l'SSRF, che non è più una categoria separata"
+    - "Nuove nel 2025: Software Supply Chain Failures (A03) e Mishandling of Exceptional Conditions (A10)"
+    - "IDOR: l'endpoint autenticato che non verifica la proprietà della risorsa. Filtra per proprietario nella query"
     - "SQL injection: query parametrizzate, sempre. Il concatenamento di stringhe non si usa mai, nemmeno per i valori interni"
     - "XSS: escaping in output, Content-Security-Policy, cookie HttpOnly. I framework moderni escapano di default, ma dangerouslySetInnerHTML lo disattiva"
     - "CSRF: token anti-CSRF o cookie SameSite"
-    - "Password: bcrypt, scrypt o argon2 con salt. Mai MD5 o SHA senza salt, mai reversibile"
+    - "Password: argon2id, oppure bcrypt o scrypt, con salt. Mai MD5 o SHA nudi: sono sbagliati perché veloci"
     - "Segreti: variabili d'ambiente o un key vault, mai nel repository. Ruotali se esposti"
     - "Dipendenze: la maggior parte delle vulnerabilità arriva da lì. Scansione automatica in CI"
     - "Principio del minimo privilegio su database, ruoli cloud e token"
+  examples:
+    - title: IDOR - il controllo va messo nella query
+      language: python
+      code: |
+        # VULNERABILE: autenticato ma non autorizzato. Cambiando l'id si legge tutto.
+        @app.get("/ordini/{ordine_id}")
+        def leggi(ordine_id: int, utente: Utente = Depends(utente_corrente)):
+            return db.query(Ordine).filter(Ordine.id == ordine_id).one()
+
+        # SICURO: la proprietà è parte della query, non un controllo che si può saltare.
+        @app.get("/ordini/{ordine_id}")
+        def leggi(ordine_id: int, utente: Utente = Depends(utente_corrente)):
+            ordine = (db.query(Ordine)
+                        .filter(Ordine.id == ordine_id, Ordine.utente_id == utente.id)
+                        .one_or_none())
+            if ordine is None:
+                raise HTTPException(404)   # 404 e non 403: non rivela che esiste
+            return ordine
+      note: >-
+        Restituire 404 invece di 403 evita di confermare l'esistenza della risorsa, che è
+        di per sé un'informazione utile a chi sta sondando.
+    - title: Injection e password, le due regole che non hanno eccezioni
+      language: python
+      code: |
+        # MAI, nemmeno "solo per un valore interno": la separazione dev'essere strutturale.
+        db.execute(f"SELECT * FROM utenti WHERE email = '{email}'")
+
+        # SEMPRE: il driver separa il codice dai dati.
+        db.execute("SELECT * FROM utenti WHERE email = :email", {"email": email})
+
+        # Password: hash LENTO e salato. La lentezza è la caratteristica, non un difetto.
+        from argon2 import PasswordHasher
+        ph = PasswordHasher()                 # salt generato e incluso nell'hash
+        memorizzato = ph.hash(password)
+        ph.verify(memorizzato, password_inserita)
+
+        # SHA-256 non è "debole": è VELOCE, e per questo inadatto alle password.
+      note: >-
+        Anche quando si usa un ORM il pericolo resta nelle parti scritte a mano: filtri
+        dinamici, ORDER BY costruiti da input, frammenti di SQL grezzo.
+  trade_offs:
+    - option: Controllo di proprietà dentro la query
+      pros: Strutturale, non si può dimenticare in un ramo, un solo punto da rivedere
+      cons: Richiede disciplina nel non aggiungere query senza il filtro
+      when: Sempre, per le risorse che appartengono a un utente
+    - option: Autorizzazione in un middleware
+      pros: Centralizzata, visibile, facile da verificare
+      cons: Conosce il percorso ma non sempre la proprietà del dato
+      when: Ruoli e permessi grossolani, da affiancare al filtro nella query
+    - option: Token opachi di sessione
+      pros: Revocabili subito, nessun dato sensibile sul client
+      cons: Richiedono uno stato condiviso da consultare a ogni richiesta
+      when: Serve la revoca immediata; i JWT valgono finché non scadono
+  numbers:
+    - "argon2id e bcrypt si configurano per impiegare nell'ordine di 100-250 ms per verifica: abbastanza da non disturbare il login, abbastanza da rendere proibitiva la forza bruta"
+    - "L'edizione 2025 della OWASP Top 10 è la prima revisione dopo quella del 2021: le categorie si aggiornano ogni pochi anni, non ogni anno"
   interview_answer: >-
     Le due che vedo più spesso nel codice reale sono il controllo di accesso mancante e la
     gestione dei segreti. Sull'accesso il problema non è l'endpoint senza autenticazione, che si
@@ -296,13 +1503,65 @@
     a chi la chiede: per questo preferisco filtrare per proprietario a livello di query, così il
     controllo è strutturale. Sui segreti la regola è che non entrano mai nel repository e che se
     uno è stato esposto va ruotato, non solo rimosso dal codice, perché nella storia di git resta.
+    Come riferimento uso la Top 10 del 2025, dove fra l'altro l'SSRF è confluito dentro broken
+    access control e sono entrate le due categorie su catena di fornitura e gestione degli errori.
+  senior_signals:
+    - "Cita l'edizione 2025 e sa cosa è cambiato rispetto alla 2021"
+    - "Rende il controllo di autorizzazione strutturale invece che un if da ricordare"
+    - "Sa che MD5 e SHA sono inadatti perché veloci, non perché 'deboli'"
+    - "Sul segreto esposto parla di rotazione, non solo di rimozione"
   pitfalls:
     - "Query costruite per concatenazione anche solo in un punto"
     - "Password hashate con SHA-256 senza salt"
     - "Segreto rimosso dal codice ma non ruotato"
-  follow_up_questions:
-    - "Come memorizzeresti le password degli utenti?"
-    - "Cos'è un IDOR?"
+    - "Restituire 403 dove un 404 eviterebbe di confermare l'esistenza della risorsa"
+  follow_ups:
+    - question: Come memorizzeresti le password degli utenti?
+      answer: >-
+        Con una funzione di hash lenta e salata pensata per le password: argon2id è la
+        scelta corrente, bcrypt e scrypt restano valide. Il salt, generato a caso per ogni
+        utente, impedisce le tabelle precalcolate, e la lentezza - si tarano i parametri
+        per stare intorno al centinaio di millisecondi - rende proibitiva la forza bruta.
+        MD5 e SHA-256 non vanno usati non perché siano crittograficamente deboli ma perché
+        sono velocissimi, il che è esattamente ciò che serve a chi attacca. E la password
+        non si cifra mai in modo reversibile: non c'è nessuna ragione legittima per poterla
+        rileggere.
+    - question: Cos'è un IDOR?
+      answer: >-
+        Insecure Direct Object Reference: un endpoint espone un identificativo diretto -
+        tipicamente in URL - e verifica che l'utente sia autenticato ma non che quella
+        risorsa gli appartenga. Chiunque può cambiare il numero e leggere o modificare i
+        dati di un altro. Rientra in Broken Access Control, che è la prima categoria della
+        Top 10. La difesa efficace è rendere la proprietà parte della query invece di
+        affidarla a un controllo successivo, perché quel controllo prima o poi viene
+        dimenticato in un ramo nuovo.
+    - question: Che cos'è cambiato nella OWASP Top 10 del 2025?
+      answer: >-
+        Broken Access Control resta prima e ha assorbito l'SSRF, che non è più una
+        categoria autonoma. Security Misconfiguration sale al secondo posto. Sono entrate
+        due categorie nuove: Software Supply Chain Failures, che riconosce quanto le
+        dipendenze e la catena di build siano diventate il vettore principale, e
+        Mishandling of Exceptional Conditions, cioè gli errori gestiti male e i sistemi
+        che in caso di guasto si aprono invece di chiudersi. È utile saperlo perché
+        indica dove si è spostata l'attenzione del settore.
+    - question: Come proteggeresti la catena di fornitura del software?
+      answer: >-
+        Fissando le versioni con un lockfile e verificandone l'integrità, eseguendo una
+        scansione automatica delle vulnerabilità nella pipeline che blocchi le build su
+        problemi gravi, e aggiornando le dipendenze con regolarità invece che in blocco
+        una volta l'anno. Sul lato build, limitare i permessi dei job di CI - che spesso
+        hanno token con più privilegi del necessario - e generare una distinta dei
+        componenti per sapere cosa c'è dentro un rilascio quando esce una vulnerabilità
+        nuova. È un'area che nel 2025 è diventata una categoria a sé proprio perché è lì
+        che gli attacchi si sono spostati.
+  related: [core-06-authn-vs-authz, core-07-sessions-vs-jwt, core-08-oauth2, eng-03-cloud-basics]
+  resources:
+    - title: "OWASP Top 10:2025"
+      url: https://owasp.org/Top10/
+      kind: doc
+    - title: "OWASP Cheat Sheet Series"
+      url: https://cheatsheetseries.owasp.org/
+      kind: doc
 
 - id: eng-05-code-quality
   title: Qualità del codice, SOLID e code review
@@ -315,6 +1574,41 @@
     Le domande sul design valutano se sai giustificare le scelte, non se ricordi gli
     acronimi. SOLID è utile come vocabolario condiviso, meno come regola da applicare
     ovunque.
+  deep_dive: |-
+    SOLID va conosciuto per poter parlare la stessa lingua in una discussione di design,
+    ma applicato meccanicamente produce astrazioni che nessuno usa. Dei cinque principi,
+    quello che si applica davvero ogni giorno è l'inversione delle dipendenze: dipendere
+    da un'interfaccia invece che da un'implementazione concreta è ciò che rende la logica
+    di dominio testabile senza database né rete, ed è anche ciò che permette di
+    sostituire un fornitore senza riscrivere il dominio. Il principio di singola
+    responsabilità è più sottile di come viene raccontato: non significa "una classe fa
+    una cosa sola" ma "una classe cambia per una sola ragione", cioè risponde a un solo
+    committente. Liskov è quello che si viola più spesso senza accorgersene, tipicamente
+    con un sottotipo che solleva un'eccezione dove il tipo base non lo faceva.
+
+    Il DRY ha un limite che si impara solo sbagliando. Due frammenti di codice identici
+    oggi ma che rispondono a requisiti diversi vanno tenuti separati, perché unificarli
+    crea un accoppiamento fra due parti che evolveranno in direzioni diverse: al primo
+    requisito divergente si finisce ad aggiungere un parametro booleano, poi un secondo,
+    e si ottiene una funzione che nessuno capisce. La regola pratica opposta si chiama
+    "aspetta il terzo caso": prima di astrarre conviene avere tre usi reali, perché con
+    due non si vede ancora quale sia la variabilità vera.
+
+    L'astrazione prematura è il difetto più costoso perché si presenta come virtù. Un
+    livello di indirezione introdotto "per il futuro" ha un costo certo - ogni lettore
+    deve attraversarlo - e un beneficio ipotetico. Il debito tecnico, invece, è una
+    scelta legittima quando è consapevole e registrata: scrivere la soluzione rapida
+    sapendo perché e lasciandone traccia è ingegneria; scriverla senza accorgersene è
+    solo un problema rimandato.
+
+    Sulla code review, il valore non è trovare bug - per quelli ci sono i test - ma
+    condividere conoscenza e mantenere il codice comprensibile a chi non l'ha scritto.
+    Le regole che la rendono utile sono poche: commentare il codice e non la persona,
+    distinguere esplicitamente ciò che blocca il merge da ciò che è una preferenza,
+    spiegare il perché di ogni richiesta, e lasciare al linter e al formattatore tutto
+    ciò che è stile. Una review che si perde sull'indentazione mentre non guarda la
+    gestione degli errori ha sbagliato bersaglio. E vale anche il contrario: approvare
+    senza leggere è peggio che non fare review, perché dà una falsa garanzia.
   key_points:
     - "Single Responsibility: una classe cambia per una sola ragione, ovvero risponde a un solo stakeholder"
     - "Open/Closed: estendere senza modificare, tipicamente tramite interfacce"
@@ -322,22 +1616,133 @@
     - "Interface Segregation: interfacce piccole e mirate"
     - "Dependency Inversion: dipendi da astrazioni, che è ciò che rende testabile il codice"
     - "DRY ha un limite: due cose che si somigliano oggi ma cambiano per ragioni diverse vanno tenute separate"
+    - "Aspetta il terzo caso prima di astrarre: con due usi non si vede ancora la variabilità vera"
     - "Code review: commenta il codice non la persona, distingui i blocchi dalle preferenze, spiega il perché"
+    - "Lo stile lo decide il linter: una review che discute di indentazione ha sbagliato bersaglio"
     - "Il debito tecnico è una scelta legittima se è consapevole e registrata"
+  examples:
+    - title: L'inversione delle dipendenze, che è quella che si usa davvero
+      language: python
+      code: |
+        from typing import Protocol
+
+        class RepositoryOrdini(Protocol):          # astrazione definita dal DOMINIO
+            def per_id(self, ordine_id: int) -> "Ordine | None": ...
+            def salva(self, ordine: "Ordine") -> None: ...
+
+        class ServizioOrdini:
+            def __init__(self, repository: RepositoryOrdini) -> None:
+                self.repository = repository       # dipende dall'astrazione, non da SQL
+
+            def conferma(self, ordine_id: int) -> None:
+                ordine = self.repository.per_id(ordine_id)
+                if ordine is None:
+                    raise OrdineNonTrovato(ordine_id)
+                ordine.conferma()
+                self.repository.salva(ordine)
+
+        # In produzione si passa l'implementazione su database, nei test una in memoria:
+        # la logica di dominio si prova senza infrastruttura, ed è questo il valore.
+      note: >-
+        L'interfaccia appartiene al dominio, non al livello dati: è il verso della
+        dipendenza a essere invertito, non solo la presenza di un'interfaccia.
+    - title: Il DRY che fa danno
+      language: python
+      code: |
+        # Due regole identiche oggi, ma di due committenti diversi.
+        def sconto_promozionale(totale: float) -> float:
+            return totale * 0.9      # marketing decide questa
+
+        def sconto_dipendenti(totale: float) -> float:
+            return totale * 0.9      # HR decide questa
+
+        # Unificarle sembra pulito...
+        def sconto(totale: float) -> float:
+            return totale * 0.9
+
+        # ...finché marketing porta il suo al 15% e HR no. Allora arriva il parametro:
+        def sconto(totale: float, tipo: str) -> float:          # e poi il secondo,
+            return totale * (0.85 if tipo == "promo" else 0.9)  # e poi il terzo.
+      note: >-
+        Codice uguale non è codice duplicato: la duplicazione è di conoscenza, non di
+        caratteri. Se due formule cambiano per ragioni diverse, sono due formule.
+  trade_offs:
+    - option: Astrarre presto
+      pros: Se la previsione è giusta, si risparmia un refactor
+      cons: Costo certo per ogni lettore, beneficio ipotetico; spesso l'astrazione è sbagliata
+      when: Il punto di variabilità è già noto con certezza, per esempio un requisito scritto
+    - option: Aspettare il terzo caso
+      pros: L'astrazione nasce dai casi reali e coglie la variabilità giusta
+      cons: Un periodo con duplicazione visibile, che va tollerato
+      when: Default ragionevole in quasi tutti i contesti
+    - option: Debito tecnico consapevole
+      pros: Si consegna quando serve consegnare, con la scelta documentata
+      cons: Va registrato e ripagato, altrimenti diventa semplicemente codice peggiore
+      when: Scadenza reale e costo del rinvio compreso e accettato
+  numbers:
+    - "Le richieste di modifica in una review perdono efficacia oltre le 400 righe di diff: sopra quella soglia la revisione diventa superficiale"
+    - "La regola del terzo caso: si astrae al terzo uso reale, non al secondo, perché con due la variabilità non è ancora visibile"
   interview_answer: >-
     Di SOLID quello che uso davvero ogni giorno è la dependency inversion, perché è ciò che mi
     permette di testare la logica di dominio senza database né rete: dipendo da un'interfaccia e
     in test passo un'implementazione finta. Sul DRY ho imparato a essere cauto: unificare due
     pezzi di codice simili che però cambiano per ragioni diverse crea un accoppiamento che si
-    paga al primo requisito divergente. Nelle review distinguo sempre fra ciò che blocca il
-    merge e ciò che è una preferenza mia, perché altrimenti chi riceve la review non sa cosa
-    deve fare davvero.
+    paga al primo requisito divergente, quindi aspetto il terzo caso prima di astrarre. Nelle
+    review distinguo sempre fra ciò che blocca il merge e ciò che è una preferenza mia, perché
+    altrimenti chi riceve la review non sa cosa deve fare davvero, e lascio lo stile al linter.
+  senior_signals:
+    - "Definisce la singola responsabilità come 'una ragione per cambiare', non 'una cosa sola'"
+    - "Distingue la duplicazione di conoscenza da quella di caratteri"
+    - "Etichetta le proprie osservazioni in review come bloccanti o facoltative"
+    - "Tratta il debito tecnico come una decisione da registrare, non come una colpa"
   pitfalls:
     - "Applicare SOLID meccanicamente e creare astrazioni inutili"
     - "Astrarre prima di avere tre casi reali"
     - "Review che si perdono su questioni di stile che dovrebbe risolvere il linter"
-  follow_up_questions:
-    - "Raccontami un caso in cui hai deliberatamente violato il DRY"
+    - "Approvare senza leggere: peggio che non fare review, perché dà una falsa garanzia"
+  follow_ups:
+    - question: Raccontami un caso in cui hai deliberatamente violato il DRY
+      answer: >-
+        La struttura della risposta è: due pezzi di codice simili, ma appartenenti a due
+        contesti con committenti diversi - per esempio la stessa formula di sconto decisa
+        da marketing in un caso e da HR nell'altro. Unificarli avrebbe accoppiato due cose
+        destinate a divergere, e infatti sono divergute. La duplicazione da evitare è
+        quella di conoscenza, non quella di caratteri: se due espressioni identiche
+        cambiano per ragioni diverse, sono due espressioni diverse che per caso oggi si
+        assomigliano.
+    - question: Come dai un feedback in una code review su qualcosa che non va?
+      answer: >-
+        Commento il codice e non la persona, spiego il perché invece di limitarmi a dire
+        cosa cambiare, e dichiaro esplicitamente se per me è bloccante o è una preferenza -
+        scrivo "non bloccante" quando lo è. Se la questione è complessa preferisco una
+        chiamata di cinque minuti a dieci commenti annidati. E se la mia osservazione
+        nasce da un dubbio invece che da una certezza, lo formulo come domanda: spesso c'è
+        una ragione che non conoscevo.
+    - question: Che cosa guardi per primo in una code review?
+      answer: >-
+        Se il cambiamento fa la cosa giusta, prima di guardare come la fa: capire il
+        problema che risolve e se l'approccio è adeguato. Poi i confini - gestione degli
+        errori, casi limite, cosa succede se la dipendenza esterna non risponde - e la
+        presenza di test che coprano il comportamento nuovo. Lo stile lo lascio al linter
+        e alla formattazione automatica. Se il diff è molto grande chiedo di dividerlo,
+        perché oltre qualche centinaio di righe la revisione diventa inevitabilmente
+        superficiale.
+    - question: Quando è accettabile introdurre debito tecnico?
+      answer: >-
+        Quando è una scelta consapevole, con una ragione e una traccia: c'è una scadenza
+        reale, si prende la strada rapida, si scrive dove e perché e si mette in lista il
+        rientro. Il problema non è il debito ma quello non dichiarato, che nessuno sa che
+        esiste finché non blocca qualcosa. La parte difficile è negoziare il tempo per
+        ripagarlo, e lì aiuta parlarne in termini di costo - quanto rallenta le prossime
+        modifiche - invece che di eleganza.
+  related: [pat-05-dependency-injection, eng-01-testing, pat-10-project-structure, pat-12-error-handling]
+  resources:
+    - title: "Software Engineering at Google - capitolo sulla code review"
+      url: https://abseil.io/resources/swe-book
+      kind: book
+    - title: "Martin Fowler - articoli su refactoring e design"
+      url: https://martinfowler.com/tags/refactoring.html
+      kind: article
 
 - id: eng-06-python
   title: Python per il colloquio tecnico
@@ -350,29 +1755,169 @@
     Se il colloquio è in Python, alcune domande arrivano quasi sicuramente: mutabilità,
     GIL, generatori, gestione della memoria. Sono le stesse che separano chi usa Python da
     chi lo conosce.
+  deep_dive: |-
+    Questa scheda è la porta d'ingresso: raccoglie le domande che arrivano quasi sempre e
+    rimanda al percorso dedicato per ciascuna, dove l'argomento è trattato a fondo.
+
+    Il primo blocco è il modello a oggetti. In Python tutto è un oggetto e le variabili
+    sono nomi legati a oggetti, non contenitori: da questa differenza discendono la
+    mutabilità condivisa, la distinzione fra identità e uguaglianza, e il trabocchetto
+    più chiesto in assoluto, il default mutabile. Il valore di default viene valutato una
+    volta sola, alla definizione della funzione, quindi tutte le chiamate condividono lo
+    stesso oggetto; la sentinella None risolve. Il percorso lo approfondisce in
+    py-01-modello-oggetti.
+
+    Il secondo è la concorrenza, ed è quello su cui si gioca la differenza in un colloquio
+    backend. Il Global Interpreter Lock impedisce a più thread di eseguire bytecode Python
+    contemporaneamente, quindi i thread aiutano sull'I/O - dove il lock viene rilasciato
+    durante l'attesa - e non sul calcolo, per il quale servono processi separati. Su
+    questo si innesta asyncio, che su un solo thread alterna migliaia di coroutine
+    sospese su await: è concorrenza cooperativa, quindi basta una chiamata bloccante per
+    fermare tutto. Sono py-03-gil-concorrenza e py-04-asyncio.
+
+    Il terzo blocco sono i generatori e la valutazione pigra, che permettono di
+    attraversare sequenze enormi con memoria costante, e in generale gli idiomi che
+    rendono il codice non solo più leggibile ma misurabilmente più veloce: comprehension
+    al posto dei cicli con append, la struttura dati giusta, il profiling prima
+    dell'ottimizzazione. È py-06-idiomi-performance.
+
+    Restano due aree che oggi in un colloquio si danno per scontate: i type hint con mypy
+    - sapendo che non sono controllati a runtime, e che per i dati esterni serve un
+    validatore - e il testing con pytest più il confezionamento moderno con pyproject.toml.
+    Sono py-05-tipi-e-typing e py-07-testing-packaging. Chi ha Python come linguaggio
+    principale nell'annuncio dovrebbe fare tutto il percorso; per chi lo usa di lato,
+    questa scheda più il modello a oggetti e il GIL coprono la maggior parte delle domande.
   key_points:
     - "Mutabile vs immutabile: liste, dict e set sono mutabili; tuple, stringhe e numeri no"
     - "Default mutabile negli argomenti: def f(x=[]) condivide la stessa lista fra le chiamate. Usa None come sentinella"
     - "GIL: un solo thread esegue bytecode Python alla volta. I thread aiutano sull'I/O, non sulla CPU. Per la CPU serve multiprocessing"
+    - "asyncio è concorrenza cooperativa su un thread solo: una chiamata bloccante ferma tutto"
     - "Generatori e yield: valutazione pigra, memoria costante su sequenze enormi"
     - "List comprehension più leggibili e veloci dei cicli espliciti con append"
     - "is confronta l'identità, == il valore"
     - "Context manager (with) per la gestione deterministica delle risorse"
     - "dataclass e type hint: il codice moderno li usa, e in colloquio fanno buona impressione"
+    - "Per approfondire, il percorso dedicato: modello a oggetti, memoria, GIL, asyncio, typing, performance, testing"
+  examples:
+    - title: Il default mutabile, la domanda più frequente in assoluto
+      language: python
+      code: |
+        # SBAGLIATO: la lista è creata UNA volta, alla definizione della funzione.
+        def aggiungi(elemento, destinazione=[]):
+            destinazione.append(elemento)
+            return destinazione
+
+        aggiungi(1)      # [1]
+        aggiungi(2)      # [1, 2]  <- la stessa lista di prima
+        print(aggiungi.__defaults__)   # ([1, 2],) - si vede l'oggetto condiviso
+
+        # CORRETTO: sentinella None, l'oggetto nuovo si crea a ogni chiamata.
+        def aggiungi(elemento, destinazione=None):
+            destinazione = [] if destinazione is None else destinazione
+            destinazione.append(elemento)
+            return destinazione
+      note: >-
+        Vale per ogni oggetto mutabile usato come default: liste, dizionari, insiemi e
+        anche le istanze di classi create nella firma.
+    - title: Thread, processi o asyncio - la scelta che viene chiesta
+      language: python
+      code: |
+        # Lavoro CPU-bound: i thread NON aiutano, il GIL li serializza.
+        from concurrent.futures import ProcessPoolExecutor
+        with ProcessPoolExecutor() as pool:
+            risultati = list(pool.map(calcolo_pesante, dati))     # processi veri
+
+        # I/O con poche decine di operazioni: i thread vanno benissimo.
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            risposte = list(pool.map(scarica, url))   # il GIL si rilascia nell'attesa
+
+        # I/O con migliaia di operazioni concorrenti: asyncio.
+        import asyncio
+        async def tutte(url):
+            async with httpx.AsyncClient() as client:
+                return await asyncio.gather(*(client.get(u) for u in url))
+      note: >-
+        La regola riassunta: CPU -> processi; I/O moderato -> thread; I/O molto
+        concorrente -> asyncio. Ed è una domanda che arriva praticamente sempre.
+  trade_offs:
+    - option: Thread
+      pros: Memoria condivisa, semplici da introdurre, ottimi per I/O moderato
+      cons: Il GIL li serializza sul calcolo; race condition da gestire
+      when: Decine di operazioni di I/O bloccanti
+    - option: Processi
+      pros: Parallelismo reale sul calcolo, nessun GIL condiviso
+      cons: Memoria non condivisa, costo di avvio, dati da serializzare
+      when: Lavoro CPU-bound
+    - option: asyncio
+      pros: Migliaia di operazioni concorrenti con poca memoria, nessun cambio di contesto
+      cons: Richiede librerie asincrone; una chiamata bloccante ferma l'event loop
+      when: I/O di rete molto concorrente
+  numbers:
+    - "Un thread del sistema operativo costa nell'ordine di qualche megabyte di stack, una coroutine qualche kilobyte: da qui la differenza di scala fra thread e asyncio"
+    - "Dalla 3.13 esiste una build sperimentale senza GIL: da citare come direzione, non come ciò che si trova oggi in produzione"
   interview_answer: >-
     Le due cose su cui faccio più attenzione sono i default mutabili e il GIL. Il default mutabile
     è un bug silenzioso: la lista di default viene creata una volta sola alla definizione della
     funzione, quindi tutte le chiamate condividono lo stesso oggetto, e uso None come sentinella.
     Sul GIL la sintesi è che i thread in Python servono per l'I/O, dove il thread rilascia il lock
     mentre aspetta, mentre per il lavoro CPU-bound servono processi separati. Oggi per l'I/O uso
-    asyncio quando il carico è molto concorrente, perché evita il costo dei thread.
+    asyncio quando il carico è molto concorrente, perché evita il costo dei thread, tenendo
+    presente che è concorrenza cooperativa e una sola chiamata bloccante ferma l'event loop.
+  senior_signals:
+    - "Spiega il default mutabile a partire da quando viene valutata la firma"
+    - "Sceglie fra thread, processi e asyncio in base al tipo di lavoro, non per abitudine"
+    - "Sa che asyncio è cooperativo e quali sono le conseguenze"
+    - "Usa i generatori quando la memoria conta, non solo perché sono eleganti"
   pitfalls:
     - "def f(items=[]) e stupirsi che i risultati si accumulino"
     - "Usare i thread per accelerare calcoli CPU-bound"
     - "Modificare una lista mentre la si itera"
-  follow_up_questions:
-    - "Cos'è il GIL e come lo aggiri?"
-    - "Differenza fra list e generatore, e quando preferisci il secondo?"
+    - "Chiamare una funzione bloccante dentro una coroutine, fermando l'event loop"
+  follow_ups:
+    - question: Cos'è il GIL e come lo aggiri?
+      answer: >-
+        È un lock a livello di interprete che permette a un solo thread per volta di
+        eseguire bytecode Python, e serve a rendere sicura la gestione dei conteggi di
+        riferimento senza un lock per oggetto. La conseguenza è che i thread non
+        parallelizzano il calcolo, mentre restano utili sull'I/O perché il lock viene
+        rilasciato durante l'attesa. Per il lavoro CPU-bound si usano processi separati con
+        multiprocessing, oppure librerie che rilasciano il GIL nel proprio codice nativo
+        come NumPy. Dalla 3.13 esiste una build sperimentale senza GIL, ma non è ancora
+        ciò che si trova in produzione.
+    - question: Differenza fra list e generatore, e quando preferisci il secondo?
+      answer: >-
+        La lista calcola e tiene in memoria tutti gli elementi; il generatore li produce uno
+        alla volta su richiesta, quindi la memoria resta costante indipendentemente dalla
+        dimensione della sequenza. Uso il generatore quando i dati sono grandi o
+        potenzialmente infiniti, quando mi serve solo una parte del risultato, o quando
+        sto concatenando trasformazioni a pipeline. Uso la lista quando devo attraversare
+        i dati più volte, mi serve la lunghezza, o devo accedere per indice: un generatore
+        si consuma, e dopo la prima iterazione è vuoto.
+    - question: Che differenza c'è fra is e ==?
+      answer: >-
+        `is` confronta l'identità, cioè se due nomi puntano allo stesso oggetto in memoria;
+        `==` confronta il valore, chiamando __eq__. Si usa `is` solo con i singleton -
+        None, True, False - e mai per confrontare numeri o stringhe: lì funziona a volte,
+        per via dell'internamento dei valori piccoli, e smette di funzionare appena i
+        valori escono da quell'intervallo. È un caso in cui il codice sbagliato passa i
+        test e fallisce in produzione.
+    - question: Perché in Python si usano i context manager?
+      answer: >-
+        Per garantire che una risorsa venga rilasciata in modo deterministico anche in caso
+        di eccezione: il blocco with chiama __exit__ qualunque cosa succeda dentro. Vale
+        per file, connessioni, lock e transazioni. È preferibile ad affidarsi al garbage
+        collector, perché il momento in cui un oggetto viene distrutto non è garantito - e
+        con i cicli di riferimento può tardare parecchio. Scriverne uno proprio richiede
+        __enter__ e __exit__, oppure il decoratore contextmanager su un generatore.
+  related: [py-01-modello-oggetti, py-03-gil-concorrenza, py-04-asyncio, py-06-idiomi-performance]
+  resources:
+    - title: "Fluent Python, 2ª edizione (Luciano Ramalho)"
+      url: https://www.oreilly.com/library/view/fluent-python-2nd/9781492056348/
+      kind: book
+    - title: "wtfpython - i trabocchetti, spiegati"
+      url: https://github.com/satwikkansal/wtfpython
+      kind: repo
 
 - id: eng-07-javascript
   title: JavaScript e TypeScript per il colloquio
@@ -385,27 +1930,163 @@
     Le domande su JavaScript ruotano attorno al modello di esecuzione asincrona, alle
     closure e a this. TypeScript aggiunge domande sul sistema di tipi e su cosa resta a
     runtime.
+  deep_dive: |-
+    Questa scheda è la porta d'ingresso: raccoglie le domande che tornano in quasi ogni
+    colloquio e rimanda al percorso dedicato per ciascuna.
+
+    Il primo blocco è il modello di esecuzione. JavaScript ha un solo thread e delega
+    l'I/O all'ambiente, riprendendo il controllo tramite l'event loop: da qui discende che
+    una funzione sincrona pesante blocca tutto, rendering compreso. Il dettaglio che viene
+    chiesto è l'ordine fra le code: le microtask, cioè le promise, vengono svuotate
+    interamente prima di passare alla macrotask successiva, e per questo un then già
+    risolto parte prima di un setTimeout a zero millisecondi. È js-04-event-loop, e la
+    gestione pratica della concorrenza è js-05-async-patterns.
+
+    Il secondo blocco è scope, closure e this. Una closure è una funzione che mantiene
+    l'accesso allo scope in cui è stata creata, ed è la base di moduli, callback e hook.
+    `this` in JavaScript non dipende da dove la funzione è definita ma da come viene
+    chiamata, il che spiega perché un metodo passato come callback perde il contesto; le
+    arrow function lo ereditano lessicalmente e sono la soluzione più comune. È
+    js-02-scope-closure-this.
+
+    Il terzo è la coercizione. `==` applica conversioni implicite con regole che quasi
+    nessuno ricorda per intero, `===` no: si usa sempre il secondo, con l'unica eccezione
+    idiomatica di `== null` per intercettare insieme null e undefined. Vanno saputi anche
+    NaN !== NaN e il perché di Object.is. È js-01-tipi-coercizione.
+
+    Su TypeScript il punto che a un colloquio distingue è duplice: il sistema di tipi è
+    strutturale - conta la forma, non il nome dichiarato - e i tipi vengono cancellati
+    alla compilazione, quindi a runtime non esiste nulla. Ne segue che il compilatore
+    garantisce la coerenza del proprio codice ma non dice niente sui dati che arrivano
+    dalla rete: ai confini serve un validatore a runtime, e `as` non valida, asserisce
+    soltanto. È js-07-typescript.
+
+    Restano due aree che pesano nei ruoli frontend: la dimensione del bundle con tree
+    shaking e code splitting, e la caccia alle perdite di memoria nel browser e in Node.
+    Sono js-06-moduli-bundling e js-08-performance-memoria. Chi fa frontend o Node
+    dovrebbe percorrere tutto; chi lavora su un altro stack può fermarsi al modello di
+    esecuzione e alle closure.
   key_points:
     - "Event loop: call stack, task queue e microtask queue. Le promise (microtask) precedono setTimeout (macrotask)"
+    - "Un solo thread: una funzione sincrona pesante blocca anche il rendering"
     - "Closure: una funzione ricorda lo scope in cui è stata creata. Base di moduli, callback e hook"
     - "var è function-scoped e soggetto a hoisting, let e const sono block-scoped"
     - "this dipende da come la funzione viene chiamata; le arrow function lo ereditano lessicalmente"
-    - "== fa coercizione, === no. Usa sempre ==="
+    - "== fa coercizione, === no. Usa sempre ===, con l'eccezione idiomatica di == null"
     - "async/await è zucchero sintattico sulle promise. Promise.all parallelizza, await in ciclo serializza"
+    - "TypeScript è strutturale: conta la forma, non il nome del tipo"
     - "TypeScript è cancellato a runtime: i tipi non esistono dopo la compilazione, quindi i dati esterni vanno validati (zod o simili)"
     - "unknown è il sostituto sicuro di any"
+    - "Per approfondire, il percorso dedicato: tipi, closure, prototipi, event loop, async, bundling, TypeScript, performance"
+  examples:
+    - title: L'ordine di esecuzione, la domanda classica
+      language: javascript
+      code: |
+        console.log('1')
+        setTimeout(() => console.log('2'), 0)      // macrotask
+        Promise.resolve().then(() => console.log('3'))  // microtask
+        queueMicrotask(() => console.log('4'))     // microtask
+        console.log('5')
+
+        // Stampa: 1, 5, 3, 4, 2
+        // Prima tutto il codice sincrono (1, 5), poi TUTTE le microtask nell'ordine
+        // in cui sono state accodate (3, 4), e solo allora la prima macrotask (2).
+      note: >-
+        La regola da saper enunciare: fra una macrotask e la successiva la coda delle
+        microtask viene svuotata per intero, comprese quelle aggiunte nel frattempo.
+    - title: Il confine dei tipi, dove TypeScript non protegge
+      language: typescript
+      code: |
+        type Utente = { id: string; email: string }
+
+        // BUGIA: `as` non controlla niente. Se l'API cambia, esplode a runtime,
+        // e lo fa lontano da qui, dove il campo viene finalmente usato.
+        const utente = (await (await fetch('/api/me')).json()) as Utente
+
+        // VERITÀ: al confine serve una validazione che esiste a runtime.
+        import { z } from 'zod'
+        const SchemaUtente = z.object({ id: z.string(), email: z.string().email() })
+        const utente = SchemaUtente.parse(await (await fetch('/api/me')).json())
+        // Da qui in poi il tipo è garantito, non asserito.
+      note: >-
+        I tipi vengono cancellati alla compilazione: il compilatore verifica il mio
+        codice, non i dati che arrivano da fuori. È la distinzione che va detta esplicita.
+  trade_offs:
+    - option: "await dentro un ciclo"
+      pros: Ordine garantito, backpressure naturale, codice lineare
+      cons: Serializza operazioni indipendenti, moltiplicando la latenza totale
+      when: Le operazioni dipendono l'una dall'altra, o il servizio ha un limite di rate
+    - option: Promise.all
+      pros: Esecuzione concorrente, latenza pari alla più lenta
+      cons: Fallisce al primo errore; su migliaia di elementi satura le connessioni
+      when: Operazioni indipendenti e in numero controllato
+    - option: Promise.allSettled
+      pros: Restituisce tutti gli esiti, riusciti e falliti
+      cons: Va gestito ogni risultato a mano, nessun fallimento rapido
+      when: Serve sapere cosa è andato storto senza perdere il resto
+  numbers:
+    - "Un compito sincrono oltre i 50 ms è considerato un long task: blocca il thread principale e si vede nell'interazione"
+    - "I tipi di TypeScript pesano zero a runtime, un validatore come zod aggiunge qualche decina di KB al bundle: quasi sempre giustificati sul server, da valutare sul client"
   interview_answer: >-
     Il punto che ritengo più importante è l'event loop, perché spiega quasi tutti i comportamenti
     che sembrano strani. JavaScript ha un solo thread di esecuzione e delega l'I/O, quindi una
     funzione sincrona pesante blocca tutto. Le microtask, cioè le promise, vengono svuotate prima
     delle macrotask come setTimeout, ed è il motivo per cui un then risolto immediatamente parte
-    prima di un setTimeout a zero millisecondi. Su TypeScript sottolineo sempre che i tipi
-    spariscono alla compilazione: garantiscono la coerenza interna ma non validano nulla di ciò
-    che arriva dalla rete, quindi ai confini servono validatori runtime.
+    prima di un setTimeout a zero millisecondi. Su TypeScript sottolineo sempre che il sistema è
+    strutturale e che i tipi spariscono alla compilazione: garantiscono la coerenza interna ma
+    non validano nulla di ciò che arriva dalla rete, quindi ai confini servono validatori runtime.
+  senior_signals:
+    - "Enuncia la regola delle code invece di ricordare a memoria l'output di un esempio"
+    - "Distingue ciò che TypeScript garantisce da ciò che va validato a runtime"
+    - "Riconosce l'await in ciclo come un problema di latenza, non di stile"
+    - "Sa che this dipende dalla chiamata e non dalla definizione"
   pitfalls:
     - "await dentro un ciclo quando le operazioni sono indipendenti: usa Promise.all"
     - "Fidarsi dei tipi TypeScript per dati che arrivano da una API"
     - "Confondere l'ordine fra microtask e macrotask"
-  follow_up_questions:
-    - "Cosa stampa questo codice con setTimeout e Promise? In che ordine?"
-    - "Perché TypeScript non ti protegge da una risposta API malformata?"
+    - "Usare `as` per zittire il compilatore invece di validare il dato"
+  follow_ups:
+    - question: Cosa stampa questo codice con setTimeout e Promise? In che ordine?
+      answer: >-
+        Prima tutto il codice sincrono, perché viene eseguito senza interruzioni. Poi la
+        coda delle microtask - le continuazioni delle promise e queueMicrotask - svuotata
+        per intero, comprese le microtask accodate durante lo svuotamento stesso. Solo
+        allora la prima macrotask, cioè il callback di setTimeout, anche se il ritardo era
+        zero. La regola generale da enunciare è che fra una macrotask e la successiva la
+        coda delle microtask viene svuotata completamente: è più utile che ricordare
+        l'output di un esempio specifico.
+    - question: Perché TypeScript non ti protegge da una risposta API malformata?
+      answer: >-
+        Perché i tipi sono cancellati alla compilazione: dopo la build non esiste nessun
+        controllo, e il JavaScript prodotto è identico a quello che avrei scritto senza
+        tipi. Quando scrivo `as Utente` su una risposta di fetch non sto validando niente,
+        sto dicendo al compilatore di fidarsi. Se l'API cambia un campo, l'errore si
+        manifesta a runtime e lontano dal punto di ingresso, dove quel campo viene
+        finalmente usato. Per questo ai confini - risposte HTTP, form, configurazione,
+        messaggi di coda - uso un validatore che esiste anche a runtime.
+    - question: Che differenza c'è fra una arrow function e una funzione normale?
+      answer: >-
+        Le arrow function non hanno un proprio `this`: lo ereditano lessicalmente dallo
+        scope in cui sono definite, il che le rende la soluzione naturale per i callback
+        che altrimenti perderebbero il contesto. Non hanno nemmeno `arguments`, non
+        possono essere usate come costruttori e non possono essere generatori. Le funzioni
+        normali ricevono `this` in base a come vengono chiamate, e servono quando quel
+        comportamento è voluto - per esempio nei metodi di un prototipo o negli handler in
+        cui `this` deve essere l'elemento.
+    - question: Come limiti la concorrenza quando hai migliaia di richieste da fare?
+      answer: >-
+        Promise.all su migliaia di elementi le avvia tutte insieme e satura connessioni o
+        limiti di rate del servizio. Serve un pool: si tiene un numero fisso di operazioni
+        in volo e appena una finisce se ne avvia un'altra. Si può scrivere in una decina
+        di righe con un indice condiviso e N worker che consumano dalla stessa lista,
+        oppure usare una libreria dedicata. E vale la pena aggiungere un retry con
+        backoff e jitter sui fallimenti temporanei, perché riprovare tutto insieme
+        ricrea esattamente il picco che aveva causato il problema.
+  related: [js-01-tipi-coercizione, js-04-event-loop, js-05-async-patterns, js-07-typescript]
+  resources:
+    - title: "MDN - JavaScript"
+      url: https://developer.mozilla.org/en-US/docs/Web/JavaScript
+      kind: doc
+    - title: "javascript-questions (Lydia Hallie)"
+      url: https://github.com/lydiahallie/javascript-questions
+      kind: repo
