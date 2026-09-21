@@ -10,25 +10,150 @@
     Big-O descrive come cresce il costo al crescere dell'input, ignorando costanti e
     termini minori. Serve a confrontare approcci prima di scriverli, non a misurare
     performance reali.
+  deep_dive: |-
+    Big-O è un limite superiore sul tasso di crescita. Dire che un algoritmo è O(n^2)
+    significa che, oltre una certa dimensione, il suo costo non cresce più in fretta di
+    n^2 a meno di una costante moltiplicativa. Da questa definizione discendono le due
+    regole che si applicano sempre: si tiene solo il termine dominante, perché per n
+    grande gli altri diventano irrilevanti, e si buttano via le costanti, perché
+    dipendono dalla macchina e non dall'algoritmo.
+
+    Accanto a O esistono Omega (limite inferiore) e Theta (limite stretto, cioè
+    superiore e inferiore insieme). In un colloquio si dice quasi sempre "O" anche
+    quando si intende Theta, e va bene; quello che non va bene è confondere Big-O con
+    il caso peggiore. Sono due assi indipendenti: si può parlare del caso peggiore, del
+    caso medio o del caso migliore, e per ciascuno dare un limite asintotico. La
+    ricerca in una hash map è Theta(1) nel caso medio e Theta(n) nel caso peggiore:
+    entrambe sono affermazioni corrette su cose diverse.
+
+    L'analisi ammortizzata è il concetto che separa chi ha studiato da chi ripete a
+    memoria. Un push su un array dinamico costa O(1) ammortizzato pur avendo un caso
+    peggiore O(n): quando l'array si riempie, il raddoppio copia n elementi, ma quel
+    costo si spalma su tutte le n inserzioni che l'hanno preceduto. La differenza con
+    "caso medio" è che l'ammortizzato è una garanzia sulla sequenza, non una media
+    probabilistica: non esiste una sequenza di n push che costi più di O(n) in totale.
+
+    Infine i limiti dell'analisi asintotica, che a un colloquio senior è bene nominare.
+    Le costanti contano: scorrere un array contiguo è molto più veloce che seguire i
+    puntatori di una lista con lo stesso numero di operazioni, perché la cache della CPU
+    carica righe intere. Su input piccoli un algoritmo asintoticamente peggiore vince
+    quasi sempre, ed è il motivo per cui le implementazioni reali di sort passano a
+    insertion sort sotto una certa soglia. Big-O dice come scala una soluzione, non
+    quale sia la più veloce sui dati che si hanno davvero.
   key_points:
     - "Scala mentale: O(1) < O(log n) < O(n) < O(n log n) < O(n^2) < O(2^n) < O(n!)"
     - "Dichiara sempre anche la complessità di spazio: è metà della risposta attesa"
     - "Ammortizzato: il push su array dinamico è O(1) ammortizzato anche se il resize singolo è O(n)"
     - "Il caso medio di una hash map è O(1), il peggiore O(n) con collisioni patologiche"
     - "Cicli annidati non sono automaticamente O(n^2): conta quante volte gira davvero l'interno"
+    - "Big-O e caso peggiore sono assi diversi: si può dare un limite asintotico a ogni caso"
     - "Le costanti contano nella realtà: O(n) con accesso sequenziale batte spesso O(log n) con salti casuali per n piccoli"
+  examples:
+    - title: Due cicli annidati che non fanno O(n^2)
+      language: python
+      code: |
+        # Sembra quadratico, ma l'indice interno non riparte mai da capo:
+        # ogni elemento entra ed esce dalla finestra al massimo una volta.
+        def sottoarray_minimo(nums: list[int], target: int) -> int:
+            sinistra = somma = 0
+            migliore = len(nums) + 1
+            for destra, valore in enumerate(nums):
+                somma += valore
+                while somma >= target:            # totale delle iterazioni: <= n
+                    migliore = min(migliore, destra - sinistra + 1)
+                    somma -= nums[sinistra]
+                    sinistra += 1
+            return migliore if migliore <= len(nums) else 0
+        # Tempo O(n), spazio O(1). Contare i cicli annidati avrebbe dato O(n^2).
+      note: >-
+        La domanda giusta non è "quanti cicli ci sono" ma "quante volte gira in totale il
+        corpo interno". Qui ogni indice viene consumato una volta sola da ciascun bordo.
+    - title: Il costo nascosto delle slice
+      language: python
+      code: |
+        # O(n^2): ogni slice copia il resto della lista.
+        def somma_lenta(nums: list[int]) -> int:
+            if not nums:
+                return 0
+            return nums[0] + somma_lenta(nums[1:])   # copia O(n) a ogni chiamata
+
+        # O(n): si passa un indice, non una copia.
+        def somma_veloce(nums: list[int], i: int = 0) -> int:
+            return 0 if i == len(nums) else nums[i] + somma_veloce(nums, i + 1)
+      note: >-
+        Le operazioni che sembrano gratuite - slice, concatenazioni, conversioni - hanno
+        un costo lineare che dentro un ciclo diventa quadratico senza che si veda.
+  trade_offs:
+    - option: Ottimizzare la complessità asintotica
+      pros: La soluzione regge quando i dati crescono, e il guadagno è illimitato
+      cons: Codice più complesso, spesso più memoria, vantaggio nullo su input piccoli
+      when: L'input cresce o è già grande, e il profilo indica quel punto
+    - option: Ottimizzare le costanti
+      pros: Guadagni immediati senza cambiare struttura, migliore uso della cache
+      cons: Il vantaggio è limitato e sparisce appena l'input cresce di un ordine
+      when: La complessità è già quella giusta e serve un fattore due o tre
+    - option: Scambiare spazio per tempo
+      pros: Da quadratico a lineare con una hash map o una tabella di memoizzazione
+      cons: Memoria proporzionale all'input, pressione sul garbage collector
+      when: La memoria c'è; da dichiarare esplicitamente al colloquio
+  numbers:
+    - "Con n = 10^6, un algoritmo O(n log n) fa circa 2·10^7 operazioni, uno O(n^2) circa 10^12: secondi contro giorni"
+    - "Una CPU moderna esegue nell'ordine di 10^8-10^9 operazioni semplici al secondo: serve per stimare se una soluzione passerà i limiti di tempo"
   interview_answer: >-
     Analizzo contando le operazioni in funzione della dimensione dell'input e tenendo solo
     il termine dominante. In colloquio dico sempre sia tempo che spazio, perché la domanda
     successiva è quasi sempre se posso scendere in spazio. E aggiungo il caso in cui l'analisi
     asintotica mente: una hash map è O(1) in media ma O(n) nel peggiore, e su input piccoli la
-    località di memoria di un array batte strutture asintoticamente migliori.
+    località di memoria di un array batte strutture asintoticamente migliori. Quando conto,
+    non guardo quanti cicli annidati ci sono ma quante volte gira in totale il corpo più
+    interno: una sliding window ha due cicli ed è lineare.
+  senior_signals:
+    - "Distingue caso peggiore, medio e ammortizzato invece di usarli come sinonimi"
+    - "Conta le iterazioni totali invece di contare i livelli di annidamento"
+    - "Include lo stack della ricorsione nella complessità di spazio"
+    - "Sa dire quando l'analisi asintotica non è la guida giusta"
   pitfalls:
     - "Dimenticare la complessità di spazio, inclusa quella dello stack nella ricorsione"
     - "Dire O(n^2) per ogni doppio ciclo senza guardare i limiti reali"
     - "Ignorare il costo di slicing e concatenazione di stringhe dentro un ciclo"
-  follow_up_questions:
-    - "Qual è la complessità di spazio di una DFS ricorsiva su un albero sbilanciato?"
+    - "Confondere Big-O con il caso peggiore: sono due dimensioni indipendenti"
+  follow_ups:
+    - question: Qual è la complessità di spazio di una DFS ricorsiva su un albero sbilanciato?
+      answer: >-
+        O(h) dove h è l'altezza, quindi O(n) nel caso peggiore di un albero degenerato in
+        lista. Ogni chiamata ricorsiva occupa un frame sullo stack, e la profondità massima
+        raggiunta è l'altezza dell'albero. È il motivo per cui su alberi molto profondi o
+        su grafi grandi conviene una DFS iterativa con uno stack esplicito: la memoria è la
+        stessa ma non si rischia lo stack overflow dell'interprete.
+    - question: Che differenza c'è fra caso medio e costo ammortizzato?
+      answer: >-
+        Il caso medio è una media su una distribuzione di input e dipende da un'ipotesi
+        probabilistica; il costo ammortizzato è una garanzia sulla sequenza di operazioni,
+        senza ipotesi. Dire che il push su un array dinamico è O(1) ammortizzato significa
+        che qualunque sequenza di n push costa O(n) in totale, non che costa poco "in
+        media se si è fortunati". È una garanzia più forte.
+    - question: Un algoritmo O(n log n) è sempre preferibile a uno O(n^2)?
+      answer: >-
+        No, e questa è la risposta che si vuole sentire. Vale asintoticamente, ma se n è
+        piccolo le costanti dominano: le implementazioni reali di sort passano a insertion
+        sort sotto qualche decina di elementi proprio per questo. Inoltre conta il tipo di
+        accesso alla memoria: un algoritmo che scorre un array contiguo può battere uno
+        asintoticamente migliore che salta fra puntatori sparsi, perché sfrutta la cache.
+    - question: Come stimi se la tua soluzione rientrerà nei limiti di tempo?
+      answer: >-
+        Guardo il vincolo su n e conto l'ordine di grandezza delle operazioni. Con n fino a
+        10^5 accetto O(n log n) tranquillamente; con n fino a 10^3 posso permettermi O(n^2);
+        se n è 10^6 devo stare su O(n) o O(n log n). Il riferimento pratico è che si
+        eseguono nell'ordine di 10^8 operazioni semplici al secondo, quindi il vincolo
+        sull'input è di fatto un suggerimento sulla complessità attesa.
+  related: [dsa-03-hash-maps, dsa-14-sorting, dsa-11-dynamic-programming, py-06-idiomi-performance]
+  resources:
+    - title: "Big-O Cheat Sheet"
+      url: https://www.bigocheatsheet.com/
+      kind: article
+    - title: "Introduction to Algorithms (CLRS), capitoli 3 e 17"
+      url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+      kind: book
 
 - id: dsa-02-arrays-two-pointers
   title: Array e tecnica dei due puntatori
@@ -40,24 +165,170 @@
   summary: >-
     I due puntatori trasformano molti problemi da O(n^2) a O(n) sfruttando l'ordinamento o
     una relazione monotona. È il primo pattern da provare su array ordinati.
+  deep_dive: |-
+    La tecnica funziona per una ragione precisa: a ogni passo si riesce a escludere con
+    certezza un candidato senza esaminarlo. In Two Sum su array ordinato, se la somma dei
+    due estremi è maggiore del target, allora l'elemento destro non può far parte di
+    nessuna soluzione insieme a nessun elemento a sinistra del puntatore sinistro,
+    perché quelli sono tutti ancora più piccoli. Quindi lo si scarta definitivamente.
+    Ogni mossa elimina un'intera riga o colonna dello spazio delle coppie: è per questo
+    che si passa da n^2 coppie a n passi.
+
+    Ci sono due famiglie. I puntatori opposti partono dagli estremi e convergono: Two
+    Sum ordinato, verifica di palindromo, container with most water, inversione in
+    place. I puntatori nella stessa direzione - spesso chiamati fast e slow, o
+    lettore e scrittore - servono a compattare: uno legge tutti gli elementi, l'altro
+    scrive solo quelli da tenere. Rimozione di duplicati in place, spostamento degli
+    zeri e filtraggi vari sono tutti la stessa cosa.
+
+    Il prerequisito è la monotonia. Se l'array non è ordinato, prima di rinunciare
+    conviene chiedersi se ordinare aiuta: O(n log n) per l'ordinamento più O(n) per la
+    scansione resta O(n log n), che è comunque meglio dell'O(n^2) ingenuo. È esattamente
+    il salto che porta da Two Sum a Three Sum: si fissa un elemento e si applicano i due
+    puntatori sul resto, ottenendo O(n^2) invece di O(n^3).
+
+    "In place con O(1) di spazio extra" è quasi sempre il vincolo implicito quando
+    l'intervistatore propone questi problemi, e vale la pena dichiararlo prima di
+    scrivere. Attenzione però al significato: restituire un nuovo array è una soluzione
+    valida, solo non è quella che stanno cercando. E quando si modifica l'array mentre
+    lo si scorre bisogna essere certi di non leggere posizioni già sovrascritte: nello
+    schema lettore-scrittore lo scrittore resta sempre dietro al lettore, e questo lo
+    garantisce.
   key_points:
     - "Puntatori opposti: partono dagli estremi e convergono. Two Sum su array ordinato, palindromi, container with most water"
     - "Puntatori nella stessa direzione (fast/slow): rimozione di duplicati in place, spostamento degli zeri"
+    - "Ogni mossa scarta un candidato per sempre: da n^2 coppie a n passi"
     - "Se l'array è ordinato, i due puntatori sono quasi sempre la risposta attesa"
     - "Se non lo è, valuta se ordinare (O(n log n)) abilita una soluzione lineare successiva"
     - "In place significa O(1) di spazio extra: spesso è proprio ciò che l'intervistatore vuole"
+    - "Three Sum è Two Sum con un elemento fissato: O(n^2), non O(n^3)"
+  examples:
+    - title: Puntatori opposti e puntatori nella stessa direzione
+      language: python
+      code: |
+        def two_sum_ordinato(nums: list[int], target: int) -> tuple[int, int] | None:
+            sx, dx = 0, len(nums) - 1
+            while sx < dx:
+                somma = nums[sx] + nums[dx]
+                if somma == target:
+                    return sx, dx
+                if somma < target:
+                    sx += 1      # serve un valore più grande: l'unico modo è alzare sx
+                else:
+                    dx -= 1      # nums[dx] è troppo grande per qualunque sx: si scarta
+            return None
+
+        def rimuovi_duplicati(nums: list[int]) -> int:
+            """Array ordinato: compatta in place e restituisce la nuova lunghezza."""
+            if not nums:
+                return 0
+            scrittore = 1
+            for lettore in range(1, len(nums)):
+                if nums[lettore] != nums[scrittore - 1]:
+                    nums[scrittore] = nums[lettore]
+                    scrittore += 1      # lo scrittore resta sempre dietro al lettore
+            return scrittore
+      note: >-
+        Nel secondo caso lo scrittore non supera mai il lettore, quindi non si sovrascrive
+        mai un valore non ancora letto. È l'invariante che rende sicura la modifica in place.
+    - title: Three Sum - fissare un elemento e riusare i due puntatori
+      language: python
+      code: |
+        def three_sum(nums: list[int]) -> list[list[int]]:
+            nums.sort()                       # O(n log n), abilita tutto il resto
+            risultato = []
+            for i in range(len(nums) - 2):
+                if i > 0 and nums[i] == nums[i - 1]:
+                    continue                  # salta i duplicati sul primo elemento
+                sx, dx = i + 1, len(nums) - 1
+                while sx < dx:
+                    somma = nums[i] + nums[sx] + nums[dx]
+                    if somma < 0:
+                        sx += 1
+                    elif somma > 0:
+                        dx -= 1
+                    else:
+                        risultato.append([nums[i], nums[sx], nums[dx]])
+                        sx += 1
+                        while sx < dx and nums[sx] == nums[sx - 1]:
+                            sx += 1           # e sugli altri due
+                        dx -= 1
+            return risultato
+      note: >-
+        La gestione dei duplicati è la parte che si sbaglia più spesso: va fatta su tutti
+        e tre gli indici, altrimenti la stessa terna esce più volte.
+  trade_offs:
+    - option: Due puntatori su array ordinato
+      pros: O(n) di tempo e O(1) di spazio, nessuna struttura ausiliaria
+      cons: Richiede l'ordinamento, che perde gli indici originali
+      when: L'array è già ordinato, o servono i valori e non le posizioni
+    - option: Hash map
+      pros: Funziona su array non ordinati, O(n), conserva gli indici originali
+      cons: O(n) di spazio, gestione dei duplicati meno naturale
+      when: Servono gli indici, o ordinare non è ammesso
+    - option: Ordinare e poi usare i due puntatori
+      pros: O(n log n) complessivo, spazio costante, apre a Three Sum e simili
+      cons: Modifica l'input e perde l'ordine originale
+      when: Gli indici non servono e la memoria è il vincolo
+  numbers:
+    - "Su n = 10^4, la soluzione ingenua di Three Sum fa 10^12 operazioni, quella con ordinamento e due puntatori circa 10^8"
+    - "Il passaggio da O(n^2) a O(n) su n = 10^6 significa 10^12 operazioni contro 10^6: non è un'ottimizzazione, è la differenza fra fattibile e non fattibile"
   interview_answer: >-
     Quando vedo un array ordinato e una condizione che cresce o cala in modo monotono, provo
     subito i due puntatori. Il ragionamento è che a ogni passo posso escludere con certezza un
     candidato: se la somma è troppo grande so che il puntatore destro non può far parte della
     soluzione con nessun elemento a sinistra, quindi lo muovo. Ogni indice si muove al massimo
-    una volta, da cui O(n) di tempo e O(1) di spazio.
+    una volta, da cui O(n) di tempo e O(1) di spazio. Se l'array non è ordinato valuto se
+    ordinarlo conviene comunque: O(n log n) resta molto meglio del quadratico, ed è il salto
+    che porta Three Sum a O(n^2).
+  senior_signals:
+    - "Spiega perché la tecnica è corretta - cosa viene escluso a ogni passo - non solo come si scrive"
+    - "Chiede se servono gli indici originali prima di proporre di ordinare"
+    - "Dichiara il vincolo di spazio costante invece di aspettare che glielo chiedano"
+    - "Gestisce i duplicati in modo sistematico su tutti gli indici, non con un set finale"
   pitfalls:
     - "Modificare l'array mentre lo si scorre, invalidando gli indici"
     - "Sbagliare le condizioni di confine con <= invece di <"
     - "Non gestire array vuoto o con un solo elemento"
-  follow_up_questions:
-    - "Come estendi Two Sum a Three Sum mantenendo O(n^2)?"
+    - "Ordinare quando il problema chiede gli indici dell'array originale"
+  follow_ups:
+    - question: Come estendi Two Sum a Three Sum mantenendo O(n^2)?
+      answer: >-
+        Ordino l'array, poi fisso il primo elemento con un ciclo esterno e applico i due
+        puntatori sul sottoarray che resta, cercando la coppia che somma all'opposto
+        dell'elemento fissato. Il ciclo esterno è O(n), la scansione interna O(n), quindi
+        O(n^2) complessivo, più O(n log n) dell'ordinamento che sparisce nell'asintotico.
+        La parte delicata è saltare i duplicati su tutti e tre gli indici per non
+        restituire più volte la stessa terna.
+    - question: Quando i due puntatori non si possono usare?
+      answer: >-
+        Quando manca la monotonia, cioè quando muovere un puntatore non permette di
+        escludere niente con certezza. Un esempio classico è la ricerca di un sottoarray
+        con somma data in presenza di numeri negativi: allargare la finestra non aumenta
+        necessariamente la somma, quindi non so in che direzione muovermi. Lì si passa ai
+        prefix sum con una hash map, che è O(n) di tempo ma O(n) di spazio.
+    - question: Two Sum senza ordinare l'array, restituendo gli indici originali?
+      answer: >-
+        Con una hash map e il pattern del complemento: scorro una volta e per ogni valore
+        cerco nella mappa target - valore. Se c'è, ho trovato la coppia e ho entrambi gli
+        indici originali; altrimenti inserisco il valore corrente con il suo indice.
+        È O(n) di tempo e O(n) di spazio, e a differenza dei due puntatori non richiede di
+        ordinare, quindi gli indici restano validi.
+    - question: Come sposti tutti gli zeri in fondo mantenendo l'ordine degli altri?
+      answer: >-
+        Con lettore e scrittore: il lettore scorre tutto, e ogni volta che trova un valore
+        non nullo lo scrive nella posizione dello scrittore e lo avanza. Alla fine riempio
+        di zeri da scrittore in poi. È O(n) e O(1), l'ordine relativo dei non nulli è
+        preservato perché li scrivo nell'ordine in cui li incontro, e lo scrittore resta
+        sempre dietro al lettore quindi non sovrascrivo niente di non ancora letto.
+  related: [dsa-03-hash-maps, dsa-12-sliding-window, dsa-05-binary-search, dsa-14-sorting]
+  resources:
+    - title: "NeetCode - Two Pointers"
+      url: https://neetcode.io/practice
+      kind: practice
+    - title: "The Algorithms - Python"
+      url: https://github.com/TheAlgorithms/Python
+      kind: repo
 
 - id: dsa-03-hash-maps
   title: Hash map e insiemi
@@ -69,26 +340,165 @@
   summary: >-
     Le hash map scambiano spazio per tempo: trasformano una ricerca lineare in un accesso
     costante. Sono la struttura che risolve il maggior numero di problemi da colloquio.
+  deep_dive: |-
+    Una hash map calcola dalla chiave un intero - l'hash - e lo usa per scegliere
+    direttamente la posizione in cui guardare. Non c'è ricerca: si va dove il conto dice
+    di andare. Da qui l'O(1) medio. Il caso peggiore O(n) arriva quando troppe chiavi
+    finiscono nella stessa posizione, cioè quando collidono.
+
+    Le collisioni si risolvono in due modi. Con il concatenamento, ogni posizione tiene
+    una lista (o un piccolo albero) di tutte le chiavi che ci finiscono. Con
+    l'indirizzamento aperto, si cerca la prima posizione libera secondo una regola
+    deterministica - sondaggio lineare, quadratico, doppio hashing - e CPython usa
+    questa seconda strada. In entrambi i casi la struttura si ridimensiona quando il
+    fattore di carico, cioè il rapporto fra elementi e posizioni, supera una soglia:
+    si allocano più posizioni e si ricalcolano tutti gli hash. È un'operazione O(n) che
+    però si ammortizza sulle inserzioni precedenti, quindi l'inserimento resta O(1)
+    ammortizzato.
+
+    Due requisiti sulle chiavi vanno saputi. Devono essere immutabili, perché se la
+    chiave cambia dopo l'inserimento il suo hash cambia e l'elemento diventa
+    irraggiungibile: in Python una tupla è una chiave valida, una lista no. E hash e
+    uguaglianza devono essere coerenti: due oggetti uguali devono avere lo stesso hash,
+    altrimenti la ricerca fallisce anche quando l'elemento c'è. In Python, definire
+    __eq__ senza __hash__ rende la classe non hashable proprio per non far cadere in
+    questo errore.
+
+    L'uso che conta a un colloquio è il pattern del complemento: invece di confrontare
+    tutte le coppie, si scorre una volta sola e per ogni elemento si chiede alla mappa
+    se si è già visto ciò che lo completerebbe. Two Sum, sottoarray con somma data,
+    coppie a distanza fissa sono tutte la stessa idea. Accanto a questo, la mappa di
+    frequenze - contare le occorrenze e confrontare i conteggi - risolve anagrammi,
+    elementi maggioritari, primo carattere non ripetuto. Vale la pena dichiarare
+    esplicitamente che si sta comprando tempo con la memoria, perché la domanda
+    successiva è quasi sempre come farlo in spazio costante.
   key_points:
     - "Insert, lookup e delete in O(1) medio, O(n) nel caso peggiore"
     - "Pattern del complemento: scorri una volta e cerca ciò che manca. Two Sum in O(n)"
     - "Mappa di frequenze: conteggi, anagrammi, primo carattere non ripetuto"
     - "Set per l'appartenenza e la deduplicazione"
-    - "Chiavi immutabili: in Python tuple sì, liste no"
+    - "Chiavi immutabili: in Python tuple sì, liste no. E hash coerente con l'uguaglianza"
+    - "Collisioni: concatenamento o indirizzamento aperto; il resize è O(n) ma ammortizzato"
     - "Non c'è ordine garantito (in Python dalla 3.7 c'è l'ordine di inserimento, ma non è ordinamento)"
+  examples:
+    - title: Complemento e frequenze, i due usi che coprono quasi tutto
+      language: python
+      code: |
+        def two_sum(nums: list[int], target: int) -> tuple[int, int] | None:
+            visti: dict[int, int] = {}          # valore -> indice
+            for i, valore in enumerate(nums):
+                if target - valore in visti:    # il complemento è già passato?
+                    return visti[target - valore], i
+                visti[valore] = i
+            return None
+
+        def sono_anagrammi(a: str, b: str) -> bool:
+            if len(a) != len(b):
+                return False
+            conteggi: dict[str, int] = {}
+            for carattere in a:
+                conteggi[carattere] = conteggi.get(carattere, 0) + 1
+            for carattere in b:
+                if conteggi.get(carattere, 0) == 0:
+                    return False
+                conteggi[carattere] -= 1
+            return True                          # O(n), meglio del sort O(n log n)
+      note: >-
+        In Two Sum il controllo va fatto *prima* dell'inserimento, altrimenti un elemento
+        che vale esattamente metà del target trova sé stesso.
+    - title: Hash e uguaglianza devono andare d'accordo
+      language: python
+      code: |
+        class Punto:
+            def __init__(self, x: int, y: int) -> None:
+                self.x, self.y = x, y
+            def __eq__(self, altro: object) -> bool:
+                return isinstance(altro, Punto) and (self.x, self.y) == (altro.x, altro.y)
+            # Senza __hash__, Python rende la classe non hashable: è una protezione.
+            def __hash__(self) -> int:
+                return hash((self.x, self.y))
+
+        # Chiave mutabile: l'elemento diventa irraggiungibile dopo la modifica.
+        chiave = [1, 2]
+        # {chiave: "v"}  ->  TypeError: unhashable type: 'list'
+        mappa = {(1, 2): "v"}              # la tupla è immutabile: va bene
+      note: >-
+        Due oggetti uguali devono avere lo stesso hash. Il contrario non serve: due
+        oggetti con lo stesso hash possono essere diversi, è appunto una collisione.
+  trade_offs:
+    - option: Hash map
+      pros: Accesso, inserimento e cancellazione O(1) medio; funziona su dati non ordinati
+      cons: O(n) di spazio, nessun ordine, caso peggiore O(n), overhead per oggetto
+      when: Serve appartenenza, conteggio o ricerca per chiave
+    - option: Array ordinato con ricerca binaria
+      pros: O(1) di spazio extra, ordine disponibile, ottima località di memoria
+      cons: O(log n) per la ricerca, O(n) per l'inserimento
+      when: I dati sono statici e la memoria conta più della velocità di inserimento
+    - option: Albero bilanciato
+      pros: O(log n) garantito anche nel peggiore, mantiene l'ordine, supporta i range
+      cons: Più lento in media della hash map, più memoria per i puntatori
+      when: Servono query per intervallo o l'attraversamento ordinato
+  numbers:
+    - "Il fattore di carico tipico prima del resize è fra 0,66 e 0,75: oltre, le collisioni degradano l'accesso"
+    - "Una dict di Python costa alcune decine di byte per elemento fra chiave, valore e struttura: su milioni di voci è la memoria a diventare il vincolo"
   interview_answer: >-
     Appena un problema chiede di sapere se qualcosa è già stato visto, penso a una hash map.
     Il pattern che uso più spesso è quello del complemento: invece di confrontare ogni coppia,
     scorro una volta e per ogni elemento cerco nella mappa il valore che mi completerebbe la
     soluzione, passando da O(n^2) a O(n) con O(n) di spazio. In colloquio esplicito sempre che
     sto comprando tempo con la memoria, perché la domanda successiva spesso è di farlo in
-    spazio costante.
+    spazio costante. E se mi chiedono il caso peggiore dico O(n): con collisioni patologiche
+    la mappa degenera, ed è il motivo per cui gli hash delle stringhe in molti runtime sono
+    randomizzati a ogni avvio.
+  senior_signals:
+    - "Nomina il caso peggiore O(n) e sa perché si verifica, invece di dire solo O(1)"
+    - "Sa che hash e uguaglianza devono essere coerenti e cosa succede se non lo sono"
+    - "Dichiara il costo in memoria come una scelta, non come un dettaglio"
+    - "Distingue l'ordine di inserimento di dict dall'ordinamento"
   pitfalls:
     - "Usare una lista come chiave (non hashable)"
     - "Assumere un ordine nell'iterazione"
     - "Dimenticare il caso in cui l'elemento cercato è l'elemento stesso"
-  follow_up_questions:
-    - "Come gestisce le collisioni una hash table?"
+    - "Mutare un oggetto dopo averlo usato come chiave: diventa irraggiungibile"
+  follow_ups:
+    - question: Come gestisce le collisioni una hash table?
+      answer: >-
+        In due modi. Con il concatenamento, ogni posizione contiene una lista o un albero
+        con tutte le chiavi che ci finiscono: la ricerca scorre quella lista. Con
+        l'indirizzamento aperto si cerca la prossima posizione libera secondo una regola
+        deterministica - sondaggio lineare, quadratico o doppio hashing - e CPython usa
+        questo. In entrambi i casi, quando il fattore di carico supera una soglia intorno a
+        0,7 la tabella si ridimensiona e tutte le chiavi vengono reinserite.
+    - question: Perché una hash map è O(n) nel caso peggiore?
+      answer: >-
+        Perché se tutte le chiavi collidono nella stessa posizione la struttura degenera
+        in una lista e la ricerca diventa lineare. È un caso raro con hash ben distribuiti,
+        ma diventa un problema di sicurezza se un attaccante può scegliere le chiavi: è
+        l'attacco di collisione hash, che si contrasta randomizzando il seed dell'hash a
+        ogni avvio del processo - cosa che Python fa di default - o usando alberi al posto
+        delle liste nei bucket sovraffollati.
+    - question: Quando useresti un set invece di un dict?
+      answer: >-
+        Quando mi serve solo sapere se un elemento c'è, senza associargli un valore:
+        deduplicazione, appartenenza, intersezioni. Il costo è lo stesso, ma il set esprime
+        meglio l'intenzione e non fa scrivere valori fittizi. In più offre le operazioni
+        insiemistiche - unione, intersezione, differenza - che su un dict andrebbero
+        scritte a mano.
+    - question: Come contresti gli elementi mantenendo l'ordine di prima comparsa?
+      answer: >-
+        In Python basta un dict normale: dalla 3.7 l'ordine di inserimento è garantito dal
+        linguaggio, quindi iterando su un Counter o su un dict di frequenze ottengo le
+        chiavi nell'ordine in cui le ho viste la prima volta. È importante però non
+        confondere questa garanzia con l'ordinamento: le chiavi non sono ordinate per
+        valore, solo per momento di inserimento.
+  related: [dsa-01-complexity, dsa-02-arrays-two-pointers, dsa-04-strings, py-01-modello-oggetti]
+  resources:
+    - title: "Documentazione di Python - tipi mapping"
+      url: https://docs.python.org/3/library/stdtypes.html#mapping-types-dict
+      kind: doc
+    - title: "NeetCode - Arrays & Hashing"
+      url: https://neetcode.io/practice
+      kind: practice
 
 - id: dsa-04-strings
   title: Manipolazione di stringhe
@@ -100,26 +510,160 @@
   summary: >-
     Le stringhe sono array di caratteri con un'insidia: in quasi tutti i linguaggi moderni
     sono immutabili, quindi concatenare dentro un ciclo costa O(n^2).
+  deep_dive: |-
+    L'immutabilità è il punto di partenza. In Python, Java, JavaScript e C# una stringa
+    non si modifica: ogni operazione ne produce una nuova. Quindi `s += x` dentro un
+    ciclo non aggiunge un carattere, alloca una stringa nuova e copia tutto il contenuto
+    precedente. Ripetuto n volte, il totale delle copie è 1 + 2 + ... + n, cioè
+    quadratico. La soluzione è accumulare i pezzi in una lista e unirli una sola volta
+    alla fine con join, che alloca una volta sola. In Java lo stesso ruolo lo ha
+    StringBuilder.
+
+    Il secondo blocco è l'Unicode, che a un colloquio distingue subito chi ci ha
+    lavorato. Una stringa Python è una sequenza di code point, non di caratteri
+    percepiti. Un'emoji con modificatore di tono, una bandiera o una lettera accentata
+    scritta in forma decomposta occupano più code point pur essendo un solo carattere
+    sullo schermo, quindi len() restituisce un numero che non corrisponde a ciò che
+    l'utente conta. Esiste inoltre la normalizzazione: la stessa "é" può essere un
+    singolo code point o la "e" seguita dall'accento combinante, e i due valori non sono
+    uguali finché non si normalizzano con unicodedata.normalize. Se il problema parla di
+    palindromi o di confronti su testo reale, vale la pena chiedere se l'input è ASCII.
+
+    Poi ci sono i pattern. Il confronto per anagramma si fa con le mappe di frequenza in
+    O(n) invece che ordinando in O(n log n). I palindromi si verificano con due puntatori
+    dagli estremi in O(1) di spazio. Le sottostringhe con vincoli sono quasi sempre
+    sliding window. E per la ricerca di un pattern dentro un testo esistono algoritmi
+    dedicati - Knuth-Morris-Pratt in O(n + m), Rabin-Karp con hashing a finestra - che
+    non serve saper implementare a memoria ma conviene saper nominare, insieme al fatto
+    che la ricerca ingenua è O(n·m).
+
+    Infine il costo nascosto delle slice. In Python `s[1:]` crea una copia: usarlo dentro
+    una ricorsione o un ciclo trasforma un algoritmo lineare in uno quadratico senza che
+    si veda niente di sospetto nel codice. Si passano indici, non sottostringhe.
   key_points:
     - "Concatenazione in ciclo: O(n^2). Accumula in una lista e fai join alla fine"
     - "Anagrammi: confronto delle mappe di frequenza, O(n), meglio del sort O(n log n)"
     - "Palindromi: due puntatori dagli estremi, O(1) di spazio"
     - "Sliding window per sottostringhe con vincoli"
     - "Unicode: len() conta i code point, non i caratteri percepiti. Emoji e accenti compositi rompono le assunzioni"
+    - "Normalizzazione: la stessa lettera accentata ha due rappresentazioni diverse e non uguali"
     - "In Python le slice creano copie: s[1:] in un ciclo è O(n^2) nascosto"
+    - "Ricerca di pattern: ingenua O(n·m), KMP O(n + m), Rabin-Karp con hashing a finestra"
+  examples:
+    - title: La concatenazione quadratica e come si evita
+      language: python
+      code: |
+        # O(n^2): ogni += rialloca e ricopia tutta la stringa costruita finora.
+        def inverti_lento(s: str) -> str:
+            risultato = ""
+            for carattere in s:
+                risultato = carattere + risultato
+            return risultato
+
+        # O(n): si accumula in lista e si alloca una volta sola.
+        def inverti_veloce(s: str) -> str:
+            pezzi = []
+            for carattere in s:
+                pezzi.append(carattere)
+            return "".join(reversed(pezzi))
+      note: >-
+        Il costo non si vede leggendo il codice: entrambe le versioni hanno un solo ciclo.
+        La differenza è che nella prima ogni iterazione fa un lavoro proporzionale a n.
+    - title: Palindromo, ma sull'Unicode bisogna chiedere
+      language: python
+      code: |
+        import unicodedata
+
+        def e_palindromo(s: str) -> bool:
+            # Normalizzo per far coincidere "é" precomposta e "e" + accento combinante.
+            testo = unicodedata.normalize("NFC", s).casefold()
+            puliti = [c for c in testo if c.isalnum()]
+            sx, dx = 0, len(puliti) - 1
+            while sx < dx:
+                if puliti[sx] != puliti[dx]:
+                    return False
+                sx, dx = sx + 1, dx - 1
+            return True
+
+        len("é")        # 2: "e" più accento combinante
+        len("é")         # 1: "é" precomposta - stesso testo a schermo
+      note: >-
+        casefold è più aggressivo di lower ed è quello corretto per i confronti
+        insensibili alle maiuscole su testo non inglese.
+  trade_offs:
+    - option: Mappa di frequenze per l'anagramma
+      pros: O(n) di tempo, nessun ordinamento, si adatta ai conteggi parziali
+      cons: O(k) di spazio con k dimensione dell'alfabeto
+      when: Quasi sempre; è la risposta attesa
+    - option: Ordinare e confrontare
+      pros: Due righe, nessuna struttura ausiliaria oltre alle copie ordinate
+      cons: O(n log n), e su Unicode l'ordinamento ha sue regole
+      when: Leggibilità più importante della velocità, stringhe corte
+    - option: Ricerca di pattern ingenua
+      pros: Immediata da scrivere, nessuna precomputazione
+      cons: O(n·m) nel caso peggiore
+      when: Testo corto; sopra, si nomina KMP o si usa la libreria standard
+  numbers:
+    - "Costruire una stringa di 100.000 caratteri con += fa circa 5·10^9 copie di carattere; con join, 10^5"
+    - "Un carattere ASCII in una str Python compatta occupa 1 byte, ma l'oggetto stringa ha decine di byte di intestazione: le stringhe molto corte costano soprattutto in overhead"
   interview_answer: >-
     La prima cosa che verifico è se sto costruendo una stringa dentro un ciclo, perché con
     stringhe immutabili ogni concatenazione copia tutto e il costo diventa quadratico senza
     che si veda. Accumulo in lista e faccio join. Per i confronti tipo anagramma uso mappe di
     frequenza invece di ordinare, perché passo da O(n log n) a O(n). E se il problema parla di
     caratteri reali chiedo se devo considerare l'Unicode, perché la lunghezza in code point non
-    corrisponde a quella percepita.
+    corrisponde a quella percepita e la stessa lettera accentata ha due rappresentazioni
+    diverse finché non normalizzo.
+  senior_signals:
+    - "Chiede se l'input è ASCII prima di assumere che un carattere sia un code point"
+    - "Riconosce le slice come copie e passa indici invece di sottostringhe"
+    - "Sa nominare KMP o Rabin-Karp senza doverli implementare"
+    - "Usa casefold invece di lower per i confronti su testo non inglese"
   pitfalls:
     - "Concatenazione in ciclo"
     - "Confondere byte e caratteri su input non ASCII"
     - "Non chiedere se il confronto è case sensitive"
-  follow_up_questions:
-    - "Perché s += x in un ciclo è O(n^2) in Python?"
+    - "Usare s[1:] dentro una ricorsione, rendendola quadratica"
+  follow_ups:
+    - question: Perché s += x in un ciclo è O(n^2) in Python?
+      answer: >-
+        Perché le stringhe sono immutabili: ogni += alloca una stringa nuova e copia tutto
+        il contenuto precedente più il pezzo nuovo. Alla iterazione i si copiano i
+        caratteri, quindi il totale è 1 + 2 + ... + n, cioè quadratico. CPython ha
+        un'ottimizzazione che a volte modifica in place quando il conteggio dei riferimenti
+        è uno, ma non è garantita dal linguaggio e sparisce appena la stringa è
+        referenziata altrove: non ci si fa affidamento.
+    - question: Come verificheresti se due stringhe sono anagrammi?
+      answer: >-
+        Con una mappa di frequenze: conto i caratteri della prima, decremento con quelli
+        della seconda e verifico che tutti i conteggi tornino a zero. È O(n) di tempo e
+        O(k) di spazio con k la dimensione dell'alfabeto. Ordinare entrambe e confrontarle
+        funziona ed è più corto da scrivere, ma costa O(n log n). Prima però chiedo se il
+        confronto è sensibile a maiuscole, spazi e accenti, perché cambia la risposta.
+    - question: Come cerchi un pattern dentro un testo in modo efficiente?
+      answer: >-
+        L'approccio ingenuo prova ogni posizione di partenza ed è O(n·m). Knuth-Morris-Pratt
+        precalcola, per ogni prefisso del pattern, la lunghezza del più lungo prefisso che è
+        anche suffisso: questo permette, dopo un mismatch, di ripartire senza tornare
+        indietro nel testo, ottenendo O(n + m). Rabin-Karp usa invece un hash a finestra
+        scorrevole ed è comodo quando i pattern da cercare sono molti. In pratica uso la
+        funzione della libreria standard, che è già ottimizzata.
+    - question: Perché len() di un'emoji può essere maggiore di uno?
+      answer: >-
+        Perché len conta i code point, e molti caratteri percepiti come uno solo ne usano
+        più di uno: un'emoji con modificatore di tono della pelle, una bandiera composta da
+        due indicatori regionali, una famiglia unita da zero-width joiner. Se serve contare
+        i caratteri come li vede l'utente bisogna ragionare in grafemi, che la libreria
+        standard di Python non offre: serve una libreria esterna. Al colloquio basta
+        nominare la differenza e chiedere quale delle due conta.
+  related: [dsa-03-hash-maps, dsa-12-sliding-window, dsa-02-arrays-two-pointers, py-06-idiomi-performance]
+  resources:
+    - title: "Unicode HOWTO - documentazione di Python"
+      url: https://docs.python.org/3/howto/unicode.html
+      kind: doc
+    - title: "NeetCode - problemi su stringhe"
+      url: https://neetcode.io/practice
+      kind: practice
 
 - id: dsa-05-binary-search
   title: Ricerca binaria
@@ -131,27 +675,163 @@
   summary: >-
     La ricerca binaria dimezza lo spazio di ricerca a ogni passo. Vale su qualunque dominio
     monotono, non solo sugli array ordinati: è questa generalizzazione che la rende potente.
+  deep_dive: |-
+    L'idea vera non è "array ordinato" ma "predicato monotono": una condizione che, una
+    volta diventata vera, resta vera per tutti i valori successivi. Se esiste una tale
+    condizione si può cercare binariamente il punto di transizione, perché valutare il
+    centro dice sempre da che parte sta la risposta. L'array ordinato è solo il caso più
+    familiare: il predicato è "l'elemento in posizione i è maggiore o uguale a x".
+
+    Quasi tutti i bug nascono dall'invariante. Bisogna scegliere se l'intervallo di
+    ricerca è chiuso [lo, hi] o semiaperto [lo, hi) e non mescolare le due convenzioni:
+    la condizione del while, il calcolo di mid e gli aggiornamenti di lo e hi devono
+    essere coerenti fra loro. Con l'intervallo chiuso si cicla finché lo <= hi e si
+    aggiorna a mid+1 o mid-1; con il semiaperto si cicla finché lo < hi e si aggiorna a
+    mid+1 o mid. Mescolarle produce cicli infiniti o risposte fuori di uno, ed è il
+    motivo per cui conviene scrivere sempre la stessa variante, memorizzata bene.
+
+    Le varianti che servono davvero sono due: il primo indice con valore maggiore o
+    uguale a x - lower_bound - e il primo strettamente maggiore - upper_bound. Da queste
+    si ricavano tutte le altre domande: se x esiste, quante volte compare, dove andrebbe
+    inserito. In Python le fornisce il modulo bisect, e usarlo invece di riscriverle è
+    una risposta perfettamente valida a un colloquio, purché si sappia cosa fanno.
+
+    La generalizzazione più preziosa è la ricerca binaria sulla risposta. Se il problema
+    chiede il valore minimo (o massimo) che soddisfa un vincolo, e si sa verificare in
+    tempo ragionevole se un candidato è fattibile, si cerca binariamente sullo spazio
+    delle risposte invece che sui dati. Il costo diventa O(costo della verifica ×
+    log dell'intervallo). È lo schema di problemi come "dividi l'array in k parti
+    minimizzando la somma massima" o "qual è la velocità minima per finire in h ore":
+    verificare una velocità è lineare, e le velocità candidate si dimezzano.
+
+    Un dettaglio da nominare: mid = lo + (hi - lo) // 2 invece di (lo + hi) // 2. In
+    Python gli interi non traboccano e la differenza è nulla, ma in Java o C++ la somma
+    può eccedere il tipo, ed è un bug storico rimasto per anni nella libreria standard di
+    Java. Dirlo mostra di conoscere il contesto oltre al linguaggio che si sta usando.
   key_points:
     - "O(log n) tempo, O(1) spazio nella versione iterativa"
     - "Usa mid = lo + (hi - lo) // 2 per evitare overflow nei linguaggi a interi fissi"
     - "Decidi l'invariante e mantienilo: [lo, hi] chiuso o [lo, hi) semiaperto, senza mescolarli"
     - "Varianti fondamentali: primo elemento >= x (lower_bound), primo > x (upper_bound)"
     - "Binary search sulla risposta: se puoi verificare in O(n) se un valore candidato è fattibile, cerchi binariamente sul valore"
+    - "Serve la monotonia del predicato, non l'ordinamento dei dati"
     - "Applicazioni: array ruotato, matrice ordinata, minimizzare il massimo carico"
+  examples:
+    - title: Lower bound con invariante esplicito
+      language: python
+      code: |
+        def primo_indice_ge(nums: list[int], x: int) -> int:
+            """Primo indice con nums[i] >= x, oppure len(nums) se non esiste."""
+            lo, hi = 0, len(nums)          # semiaperto: [lo, hi)
+            while lo < hi:                 # invariante: la risposta sta in [lo, hi]
+                mid = lo + (hi - lo) // 2  # evita l'overflow nei linguaggi a interi fissi
+                if nums[mid] < x:
+                    lo = mid + 1           # mid è escluso: non soddisfa
+                else:
+                    hi = mid               # mid potrebbe essere la risposta: resta dentro
+            return lo
+
+        # Da qui derivano le altre domande, senza riscrivere il ciclo:
+        # esiste x?            -> i = primo_indice_ge(a, x); i < len(a) and a[i] == x
+        # quante volte c'è x?  -> primo_indice_ge(a, x + 1) - primo_indice_ge(a, x)
+      note: >-
+        La chiave è che hi = mid, non mid - 1: con l'intervallo semiaperto mid resta un
+        candidato valido. Mescolare le due convenzioni è la causa quasi unica dei bug.
+    - title: Ricerca binaria sulla risposta
+      language: python
+      code: |
+        import math
+
+        def velocita_minima(pile: list[int], ore: int) -> int:
+            """Velocità oraria minima per esaurire tutte le pile entro 'ore'."""
+            def bastano(velocita: int) -> bool:          # predicato monotono:
+                servono = sum(math.ceil(p / velocita) for p in pile)
+                return servono <= ore                     # vero da un punto in poi
+
+            lo, hi = 1, max(pile)
+            while lo < hi:
+                mid = lo + (hi - lo) // 2
+                if bastano(mid):
+                    hi = mid
+                else:
+                    lo = mid + 1
+            return lo      # O(n log(max)) invece di provare tutte le velocità
+      note: >-
+        Non c'è nessun array ordinato: la monotonia è nel predicato. Se una velocità basta,
+        bastano anche tutte quelle maggiori.
+  trade_offs:
+    - option: Ricerca binaria
+      pros: O(log n), spazio costante, nessuna struttura ausiliaria
+      cons: Richiede monotonia e dati ordinati; l'ordinamento costa O(n log n)
+      when: Ricerca ripetuta su dati statici, o spazio delle risposte monotono
+    - option: Hash map
+      pros: O(1) medio per l'appartenenza, non serve ordinare
+      cons: O(n) di spazio, non risponde a domande per intervallo o "il più vicino"
+      when: Serve solo sapere se un elemento esiste
+    - option: Scansione lineare
+      pros: Nessun prerequisito, ottima località di memoria, codice banale
+      cons: O(n) per ricerca
+      when: Poche ricerche, o n così piccolo che il log non paga
+  numbers:
+    - "Su un miliardo di elementi la ricerca binaria fa 30 confronti: log2(10^9) ≈ 30"
+    - "Il bug di overflow in (lo + hi) / 2 è rimasto nella binarySearch della libreria Java per circa nove anni prima di essere corretto"
   interview_answer: >-
     La uso ogni volta che riesco a definire un predicato monotono, cioè una condizione che una
     volta diventata vera resta vera. Non serve un array ordinato: se il problema chiede il
     minimo valore che soddisfa un vincolo e so verificare un candidato in tempo lineare, cerco
     binariamente sullo spazio delle risposte e ottengo O(n log range). Sull'implementazione
     fisso l'invariante prima di scrivere, perché quasi tutti i bug della ricerca binaria sono
-    condizioni di confine incoerenti fra il calcolo di mid e l'aggiornamento dei limiti.
+    condizioni di confine incoerenti fra il calcolo di mid e l'aggiornamento dei limiti. E uso
+    mid = lo + (hi - lo) // 2, che in Python è indifferente ma in Java o C++ evita l'overflow.
+  senior_signals:
+    - "Parla di predicato monotono invece che di array ordinato"
+    - "Dichiara l'invariante dell'intervallo prima di scrivere il ciclo"
+    - "Riconosce i problemi di ottimizzazione come ricerca binaria sulla risposta"
+    - "Conosce lower_bound e upper_bound e ci deriva sopra le altre domande"
   pitfalls:
     - "Ciclo infinito quando lo e hi non si riducono"
     - "Mescolare convenzioni di intervallo chiuso e semiaperto"
     - "Dimenticare che l'array deve essere ordinato rispetto al criterio che si usa"
-  follow_up_questions:
-    - "Come cerchi in un array ordinato ma ruotato?"
-    - "Cosa significa fare binary search sulla risposta?"
+    - "Ordinare dentro un ciclo di ricerche, annullando il vantaggio del log"
+  follow_ups:
+    - question: Come cerchi in un array ordinato ma ruotato?
+      answer: >-
+        A ogni passo una delle due metà è comunque ordinata, e lo capisco confrontando
+        nums[lo] con nums[mid]. Se la metà sinistra è ordinata e il target sta nel suo
+        intervallo, mi restringo lì; altrimenti vado a destra, e simmetricamente nell'altro
+        caso. Resta O(log n). Con duplicati la garanzia salta - se nums[lo], nums[mid] e
+        nums[hi] sono uguali non so da che parte andare - e nel caso peggiore si degrada a
+        O(n): vale la pena dirlo.
+    - question: Cosa significa fare binary search sulla risposta?
+      answer: >-
+        Significa cercare non dentro i dati ma nello spazio dei possibili risultati. Serve
+        una funzione che, dato un candidato, dica se è fattibile, e che sia monotona: se un
+        valore basta, bastano tutti quelli maggiori. A quel punto si dimezza l'intervallo
+        dei candidati come in una ricerca binaria normale. Il costo è il costo della
+        verifica moltiplicato per il logaritmo dell'ampiezza dell'intervallo. È lo schema
+        di "minimizza il massimo carico" o "qual è la velocità minima per finire in tempo".
+    - question: Perché mid = lo + (hi - lo) // 2 e non (lo + hi) // 2?
+      answer: >-
+        Perché nei linguaggi con interi a dimensione fissa la somma lo + hi può superare il
+        massimo rappresentabile e diventare negativa, producendo un indice non valido. La
+        forma con la differenza calcola lo stesso valore senza mai eccedere. In Python gli
+        interi sono illimitati e il problema non esiste, ma usare la forma corretta è
+        gratis e mostra di conoscere il contesto.
+    - question: Come troveresti l'elemento più vicino a un valore in un array ordinato?
+      answer: >-
+        Con lower_bound trovo il primo indice con valore maggiore o uguale al target;
+        il candidato più vicino è quello lì o quello immediatamente precedente, quindi
+        confronto le due distanze e scelgo. I casi limite sono quando l'indice è zero -
+        allora c'è solo il successivo - o è la lunghezza dell'array, e allora solo il
+        precedente. Resta O(log n).
+  related: [dsa-01-complexity, dsa-14-sorting, dsa-02-arrays-two-pointers, db-12-indexes]
+  resources:
+    - title: "Documentazione di Python - modulo bisect"
+      url: https://docs.python.org/3/library/bisect.html
+      kind: doc
+    - title: "NeetCode - Binary Search"
+      url: https://neetcode.io/practice
+      kind: practice
 
 - id: dsa-06-linked-lists
   title: Liste concatenate
@@ -163,26 +843,158 @@
   summary: >-
     Le liste concatenate valutano la capacità di manipolare puntatori senza perdere
     riferimenti. Raramente utili in produzione, sono frequentissime in colloquio.
+  deep_dive: |-
+    Una lista concatenata è una sequenza di nodi, ognuno con un valore e il riferimento
+    al successivo. Il compromesso rispetto all'array è netto: inserire o rimuovere dato
+    un nodo costa O(1) perché basta ricucire due riferimenti, ma accedere all'elemento
+    i-esimo costa O(n) perché bisogna percorrerla. L'array fa l'opposto. In produzione
+    l'array vince quasi sempre, anche quando la teoria direbbe di no, perché i suoi
+    elementi sono contigui in memoria e la cache della CPU li carica a blocchi, mentre i
+    nodi di una lista sono sparsi e ogni salto è potenzialmente un cache miss.
+
+    Due tecniche coprono la maggior parte dei problemi. La prima è il nodo fittizio -
+    dummy head - piazzato davanti alla testa: elimina il caso speciale dell'inserimento
+    o della cancellazione in prima posizione, perché ogni nodo reale ha sempre un
+    predecessore. Il codice si accorcia e i rami condizionali spariscono. Alla fine si
+    restituisce dummy.next.
+
+    La seconda è la coppia di puntatori a velocità diversa, nota come tortoise and hare.
+    Se uno avanza di uno e l'altro di due, quando il veloce arriva in fondo il lento è a
+    metà: ecco il nodo centrale in una sola passata. E se c'è un ciclo, il veloce
+    guadagna un passo per iterazione sul lento, quindi lo raggiunge necessariamente: è
+    l'algoritmo di Floyd per il rilevamento dei cicli. La parte elegante è la seconda
+    fase: dal punto di incontro si riparte con un puntatore dalla testa e uno dal punto
+    di incontro, entrambi a velocità uno, e si incontrano esattamente all'inizio del
+    ciclo. La dimostrazione si fa con un conto sulle distanze, e saperla accennare è un
+    buon segnale.
+
+    L'inversione iterativa richiede tre puntatori - precedente, corrente, successivo -
+    e l'ordine delle assegnazioni è tutto: bisogna salvare il successivo prima di
+    riscrivere il collegamento, altrimenti si perde il resto della lista. È l'errore
+    più comune su questo argomento, e si evita disegnando i nodi e le frecce prima di
+    scrivere. Vale anche per le varianti: invertire un sottointervallo, invertire a
+    gruppi di k, unire due liste ordinate. Tutte richiedono di tenere un riferimento al
+    nodo prima del punto in cui si opera.
   key_points:
     - "Inserimento e rimozione O(1) dato il nodo, accesso per indice O(n)"
     - "Dummy head: elimina i casi particolari sull'inserimento in testa"
     - "Fast/slow (tortoise and hare): trova il nodo centrale e rileva i cicli"
     - "Algoritmo di Floyd: se i due puntatori si incontrano c'è un ciclo; ripartendo dalla testa si trova l'inizio del ciclo"
-    - "Inversione iterativa con tre puntatori: prev, curr, next"
+    - "Inversione iterativa con tre puntatori: prev, curr, next. Salva next prima di riscrivere"
+    - "In produzione l'array vince quasi sempre: la contiguità in memoria batte l'O(1) teorico"
     - "Disegnare i puntatori prima di scrivere il codice evita quasi tutti gli errori"
+  examples:
+    - title: Inversione - l'ordine delle assegnazioni è tutto
+      language: python
+      code: |
+        class Nodo:
+            def __init__(self, valore: int, successivo: "Nodo | None" = None) -> None:
+                self.valore, self.successivo = valore, successivo
+
+        def inverti(testa: Nodo | None) -> Nodo | None:
+            precedente, corrente = None, testa
+            while corrente:
+                seguente = corrente.successivo   # 1. salva, altrimenti si perde la coda
+                corrente.successivo = precedente # 2. gira la freccia all'indietro
+                precedente = corrente            # 3. avanza entrambi
+                corrente = seguente
+            return precedente                    # la vecchia coda è la nuova testa
+      note: >-
+        Invertire le righe 1 e 2 fa perdere tutto il resto della lista: è il bug classico
+        di questo esercizio, e non dà errore, restituisce solo una lista di un elemento.
+    - title: Ciclo di Floyd - rilevarlo e trovarne l'inizio
+      language: python
+      code: |
+        def inizio_ciclo(testa: Nodo | None) -> Nodo | None:
+            lento = veloce = testa
+            while veloce and veloce.successivo:      # entrambi i controlli servono
+                lento = lento.successivo
+                veloce = veloce.successivo.successivo
+                if lento is veloce:                  # si incontrano: c'è un ciclo
+                    break
+            else:
+                return None                          # uscita senza break: nessun ciclo
+
+            # Seconda fase: dalla testa e dal punto d'incontro, entrambi a passo uno.
+            altro = testa
+            while altro is not lento:
+                altro, lento = altro.successivo, lento.successivo
+            return altro                             # è l'inizio del ciclo
+      note: >-
+        Il controllo `veloce and veloce.successivo` serve tutto: senza il secondo,
+        avanzare di due su una lista di lunghezza dispari solleva un errore.
+  trade_offs:
+    - option: Lista concatenata
+      pros: Inserimento e rimozione O(1) dato il nodo, dimensione dinamica senza riallocazioni
+      cons: Accesso per indice O(n), pessima località di memoria, un puntatore per nodo
+      when: Molte rimozioni al centro con il nodo già in mano; code, LRU
+    - option: Array dinamico
+      pros: Accesso O(1), memoria contigua e cache-friendly, nessun overhead per nodo
+      cons: Inserimento e rimozione al centro O(n), riallocazioni periodiche
+      when: Quasi sempre, in produzione
+    - option: Lista doppiamente concatenata
+      pros: Rimozione O(1) con il solo nodo, attraversamento in entrambi i sensi
+      cons: Un puntatore in più per nodo, più casi da aggiornare e più bug possibili
+      when: Cache LRU, dove serve rimuovere un nodo qualunque in tempo costante
+  numbers:
+    - "Un nodo in Python costa decine di byte fra oggetto e riferimenti: una lista di un milione di interi occupa molto più dell'array equivalente"
+    - "Nel primo incontro dei puntatori di Floyd il veloce ha percorso esattamente il doppio dei passi del lento: da qui si ricava la dimostrazione della seconda fase"
   interview_answer: >-
     La tecnica che uso più spesso è fast e slow: un puntatore avanza di due e uno di uno. Se
     c'è un ciclo si incontrano necessariamente, e se non c'è, quando il veloce arriva in fondo
     il lento è a metà. Per le modifiche strutturali uso sempre un nodo dummy davanti alla
     testa, perché così inserimento e cancellazione in testa non sono più casi speciali e il
     codice si accorcia. Prima di scrivere disegno i puntatori: quasi tutti i bug su liste sono
-    riferimenti persi durante il riaggancio.
+    riferimenti persi durante il riaggancio, e nell'inversione basta invertire due righe per
+    perdere tutta la coda senza ricevere nessun errore.
+  senior_signals:
+    - "Usa il dummy head di default invece di scrivere rami speciali per la testa"
+    - "Sa spiegare perché i due puntatori di Floyd si incontrano, non solo che lo fanno"
+    - "Osserva che in produzione un array batte quasi sempre la lista, per la cache"
+    - "Controlla sia veloce sia veloce.successivo prima di avanzare di due"
   pitfalls:
     - "Perdere il riferimento al resto della lista durante l'inversione"
     - "Non controllare fast e fast.next prima di avanzare di due"
     - "Dimenticare i casi lista vuota o con un solo nodo"
-  follow_up_questions:
-    - "Come trovi il punto di inizio di un ciclo, non solo la sua esistenza?"
+    - "Restituire la vecchia testa dopo un'inversione invece della nuova"
+  follow_ups:
+    - question: Come trovi il punto di inizio di un ciclo, non solo la sua esistenza?
+      answer: >-
+        Dopo che lento e veloce si sono incontrati, faccio ripartire un puntatore dalla
+        testa e lascio l'altro nel punto d'incontro, avanzandoli entrambi di un passo: si
+        incontrano all'inizio del ciclo. Il motivo è che al primo incontro il veloce ha
+        fatto esattamente il doppio dei passi del lento, e facendo il conto la distanza
+        dalla testa all'inizio del ciclo risulta uguale alla distanza dal punto d'incontro
+        all'inizio del ciclo, percorrendo l'anello.
+    - question: Perché usare un nodo dummy?
+      answer: >-
+        Perché elimina il caso speciale della testa. Senza dummy, cancellare o inserire in
+        prima posizione richiede un ramo a parte, dato che non esiste un predecessore da
+        aggiornare; con il dummy ogni nodo reale ne ha uno e il codice è uniforme. Alla
+        fine si restituisce dummy.next, che copre anche il caso in cui la lista è diventata
+        vuota. Costa un nodo di memoria e toglie la maggior parte dei bug di confine.
+    - question: Come uniresti due liste ordinate in una sola ordinata?
+      answer: >-
+        Con un dummy e un puntatore di coda: confronto le teste delle due liste, aggancio
+        la minore alla coda e avanzo in quella lista. Quando una si esaurisce aggancio
+        tutto il resto dell'altra in un colpo solo. È O(n + m) di tempo e O(1) di spazio
+        extra, perché riuso i nodi esistenti senza allocarne di nuovi - il che è anche la
+        ragione per cui il problema si fa sulle liste e non sugli array.
+    - question: Quando useresti davvero una lista concatenata in produzione?
+      answer: >-
+        Raramente, e quasi sempre in versione doppiamente concatenata dentro una struttura
+        più grande: la cache LRU è l'esempio tipico, dove serve spostare un nodo qualunque
+        in testa in tempo costante avendo già il suo riferimento da una hash map. Fuori da
+        questo genere di casi l'array dinamico vince, perché il costo asintotico
+        identico viene deciso dalla località di memoria, e lì la lista perde.
+  related: [dsa-07-stacks-queues, dsa-08-trees, cache-22-eviction, dsa-01-complexity]
+  resources:
+    - title: "NeetCode - Linked List"
+      url: https://neetcode.io/practice
+      kind: practice
+    - title: "VisuAlgo - liste concatenate"
+      url: https://visualgo.net/en/list
+      kind: practice
 
 - id: dsa-07-stacks-queues
   title: Stack e code
@@ -194,24 +1006,158 @@
   summary: >-
     Stack (LIFO) e coda (FIFO) sono semplici ma riconoscere quando servono è metà del
     lavoro. Lo stack monotono in particolare risolve in O(n) problemi che sembrano O(n^2).
+  deep_dive: |-
+    Lo stack serve quando il problema ha una struttura annidata o quando bisogna tornare
+    indietro nell'ordine inverso a quello di arrivo: parentesi bilanciate, undo,
+    valutazione di espressioni, attraversamenti iterativi che simulano la ricorsione.
+    Non a caso la ricorsione stessa è uno stack: ogni chiamata mette un frame, ogni
+    ritorno lo toglie. Trasformare una funzione ricorsiva in una iterativa significa
+    gestire a mano quello stack, ed è quello che si fa quando la profondità rischia di
+    far esplodere quello dell'interprete.
+
+    La coda serve quando l'ordine di elaborazione deve essere quello di arrivo: BFS,
+    buffering, scheduling equo. In Python va usato collections.deque e non una lista,
+    perché list.pop(0) è O(n) - deve spostare tutti gli altri elementi - mentre
+    deque.popleft() è O(1). È un dettaglio che in colloquio conviene nominare, perché
+    trasforma un BFS lineare in uno quadratico senza cambiare una riga di logica.
+
+    Il pattern che vale davvero è lo stack monotono: si mantiene uno stack i cui
+    elementi sono sempre in ordine crescente o decrescente, e prima di inserire si
+    estrae tutto ciò che romperebbe l'ordine. Ogni elemento entra ed esce al massimo una
+    volta, quindi il totale è O(n) anche se c'è un while annidato. Risolve "prossimo
+    elemento maggiore", "quanti giorni mancano a una temperatura più alta", l'area del
+    rettangolo massimo in un istogramma e l'acqua trattenuta fra le barre: problemi che
+    la soluzione ingenua affronta in O(n^2).
+
+    Sul deque a doppia estremità c'è un uso specifico da conoscere: il massimo su
+    finestra scorrevole. Si tiene un deque di indici i cui valori sono in ordine
+    decrescente; la testa è sempre il massimo della finestra corrente, si scartano dalla
+    coda i valori più piccoli in arrivo e dalla testa gli indici usciti dalla finestra.
+    Anche qui ogni indice entra ed esce una volta sola: O(n) invece di O(n·k).
+
+    Infine, una coda di priorità non è una coda: l'ordine di uscita è dato dalla
+    priorità, non dall'arrivo. È un heap, ed è un'altra struttura con altre complessità.
   key_points:
     - "Stack: parentesi bilanciate, undo, valutazione di espressioni, simulazione della ricorsione"
     - "Coda: BFS, buffering, scheduling. In Python usa collections.deque, non list.pop(0) che è O(n)"
     - "Stack monotono: mantiene gli elementi in ordine crescente o decrescente. Risolve 'prossimo elemento maggiore' in O(n)"
+    - "Ogni elemento entra ed esce una volta sola: il while annidato non rende quadratico l'algoritmo"
     - "Deque a doppia estremità: sliding window maximum in O(n)"
+    - "La ricorsione è uno stack: renderla iterativa significa gestirlo a mano"
     - "Priority queue (heap) è un'altra cosa: l'ordine è per priorità, non di arrivo"
+  examples:
+    - title: Stack monotono - dal quadratico al lineare
+      language: python
+      code: |
+        def prossimo_maggiore(nums: list[int]) -> list[int]:
+            """Per ogni posizione, il primo valore successivo più grande (-1 se non c'è)."""
+            risultato = [-1] * len(nums)
+            stack: list[int] = []                 # indici, valori in ordine decrescente
+            for i, valore in enumerate(nums):
+                while stack and nums[stack[-1]] < valore:
+                    risultato[stack.pop()] = valore   # 'valore' è il maggiore cercato
+                stack.append(i)
+            return risultato
+        # Il while sembra annidare, ma ogni indice viene estratto al massimo una volta:
+        # il totale delle estrazioni è <= n, quindi O(n) complessivo.
+      note: >-
+        L'invariante è che lo stack contiene gli indici ancora "in attesa" di un valore
+        maggiore, e i loro valori sono in ordine decrescente dalla base alla cima.
+    - title: La coda giusta, e la coda sbagliata
+      language: python
+      code: |
+        from collections import deque
+
+        def bfs(grafo: dict[int, list[int]], partenza: int) -> list[int]:
+            visitati = {partenza}
+            coda = deque([partenza])              # O(1) in entrambe le estremità
+            ordine = []
+            while coda:
+                nodo = coda.popleft()             # con una list sarebbe O(n)
+                ordine.append(nodo)
+                for vicino in grafo[nodo]:
+                    if vicino not in visitati:
+                        visitati.add(vicino)      # si marca all'inserimento
+                        coda.append(vicino)
+            return ordine
+
+        # coda = []; coda.pop(0)   ->  O(n) per estrazione: il BFS diventa O(V^2 + E)
+      note: >-
+        Due dettagli nella stessa funzione: deque invece di list, e il set dei visitati
+        aggiornato all'inserimento in coda e non all'estrazione.
+  trade_offs:
+    - option: Stack esplicito al posto della ricorsione
+      pros: Nessun limite di profondità dell'interprete, controllo sullo stato salvato
+      cons: Codice più lungo e meno leggibile della versione ricorsiva
+      when: La profondità può superare il limite di ricorsione, o serve interrompere
+    - option: Stack monotono
+      pros: Da O(n^2) a O(n) su un'intera famiglia di problemi
+      cons: L'invariante va capito bene, altrimenti è difficile da scrivere correttamente
+      when: "Per ogni elemento, il prossimo più grande o più piccolo"
+    - option: deque contro list come coda
+      pros: popleft O(1) invece di O(n); nessuno svantaggio pratico
+      cons: Accesso per indice O(n) al centro, ma nelle code non serve
+      when: Sempre, quando serve una coda in Python
+  numbers:
+    - "list.pop(0) su 10^5 elementi fa circa 5·10^9 spostamenti; deque.popleft() ne fa 10^5"
+    - "Il limite di ricorsione predefinito di CPython è 1000 frame: sopra, serve uno stack esplicito"
   interview_answer: >-
     Lo stack lo tiro fuori quando il problema ha una struttura annidata o quando devo
     ricordare qualcosa a cui tornerò in ordine inverso: parentesi, undo, attraversamenti
     iterativi. Il caso che vale la pena conoscere bene è lo stack monotono: se devo trovare
     per ogni elemento il prossimo più grande, mantenere uno stack decrescente mi dà O(n),
     perché ogni elemento entra ed esce al massimo una volta, contro l'O(n^2) della soluzione
-    ingenua.
+    ingenua. Sulla coda, in Python dico sempre deque e non list, perché pop(0) è lineare e
+    trasforma un BFS in un algoritmo quadratico senza che la logica cambi.
+  senior_signals:
+    - "Giustifica l'O(n) dello stack monotono contando le estrazioni totali"
+    - "Nomina deque invece di list per le code, sapendo perché"
+    - "Collega la ricorsione allo stack e sa quando conviene renderla esplicita"
+    - "Distingue una coda di priorità da una coda"
   pitfalls:
     - "Usare list.pop(0) come coda in Python: è O(n) per estrazione"
     - "Non gestire lo stack vuoto al pop"
-  follow_up_questions:
-    - "Come implementeresti una coda usando due stack?"
+    - "Nello stack monotono, salvare i valori invece degli indici quando servono le posizioni"
+    - "In BFS marcare i visitati all'estrazione invece che all'inserimento"
+  follow_ups:
+    - question: Come implementeresti una coda usando due stack?
+      answer: >-
+        Uno stack per l'ingresso e uno per l'uscita. I push vanno sempre sul primo; per
+        estrarre, se il secondo è vuoto si travasa tutto il primo dentro il secondo, il che
+        inverte l'ordine e mette in cima l'elemento più vecchio. Ogni elemento viene
+        travasato al massimo una volta, quindi il costo è O(1) ammortizzato per operazione
+        anche se il singolo travaso è O(n). È un buon esempio da citare quando si parla di
+        analisi ammortizzata.
+    - question: Perché lo stack monotono è O(n) se c'è un while dentro il for?
+      answer: >-
+        Perché il numero totale di iterazioni del while su tutto l'algoritmo è limitato dal
+        numero di elementi inseriti nello stack, e ogni elemento viene inserito esattamente
+        una volta. Quindi le estrazioni complessive sono al massimo n, non n per ogni
+        iterazione esterna. È lo stesso ragionamento della sliding window: si contano le
+        iterazioni totali del corpo interno, non i livelli di annidamento.
+    - question: Come progetteresti uno stack che restituisce il minimo in O(1)?
+      answer: >-
+        Tengo due stack paralleli: quello dei valori e uno dei minimi, dove a ogni push
+        inserisco il minimo fra il valore nuovo e la cima corrente dello stack dei minimi.
+        Al pop estraggo da entrambi. Così la cima dello stack dei minimi è sempre il minimo
+        dell'intero contenuto, e tutte le operazioni restano O(1) al costo di O(n) di
+        spazio extra. Si può ottimizzare inserendo nel secondo stack solo quando il minimo
+        cambia davvero.
+    - question: Quando trasformeresti una ricorsione in una iterazione con stack esplicito?
+      answer: >-
+        Quando la profondità può superare il limite dell'interprete - in CPython mille
+        frame di default - come in una DFS su un grafo con centinaia di migliaia di nodi,
+        o quando serve poter interrompere e riprendere l'esplorazione. Il costo è che il
+        codice diventa più lungo, perché lo stato che il linguaggio salvava per me nei
+        frame ora lo devo mettere esplicitamente nello stack.
+  related: [dsa-09-graphs, dsa-13-recursion-backtracking, dsa-10-heaps, dsa-12-sliding-window]
+  resources:
+    - title: "Documentazione di Python - collections.deque"
+      url: https://docs.python.org/3/library/collections.html#collections.deque
+      kind: doc
+    - title: "NeetCode - Stack"
+      url: https://neetcode.io/practice
+      kind: practice
 
 - id: dsa-08-trees
   title: Alberi binari e BST
@@ -224,27 +1170,172 @@
     Gli alberi sono il terreno naturale della ricorsione. In un BST la proprietà di
     ordinamento permette di scartare metà dell'albero a ogni confronto, ma solo se l'albero
     è bilanciato.
+  deep_dive: |-
+    Su un albero conviene ragionare per contratto ricorsivo: si decide che cosa deve
+    restituire la funzione applicata a un sottoalbero qualunque, si assume che i figli
+    rispondano correttamente e si compone. Quasi tutti i problemi - altezza, somma
+    massima, diametro, verifica di bilanciamento - si risolvono così, e la parte difficile
+    non è il codice ma definire bene cosa restituire. Spesso serve restituire più di una
+    informazione: per il diametro servono sia l'altezza sia il miglior cammino trovato,
+    e tenerle insieme evita di ricalcolare l'altezza a ogni nodo, che porterebbe a O(n^2).
+
+    Gli attraversamenti vanno saputi tutti e quattro. Preorder visita la radice prima dei
+    figli ed è quello giusto per copiare o serializzare un albero; inorder visita sinistra,
+    radice, destra e su un BST produce la sequenza ordinata; postorder visita i figli prima
+    della radice ed è quello giusto quando il risultato del padre dipende da quelli dei
+    figli, come nel calcolo delle dimensioni o nella deallocazione; l'attraversamento per
+    livelli usa una coda ed è BFS applicato a un albero.
+
+    Il BST aggiunge l'invariante di ordinamento: tutto ciò che sta nel sottoalbero sinistro
+    è minore della radice, tutto ciò che sta a destra è maggiore. Da qui la ricerca in
+    O(h). L'errore che si vede più spesso è validare un BST confrontando solo padre e
+    figli diretti: non basta, perché un nodo profondo può rispettare il padre e violare un
+    antenato. Serve propagare lungo la discesa un intervallo di valori ammessi, che si
+    restringe a ogni passo. In alternativa si fa un inorder e si verifica che la sequenza
+    sia strettamente crescente.
+
+    Il punto che distingue una risposta completa è che O(log n) vale solo se l'albero è
+    bilanciato. Un BST costruito inserendo dati già ordinati degenera in una lista e tutte
+    le operazioni diventano O(n). Per questo esistono gli alberi auto-bilancianti: AVL,
+    più rigido, tiene la differenza di altezza fra i sottoalberi entro uno e favorisce le
+    letture; Red-Black è più permissivo, fa meno rotazioni ed è preferito quando le
+    scritture sono frequenti - è quello che usano molte librerie standard. I B-tree, usati
+    dagli indici dei database, sono la variante pensata per il disco: nodi larghi con molte
+    chiavi, per minimizzare il numero di letture di pagina.
   key_points:
     - "Attraversamenti: preorder (radice, sx, dx), inorder (sx, radice, dx), postorder (sx, dx, radice), level order (BFS con coda)"
     - "L'inorder di un BST produce la sequenza ordinata: è il test di validità"
     - "Validare un BST richiede di propagare i limiti min/max, non solo confrontare padre e figli"
+    - "Ragiona per contratto ricorsivo: cosa restituisce la funzione su un sottoalbero qualunque"
     - "Ricerca, inserimento e cancellazione: O(log n) se bilanciato, O(n) se degenerato in lista"
     - "Alberi auto-bilancianti: AVL (più rigido, letture veloci), Red-Black (più permissivo, scritture veloci)"
+    - "I B-tree degli indici sono la variante per il disco: nodi larghi, poche letture di pagina"
     - "Complessità di spazio della ricorsione: O(h), cioè O(log n) bilanciato e O(n) nel caso peggiore"
+  examples:
+    - title: Validare un BST - i limiti vanno propagati
+      language: python
+      code: |
+        class Nodo:
+            def __init__(self, v: int, sx: "Nodo | None" = None, dx: "Nodo | None" = None):
+                self.v, self.sx, self.dx = v, sx, dx
+
+        def e_bst(nodo: Nodo | None, minimo=float("-inf"), massimo=float("inf")) -> bool:
+            if nodo is None:
+                return True
+            if not (minimo < nodo.v < massimo):
+                return False
+            return (e_bst(nodo.sx, minimo, nodo.v)      # a sinistra il tetto si abbassa
+                    and e_bst(nodo.dx, nodo.v, massimo))  # a destra il pavimento si alza
+
+        # Controesempio per la validazione ingenua "confronto solo con i figli":
+        #        10
+        #       /  \
+        #      5    15
+        #          /  \
+        #         6    20      <- 6 < 15 va bene rispetto al padre, ma 6 < 10: non è un BST
+      note: >-
+        Il controesempio è la cosa da avere in mente: passa il controllo padre-figli e
+        fallisce quello corretto. Vale la pena disegnarlo alla lavagna.
+    - title: Diametro - restituire due informazioni per restare in O(n)
+      language: python
+      code: |
+        def diametro(radice: Nodo | None) -> int:
+            migliore = 0
+
+            def altezza(nodo: Nodo | None) -> int:
+                nonlocal migliore
+                if nodo is None:
+                    return 0
+                sx, dx = altezza(nodo.sx), altezza(nodo.dx)
+                migliore = max(migliore, sx + dx)   # cammino che passa per questo nodo
+                return 1 + max(sx, dx)              # altezza per il chiamante
+
+            altezza(radice)
+            return migliore
+        # O(n): ogni nodo visitato una volta. Ricalcolare l'altezza a ogni nodo darebbe O(n^2).
+      note: >-
+        Il trucco generale: quando servono due grandezze, se ne restituisce una e si
+        aggiorna l'altra lungo la risalita, invece di fare due visite annidate.
+  trade_offs:
+    - option: BST non bilanciato
+      pros: Implementazione semplice, nessuna rotazione da gestire
+      cons: Degenera in lista con input ordinati, O(n) nel caso peggiore
+      when: Dati in ordine casuale e nessun requisito sul caso peggiore
+    - option: AVL
+      pros: Bilanciamento rigido, altezza minima, letture molto veloci
+      cons: Più rotazioni in inserimento e cancellazione
+      when: Molte più letture che scritture
+    - option: Red-Black
+      pros: Meno rotazioni, buon compromesso lettura-scrittura
+      cons: Altezza fino a circa il doppio dell'AVL, invarianti più complessi
+      when: Struttura generica di libreria, carico misto
+    - option: B-tree
+      pros: Pochissimi accessi al disco grazie ai nodi larghi
+      cons: Inutilmente complesso in memoria
+      when: Indici di database e file system
+  numbers:
+    - "Un albero bilanciato su un milione di nodi ha altezza circa 20; degenerato in lista, un milione"
+    - "Un B-tree con fattore di ramificazione alcune centinaia raggiunge milioni di chiavi in 3-4 livelli: è il motivo per cui un indice costa pochissime letture"
   interview_answer: >-
     Sugli alberi ragiono ricorsivamente: definisco cosa deve restituire la funzione per un
     sottoalbero e compongo i risultati dei figli. L'errore classico che evito è validare un BST
     confrontando solo padre e figli: serve propagare un intervallo di valori ammessi lungo la
     discesa, altrimenti un nodo profondo che viola la proprietà rispetto a un antenato passa il
     controllo. E ricordo sempre che le complessità O(log n) valgono solo se l'albero è
-    bilanciato: un BST costruito inserendo dati già ordinati degenera in una lista.
+    bilanciato: un BST costruito inserendo dati già ordinati degenera in una lista, ed è per
+    questo che in pratica si usano AVL, Red-Black o, sul disco, i B-tree.
+  senior_signals:
+    - "Porta il controesempio concreto alla validazione ingenua del BST"
+    - "Restituisce più informazioni dalla stessa visita per non passare a O(n^2)"
+    - "Distingue AVL e Red-Black per profilo di carico, non solo per nome"
+    - "Collega i B-tree agli indici dei database e al costo delle letture di pagina"
   pitfalls:
     - "Validare un BST guardando solo i figli diretti"
     - "Dimenticare che la ricorsione costa O(h) di stack"
     - "Non gestire il caso albero vuoto"
-  follow_up_questions:
-    - "Come validi un BST correttamente?"
-    - "Perché un BST può degenerare e come si previene?"
+    - "Ricalcolare l'altezza dentro la visita, trasformando O(n) in O(n^2)"
+  follow_ups:
+    - question: Come validi un BST correttamente?
+      answer: >-
+        Propagando un intervallo di valori ammessi durante la discesa: ogni nodo deve stare
+        strettamente dentro (minimo, massimo), e scendendo a sinistra il massimo diventa il
+        valore del nodo, scendendo a destra il minimo diventa il valore del nodo. In
+        alternativa faccio un attraversamento inorder e verifico che la sequenza sia
+        strettamente crescente, che è equivalente e a volte più facile da spiegare. Il
+        controllo che confronta solo padre e figli è sbagliato e ha un controesempio a tre
+        livelli.
+    - question: Perché un BST può degenerare e come si previene?
+      answer: >-
+        Perché la struttura dipende dall'ordine di inserimento: inserendo valori già
+        ordinati ogni nuovo nodo finisce sempre dallo stesso lato e l'albero diventa una
+        lista, con tutte le operazioni a O(n). Si previene con il bilanciamento automatico -
+        AVL o Red-Black - che dopo ogni inserimento esegue rotazioni per mantenere
+        l'altezza logaritmica, oppure, se i dati sono statici, costruendo l'albero dal
+        centro di una sequenza ordinata.
+    - question: Che differenza c'è fra DFS e BFS su un albero?
+      answer: >-
+        La DFS scende in profondità e usa lo stack, esplicito o quello delle chiamate; è
+        naturale per tutto ciò che si calcola per composizione dei figli e costa O(h) di
+        memoria. La BFS visita per livelli con una coda ed è quella giusta quando la
+        domanda riguarda i livelli - il nodo più a destra di ogni livello, la profondità
+        minima - ma costa O(w) di memoria, con w la larghezza massima, che in un albero
+        completo è circa metà dei nodi.
+    - question: Come troveresti l'antenato comune più basso di due nodi?
+      answer: >-
+        In un BST è semplice: scendo dalla radice e finché entrambi i valori stanno dalla
+        stessa parte continuo in quella direzione; il primo nodo in cui si separano, o che
+        coincide con uno dei due, è l'antenato comune più basso, in O(h). In un albero
+        binario generico si fa ricorsivamente: se il nodo corrente è uno dei due, è lui;
+        altrimenti cerco nei due sottoalberi e, se li trovo in entrambi, l'antenato è il
+        nodo corrente, in O(n).
+  related: [dsa-09-graphs, dsa-13-recursion-backtracking, db-12-indexes, dsa-10-heaps]
+  resources:
+    - title: "VisuAlgo - BST e alberi bilanciati"
+      url: https://visualgo.net/en/bst
+      kind: practice
+    - title: "NeetCode - Trees"
+      url: https://neetcode.io/practice
+      kind: practice
 
 - id: dsa-09-graphs
   title: Grafi, BFS e DFS
@@ -257,30 +1348,180 @@
     Moltissimi problemi sono grafi travestiti: matrici, dipendenze, relazioni. BFS trova il
     cammino minimo in archi non pesati, DFS esplora in profondità ed è la base per cicli e
     ordinamento topologico.
+  deep_dive: |-
+    La prima abilità è il riconoscimento. Una matrice in cui ci si sposta fra celle
+    adiacenti è un grafo dove ogni cella è un nodo e gli archi sono gli spostamenti
+    ammessi; un insieme di task con dipendenze è un grafo diretto; parole che si
+    trasformano cambiando una lettera sono un grafo dove l'arco è la trasformazione. Una
+    volta visto il grafo, la scelta dell'algoritmo è quasi meccanica.
+
+    BFS esplora per livelli con una coda e garantisce il cammino minimo in numero di
+    archi su grafi non pesati, perché raggiunge tutti i nodi a distanza k prima di
+    qualunque nodo a distanza k+1. Il dettaglio implementativo su cui si sbaglia di più è
+    marcare i nodi come visitati al momento dell'inserimento in coda e non
+    dell'estrazione: se si marca all'estrazione, lo stesso nodo può entrare in coda più
+    volte prima di essere processato, e la complessità si degrada. DFS scende in
+    profondità, con ricorsione o stack esplicito, ed è la base per le componenti connesse,
+    il rilevamento dei cicli e l'ordinamento topologico.
+
+    Il rilevamento dei cicli si fa diversamente nei due casi. In un grafo non diretto
+    basta incontrare un nodo già visitato che non sia il padre da cui si è arrivati. In
+    un grafo diretto non basta: serve distinguere i nodi in tre stati - non visitato, in
+    corso di visita, completato - e un ciclo c'è quando si incontra un nodo ancora "in
+    corso", cioè un arco all'indietro verso un antenato nella pila di ricorsione. È una
+    distinzione che al colloquio viene chiesta spesso.
+
+    L'ordinamento topologico vale solo sui grafi aciclici diretti e si ottiene in due
+    modi equivalenti: l'algoritmo di Kahn, che parte dai nodi con grado entrante zero e
+    li rimuove progressivamente - e che come effetto collaterale rileva i cicli, perché
+    se restano nodi non emessi il grafo ne ha uno - oppure una DFS con post-order
+    invertito.
+
+    Sui grafi pesati cambia tutto: BFS non basta più. Dijkstra con una coda di priorità
+    dà il cammino minimo in O((V + E) log V) ma solo con pesi non negativi, perché
+    assume che una volta estratto un nodo la sua distanza sia definitiva - ipotesi che
+    un arco negativo può smentire. Con pesi negativi serve Bellman-Ford, O(V·E), che in
+    più rileva i cicli negativi. Per le componenti connesse su un grafo che cresce per
+    unioni successive c'è Union-Find, quasi costante per operazione con unione per rango
+    e compressione dei cammini, ed è anche la base dell'algoritmo di Kruskal.
   key_points:
     - "Rappresentazione: lista di adiacenza O(V+E) di spazio, quasi sempre la scelta giusta"
     - "BFS con coda: cammino minimo su grafo non pesato, esplorazione per livelli"
     - "DFS con stack o ricorsione: rilevamento cicli, componenti connesse, ordinamento topologico"
     - "Il set dei visitati va aggiornato all'inserimento in coda, non all'estrazione, altrimenti si duplicano i nodi"
+    - "Cicli: nei grafi non diretti basta un visitato che non sia il padre; nei diretti servono tre stati"
     - "Ordinamento topologico: algoritmo di Kahn (gradi entranti) o DFS con post-order invertito. Solo su DAG"
     - "Dijkstra per pesi non negativi, Bellman-Ford se ci sono pesi negativi"
     - "Union-Find per le componenti connesse e per Kruskal"
     - "Complessità: O(V+E) per BFS e DFS con lista di adiacenza"
+  examples:
+    - title: BFS su matrice - il grafo travestito
+      language: python
+      code: |
+        from collections import deque
+
+        def passi_minimi(griglia: list[list[int]]) -> int:
+            """Cammino minimo dall'angolo in alto a sinistra a quello in basso a destra."""
+            righe, colonne = len(griglia), len(griglia[0])
+            if griglia[0][0] == 1:
+                return -1
+            coda = deque([(0, 0, 1)])                  # riga, colonna, passi
+            visitati = {(0, 0)}                        # marcati all'inserimento
+            while coda:
+                r, c, passi = coda.popleft()
+                if (r, c) == (righe - 1, colonne - 1):
+                    return passi                       # il primo che arriva è il minimo
+                for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    nr, nc = r + dr, c + dc
+                    if (0 <= nr < righe and 0 <= nc < colonne
+                            and griglia[nr][nc] == 0 and (nr, nc) not in visitati):
+                        visitati.add((nr, nc))
+                        coda.append((nr, nc, passi + 1))
+            return -1
+      note: >-
+        Non c'è nessuna struttura "grafo": i nodi sono le celle e gli archi sono gli
+        spostamenti ammessi. Riconoscerlo è metà del lavoro.
+    - title: Cicli in un grafo diretto - tre stati, non due
+      language: python
+      code: |
+        def ha_cicli(grafo: dict[int, list[int]]) -> bool:
+            NON_VISITATO, IN_CORSO, FINITO = 0, 1, 2
+            stato = {nodo: NON_VISITATO for nodo in grafo}
+
+            def visita(nodo: int) -> bool:
+                if stato[nodo] == IN_CORSO:
+                    return True          # arco all'indietro: ciclo
+                if stato[nodo] == FINITO:
+                    return False         # già esplorato, niente di nuovo
+                stato[nodo] = IN_CORSO
+                for vicino in grafo[nodo]:
+                    if visita(vicino):
+                        return True
+                stato[nodo] = FINITO
+                return False
+
+            return any(visita(n) for n in grafo if stato[n] == NON_VISITATO)
+      note: >-
+        Con due soli stati si segnalerebbe un ciclo anche per un nodo raggiunto da due
+        rami diversi, che è un normale grafo aciclico a diamante.
+  trade_offs:
+    - option: BFS
+      pros: Cammino minimo garantito su archi non pesati, si ferma appena trova
+      cons: Memoria proporzionale alla larghezza del livello, che può essere enorme
+      when: Distanza minima in numero di passi
+    - option: DFS
+      pros: Memoria O(h), naturale per esplorazione esaustiva, cicli e ordinamento topologico
+      cons: Non dà il cammino minimo; rischio di stack overflow se ricorsiva
+      when: Raggiungibilità, componenti, cicli, backtracking
+    - option: Dijkstra
+      pros: Cammino minimo con pesi, efficiente con coda di priorità
+      cons: Non ammette pesi negativi, più complesso di BFS
+      when: Archi con costo non negativo
+    - option: Union-Find
+      pros: Quasi O(1) per operazione, ideale per unioni incrementali
+      cons: Risponde solo sulla connettività, non dà i cammini
+      when: Componenti connesse che crescono nel tempo, Kruskal
+  numbers:
+    - "Con lista di adiacenza BFS e DFS costano O(V+E); con matrice di adiacenza O(V^2), che su grafi sparsi è uno spreco"
+    - "Union-Find con unione per rango e compressione dei cammini costa O(α(n)) ammortizzato, dove α è praticamente sotto 5 per qualunque n reale"
   interview_answer: >-
     La prima domanda che mi faccio è se il problema è un grafo mascherato: una matrice con
     spostamenti fra celle adiacenti, un insieme di dipendenze fra task, una rete di relazioni.
     Se sì, scelgo BFS quando serve il cammino minimo in numero di passi e DFS quando devo
     esplorare esaustivamente o rilevare cicli. Il dettaglio implementativo su cui si sbaglia più
     spesso è marcare i nodi come visitati al momento dell'accodamento e non dell'estrazione:
-    altrimenti lo stesso nodo entra più volte in coda e la complessità si degrada.
+    altrimenti lo stesso nodo entra più volte in coda e la complessità si degrada. Se gli archi
+    hanno peso passo a Dijkstra, e se i pesi possono essere negativi a Bellman-Ford.
+  senior_signals:
+    - "Riconosce il grafo dentro problemi che non lo nominano"
+    - "Usa tre stati per i cicli nei grafi diretti e sa perché due non bastano"
+    - "Sa spiegare perché Dijkstra richiede pesi non negativi"
+    - "Ricorda il ciclo esterno su tutti i nodi per i grafi disconnessi"
   pitfalls:
     - "Marcare i visitati all'estrazione invece che all'inserimento in BFS"
     - "Applicare Dijkstra con pesi negativi"
     - "Non gestire grafi disconnessi: serve un ciclo esterno su tutti i nodi"
     - "DFS ricorsiva su grafi profondi: stack overflow"
-  follow_up_questions:
-    - "Come rilevi un ciclo in un grafo diretto? E in uno non diretto?"
-    - "Perché Dijkstra non funziona con pesi negativi?"
+  follow_ups:
+    - question: Come rilevi un ciclo in un grafo diretto? E in uno non diretto?
+      answer: >-
+        In un grafo diretto uso tre stati: non visitato, in corso, finito. Se durante la DFS
+        incontro un nodo ancora "in corso" ho trovato un arco all'indietro verso un antenato
+        nella pila di ricorsione, quindi un ciclo. Due stati non bastano perché un nodo
+        raggiunto da due rami distinti - un diamante - verrebbe segnalato per errore. In un
+        grafo non diretto basta incontrare un nodo già visitato che non sia il padre da cui
+        sono arrivato.
+    - question: Perché Dijkstra non funziona con pesi negativi?
+      answer: >-
+        Perché si basa sull'ipotesi che quando estrae dalla coda di priorità il nodo con
+        distanza minima, quella distanza sia definitiva: nessun cammino futuro potrà
+        migliorarla, dato che ogni arco aggiunge un costo non negativo. Con un arco
+        negativo l'ipotesi cade, perché un percorso più lungo può diventare più economico
+        più avanti, e il nodo già chiuso resterebbe con un valore sbagliato. Lì serve
+        Bellman-Ford, che rilassa tutti gli archi V-1 volte ed è O(V·E).
+    - question: Come faresti un ordinamento topologico?
+      answer: >-
+        Con l'algoritmo di Kahn: calcolo il grado entrante di ogni nodo, metto in coda
+        quelli a zero, e ogni volta che ne estraggo uno lo aggiungo al risultato e
+        decremento il grado dei suoi successori, accodando quelli che arrivano a zero. Se
+        alla fine il risultato non contiene tutti i nodi, il grafo ha un ciclo e
+        l'ordinamento non esiste: è un rilevamento di cicli gratis. In alternativa, una DFS
+        con i nodi emessi in post-order e la lista invertita.
+    - question: Quando useresti una matrice di adiacenza invece di una lista?
+      answer: >-
+        Quando il grafo è denso, cioè quando il numero di archi si avvicina a V^2, oppure
+        quando serve rispondere in O(1) alla domanda "esiste l'arco fra questi due nodi",
+        che su lista di adiacenza costa O(grado). Il prezzo è O(V^2) di memoria anche se
+        gli archi sono pochi, quindi su grafi sparsi - il caso comune - la lista vince
+        nettamente.
+  related: [dsa-07-stacks-queues, dsa-08-trees, dsa-13-recursion-backtracking, dist-29-service-communication]
+  resources:
+    - title: "VisuAlgo - attraversamento di grafi"
+      url: https://visualgo.net/en/dfsbfs
+      kind: practice
+    - title: "NeetCode - Graphs"
+      url: https://neetcode.io/practice
+      kind: practice
 
 - id: dsa-10-heaps
   title: Heap e code di priorità
@@ -292,26 +1533,162 @@
   summary: >-
     Un heap mantiene il minimo (o il massimo) accessibile in O(1) con inserimenti ed
     estrazioni in O(log n). È la struttura per i problemi di tipo "i k migliori".
+  deep_dive: |-
+    Un heap binario è un albero completo in cui ogni nodo è minore (min-heap) o maggiore
+    (max-heap) dei suoi figli. Essendo completo si rappresenta in un array senza
+    puntatori: il figlio sinistro di i sta in 2i+1, il destro in 2i+2, il padre in
+    (i-1)//2. Da qui l'efficienza pratica, perché la memoria è contigua e la cache
+    lavora bene. L'inserimento aggiunge in fondo e fa risalire l'elemento finché
+    l'invariante non è ripristinato; l'estrazione prende la radice, ci mette l'ultimo
+    elemento e lo fa scendere. Entrambe sono O(log n) perché l'altezza è logaritmica.
+
+    Un dettaglio controintuitivo che vale la pena sapere: costruire un heap da una lista
+    esistente costa O(n), non O(n log n). Il motivo è che la maggior parte dei nodi sta
+    vicino alle foglie e deve scendere di pochissimo; sommando i costi per livello la
+    serie converge a un multiplo di n. È il motivo per cui heapify è preferibile a n
+    inserimenti successivi.
+
+    L'uso che conta a un colloquio è il problema dei k migliori. Ordinare tutto costa
+    O(n log n) e tiene n elementi in memoria; con un min-heap di dimensione k si scorre
+    una volta sola, si inserisce e, appena si supera k, si scarta la radice - che è il
+    peggiore dei k tenuti finora. Il costo diventa O(n log k) con O(k) di spazio. La
+    scelta del tipo di heap è quella che confonde: per i k *più grandi* serve un
+    *min*-heap, perché la radice deve essere l'elemento più facile da buttare via.
+
+    Gli altri due schemi classici sono la mediana in streaming e il merge di k liste
+    ordinate. La mediana si mantiene con due heap bilanciati, un max-heap per la metà
+    bassa e un min-heap per quella alta: le due radici sono i valori centrali e la
+    mediana si legge in O(1). Il merge tiene nell'heap un elemento per lista e ne estrae
+    il minimo, ottenendo O(N log k) invece di O(N log N).
+
+    Infine l'errore più frequente in Python: heapq è solo un min-heap. Per un max-heap si
+    inseriscono i valori negati, oppure tuple (-priorità, valore). E iterare sulla lista
+    che rappresenta l'heap non restituisce gli elementi ordinati: solo la radice ha una
+    garanzia, il resto è parzialmente ordinato.
   key_points:
     - "Min-heap: la radice è il minimo. In Python heapq è un min-heap; per il max si inseriscono i valori negati"
     - "push e pop O(log n), peek O(1), costruzione da lista O(n) con heapify"
+    - "Rappresentato in un array: figli in 2i+1 e 2i+2, padre in (i-1)//2, nessun puntatore"
     - "Top-k elementi: min-heap di dimensione k, O(n log k) invece di O(n log n) del sort completo"
+    - "Per i k più grandi serve un min-heap, non un max-heap: la radice è quella da scartare"
     - "Mediana in streaming: due heap, un max-heap per la metà bassa e un min-heap per quella alta"
     - "Merge di k liste ordinate: heap con un elemento per lista, O(N log k)"
     - "Un heap non è ordinato: solo la radice ha una garanzia"
+  examples:
+    - title: Top-k con un min-heap di dimensione k
+      language: python
+      code: |
+        import heapq
+
+        def k_piu_grandi(nums: list[int], k: int) -> list[int]:
+            heap: list[int] = []
+            for valore in nums:
+                heapq.heappush(heap, valore)
+                if len(heap) > k:
+                    heapq.heappop(heap)      # scarta il minimo dei k+1 tenuti finora
+            return heap                      # O(n log k) di tempo, O(k) di spazio
+
+        # Perché un MIN-heap per i k più GRANDI: la radice è il peggiore fra quelli
+        # tenuti, cioè esattamente il candidato da buttare quando ne arriva uno migliore.
+      note: >-
+        Con n enorme e k piccolo la differenza è sostanziale, e su dati in streaming è
+        l'unica opzione: non si possono tenere tutti gli elementi in memoria.
+    - title: Mediana su flusso con due heap
+      language: python
+      code: |
+        import heapq
+
+        class Mediana:
+            def __init__(self) -> None:
+                self.bassa: list[int] = []   # max-heap simulato con valori negati
+                self.alta: list[int] = []    # min-heap
+
+            def aggiungi(self, valore: int) -> None:
+                heapq.heappush(self.bassa, -valore)
+                # il massimo della metà bassa non può superare il minimo di quella alta
+                heapq.heappush(self.alta, -heapq.heappop(self.bassa))
+                if len(self.alta) > len(self.bassa):     # riequilibra le dimensioni
+                    heapq.heappush(self.bassa, -heapq.heappop(self.alta))
+
+            def valore(self) -> float:
+                if len(self.bassa) > len(self.alta):
+                    return -self.bassa[0]
+                return (-self.bassa[0] + self.alta[0]) / 2
+      note: >-
+        Aggiunta O(log n), lettura O(1). Il passaggio obbligato attraverso l'altro heap
+        garantisce l'invariante senza dover confrontare esplicitamente i valori.
+  trade_offs:
+    - option: Heap di dimensione k
+      pros: O(n log k) di tempo e O(k) di spazio, funziona in streaming
+      cons: Non dà i k elementi già ordinati fra loro senza un passo finale
+      when: "I k migliori, con k molto minore di n"
+    - option: Ordinare tutto e prendere i primi k
+      pros: Una riga, risultato già ordinato
+      cons: O(n log n) e tutti gli elementi in memoria
+      when: n piccolo o serve comunque l'ordinamento completo
+    - option: Quickselect
+      pros: O(n) atteso, trova il k-esimo senza ordinare
+      cons: O(n^2) nel caso peggiore, modifica l'array, non funziona in streaming
+      when: Tutti i dati in memoria e serve solo il k-esimo elemento
+  numbers:
+    - "Con n = 10^7 e k = 10, l'heap fa circa 2,3·10^7 confronti contro i 2,3·10^8 dell'ordinamento completo"
+    - "heapify su una lista costa O(n), non O(n log n): la somma dei costi per livello converge a circa 2n"
   interview_answer: >-
     Quando il problema chiede i k elementi più grandi non ordino tutto: tengo un min-heap di
     dimensione k e scarto la radice ogni volta che supero k, ottenendo O(n log k) e O(k) di
     spazio. È la differenza che conta quando n è enorme e k piccolo, o quando i dati arrivano in
     streaming e non posso tenerli tutti. L'altro uso che cito volentieri è la mediana su flusso
     con due heap bilanciati, perché mostra che l'heap serve a mantenere un invariante, non solo a
-    ordinare.
+    ordinare. Se invece ho tutti i dati in memoria e mi serve solo il k-esimo, propongo
+    quickselect, che è O(n) atteso.
+  senior_signals:
+    - "Spiega perché per i k più grandi serve un min-heap e non il contrario"
+    - "Sa che heapify è O(n) e non O(n log n)"
+    - "Propone quickselect come alternativa quando i dati stanno tutti in memoria"
+    - "Non confonde l'heap con una struttura ordinata"
   pitfalls:
     - "Dimenticare che heapq in Python è solo min-heap"
     - "Iterare sull'heap aspettandosi un ordinamento"
     - "Usare un max-heap di dimensione k per i top-k: serve il min-heap"
-  follow_up_questions:
-    - "Come mantieni la mediana di un flusso di numeri?"
+    - "Inserire tutti gli n elementi e poi estrarne k, tornando a O(n log n)"
+  follow_ups:
+    - question: Come mantieni la mediana di un flusso di numeri?
+      answer: >-
+        Con due heap: un max-heap che contiene la metà più bassa dei valori e un min-heap
+        con la metà più alta, tenuti di dimensione uguale o con uno di differenza. Le due
+        radici sono i valori centrali, quindi la mediana si legge in O(1): è la radice
+        dell'heap più grande se le dimensioni differiscono, altrimenti la media delle due.
+        L'inserimento costa O(log n) e comporta un passaggio da un heap all'altro per
+        mantenere l'invariante di ordinamento fra le due metà.
+    - question: Perché per i k elementi più grandi si usa un min-heap?
+      answer: >-
+        Perché l'heap deve tenere i k migliori visti finora, e quando ne arriva uno nuovo
+        bisogna poter scartare rapidamente il peggiore fra quelli tenuti. In un min-heap la
+        radice è proprio il più piccolo dei k, cioè il candidato all'espulsione, ed è
+        accessibile in O(1). Con un max-heap avrei in cima il migliore, che è l'ultimo che
+        vorrei togliere.
+    - question: Perché costruire un heap da una lista costa O(n)?
+      answer: >-
+        Perché il costo di sistemare un nodo è proporzionale alla sua distanza dalle foglie,
+        e la maggior parte dei nodi sta vicino alle foglie: metà sono foglie e non si
+        muovono, un quarto scende al massimo di un livello, e così via. Sommando per
+        livello si ottiene una serie che converge a circa 2n. L'errore è pensare che siano
+        n operazioni da O(log n) ciascuna, che sarebbe il costo di n inserimenti successivi.
+    - question: Come uniresti k liste ordinate in una sola?
+      answer: >-
+        Metto nell'heap il primo elemento di ogni lista insieme all'indice della lista di
+        provenienza, poi estraggo ripetutamente il minimo e inserisco l'elemento successivo
+        della lista da cui proveniva. L'heap ha sempre al massimo k elementi, quindi il
+        costo è O(N log k) con N il numero totale di elementi, contro O(N log N) se
+        concatenassi tutto e ordinassi.
+  related: [dsa-14-sorting, dsa-07-stacks-queues, dsa-01-complexity, rel-40-traffic-spikes]
+  resources:
+    - title: "Documentazione di Python - modulo heapq"
+      url: https://docs.python.org/3/library/heapq.html
+      kind: doc
+    - title: "VisuAlgo - heap binario"
+      url: https://visualgo.net/en/heap
+      kind: practice
 
 - id: dsa-11-dynamic-programming
   title: Programmazione dinamica
@@ -323,28 +1700,170 @@
   summary: >-
     La programmazione dinamica si applica quando il problema ha sottostruttura ottima e
     sottoproblemi ripetuti. Si riconosce dalla ricorsione che ricalcola gli stessi stati.
+  deep_dive: |-
+    Due condizioni devono valere insieme. La sottostruttura ottima dice che la soluzione
+    ottima del problema si costruisce con le soluzioni ottime dei sottoproblemi; la
+    sovrapposizione dei sottoproblemi dice che gli stessi sottoproblemi ricorrono più
+    volte. Se manca la prima, la DP non si applica; se manca la seconda, la ricorsione
+    semplice basta e la DP è solo peso inutile - divide et impera, come il merge sort, ha
+    sottostruttura ottima ma sottoproblemi distinti, ed è per questo che non è DP.
+
+    Il metodo che funziona in colloquio è sempre lo stesso, ed è importante seguirlo ad
+    alta voce. Primo: definire lo stato, cioè quali parametri identificano completamente
+    un sottoproblema. Secondo: scrivere la ricorrenza, cioè come il valore di uno stato
+    dipende da quelli più piccoli. Terzo: fissare i casi base. Quarto: scegliere l'ordine
+    di calcolo. Partire dalla tabella senza aver definito lo stato è il modo più efficace
+    per sbagliare e non accorgersene.
+
+    Top-down e bottom-up sono equivalenti nei risultati e diversi nella pratica. Il
+    top-down è la ricorsione con una cache: è più vicino a come si ragiona, calcola solo
+    gli stati effettivamente raggiunti e in Python si ottiene con un decoratore di
+    memoizzazione. Costa però O(profondità) di stack e ha l'overhead delle chiamate. Il
+    bottom-up riempie una tabella iterativamente: niente stack, costanti più basse, e
+    soprattutto si presta all'ottimizzazione dello spazio. Se dp[i] dipende solo da
+    dp[i-1] e dp[i-2] bastano due variabili invece di un array; se una tabella
+    bidimensionale dipende solo dalla riga precedente, bastano due righe.
+
+    La difficoltà vera non è l'implementazione ma la definizione dello stato. Uno stato
+    incompleto fa collidere situazioni diverse e produce risposte sbagliate senza errori
+    visibili: nel problema dello zaino, indicizzare solo per oggetto senza tenere conto
+    della capacità residua è esattamente questo errore. Un buon controllo è chiedersi:
+    se mi dessero solo questi parametri, senza sapere come ci sono arrivato, saprei
+    calcolare il risultato? Se la risposta è no, lo stato è incompleto.
+
+    Infine il confronto con il greedy, che è una domanda ricorrente. Il greedy fa la
+    scelta localmente migliore e non torna indietro: è corretto solo se si può dimostrare
+    che la scelta locale non preclude l'ottimo globale. Coin change con monete arbitrarie
+    è il controesempio classico: con monete da 1, 3 e 4 e un totale di 6, il greedy
+    prende 4+1+1 mentre l'ottimo è 3+3.
   key_points:
     - "Due condizioni: sottostruttura ottima e sovrapposizione dei sottoproblemi"
     - "Top-down (memoizzazione): ricorsione + cache. Più vicino al ragionamento, stack O(n)"
     - "Bottom-up (tabulazione): iterativo, nessuno stack, spesso ottimizzabile in spazio"
     - "Metodo: definisci lo stato, scrivi la ricorrenza, fissa i casi base, scegli l'ordine di calcolo"
+    - "Uno stato incompleto fa collidere situazioni diverse: è l'errore che non dà errori"
     - "Ottimizzazione di spazio: se dp[i] dipende solo da dp[i-1] bastano due variabili"
     - "Classici: Fibonacci, scale, zaino 0/1, LCS, LIS, coin change, edit distance"
     - "In colloquio parti dalla ricorsione brute force, poi aggiungi la memoizzazione: mostra il ragionamento"
+  examples:
+    - title: Dalla ricorsione alla memoizzazione alla tabella
+      language: python
+      code: |
+        from functools import lru_cache
+
+        # 1. Ricorsione ingenua: esponenziale, ma definisce stato e ricorrenza.
+        def scale_lento(n: int) -> int:
+            if n <= 2:
+                return max(n, 1)
+            return scale_lento(n - 1) + scale_lento(n - 2)
+
+        # 2. Memoizzazione: stessa forma, O(n). Spesso basta una riga.
+        @lru_cache(maxsize=None)
+        def scale_memo(n: int) -> int:
+            if n <= 2:
+                return max(n, 1)
+            return scale_memo(n - 1) + scale_memo(n - 2)
+
+        # 3. Bottom-up con spazio O(1): dp[i] dipende solo dai due precedenti.
+        def scale_veloce(n: int) -> int:
+            precedente, corrente = 1, 1
+            for _ in range(n - 1):
+                precedente, corrente = corrente, precedente + corrente
+            return corrente
+      note: >-
+        In colloquio conviene percorrere i tre passaggi a voce: mostra il ragionamento e
+        non solo il risultato, e ciascun passaggio è verificabile contro il precedente.
+    - title: Zaino 0/1 - lo stato deve includere la capacità
+      language: python
+      code: |
+        def zaino(pesi: list[int], valori: list[int], capacita: int) -> int:
+            # Stato: (oggetti considerati, capacità residua). Senza la capacità,
+            # due situazioni diverse collidono e il risultato è sbagliato in silenzio.
+            dp = [0] * (capacita + 1)
+            for peso, valore in zip(pesi, valori):
+                # All'indietro: ogni oggetto si usa al massimo una volta.
+                for c in range(capacita, peso - 1, -1):
+                    dp[c] = max(dp[c], dp[c - peso] + valore)
+            return dp[capacita]
+        # O(n · capacita) di tempo, O(capacita) di spazio dopo l'ottimizzazione da 2D a 1D.
+      note: >-
+        Scorrere la capacità in avanti invece che all'indietro risolve un problema
+        diverso - lo zaino illimitato - perché permette di riusare lo stesso oggetto.
+  trade_offs:
+    - option: Top-down con memoizzazione
+      pros: Vicino al ragionamento, calcola solo gli stati raggiunti, facile da scrivere
+      cons: Stack O(profondità), overhead delle chiamate, difficile ottimizzare lo spazio
+      when: Spazio degli stati sparso, o durante il colloquio per mostrare il percorso
+    - option: Bottom-up con tabella
+      pros: Nessuno stack, costanti basse, si può ridurre lo spazio
+      cons: Serve conoscere l'ordine di calcolo, calcola anche stati inutili
+      when: Tutti gli stati servono e la memoria è un vincolo
+    - option: Greedy
+      pros: O(n) o O(n log n), codice corto
+      cons: Corretto solo se si dimostra che la scelta locale non preclude l'ottimo
+      when: Esiste la dimostrazione; altrimenti è un errore che passa i test facili
+  numbers:
+    - "Fibonacci ricorsivo puro su n = 40 fa circa 3·10^8 chiamate; con memoizzazione, 40"
+    - "Lo zaino è O(n·W): è pseudo-polinomiale, perché W cresce esponenzialmente nel numero di bit usati per rappresentarlo"
   interview_answer: >-
     Il mio metodo è sempre lo stesso: scrivo prima la soluzione ricorsiva ingenua, anche se
     esponenziale, perché mi costringe a definire lo stato e la ricorrenza. A quel punto guardo
     se gli stessi stati tornano più volte e, se sì, aggiungo la memoizzazione, che di fatto è
     già la DP. Solo dopo, se serve, la converto in bottom-up e valuto se posso ridurre lo spazio
     tenendo solo le ultime righe. Partire direttamente dalla tabella è il modo migliore per
-    sbagliare la definizione dello stato e non accorgersene.
+    sbagliare la definizione dello stato e non accorgersene, perché uno stato incompleto non dà
+    errori: dà risultati sbagliati.
+  senior_signals:
+    - "Definisce lo stato a voce prima di scrivere qualunque codice"
+    - "Sa dire perché divide et impera non è DP pur avendo sottostruttura ottima"
+    - "Porta un controesempio concreto per distinguere DP da greedy"
+    - "Riduce lo spazio osservando da quante righe precedenti dipende la ricorrenza"
   pitfalls:
     - "Definire lo stato in modo incompleto, così che due situazioni diverse collidano"
     - "Casi base sbagliati o mancanti"
     - "Usare la DP dove basta un greedy, o viceversa"
-  follow_up_questions:
-    - "Come riduci lo spazio di una DP bidimensionale?"
-    - "Come riconosci che un problema è DP e non greedy?"
+    - "Scorrere la tabella nell'ordine sbagliato, risolvendo un problema diverso"
+  follow_ups:
+    - question: Come riduci lo spazio di una DP bidimensionale?
+      answer: >-
+        Guardo da quante righe precedenti dipende la ricorrenza. Se dp[i][j] usa solo la
+        riga i-1, tengo due righe e le alterno, passando da O(n·m) a O(m). In molti casi -
+        come lo zaino 0/1 - basta una riga sola, purché si scorra la seconda dimensione
+        nel verso giusto: all'indietro per non riusare lo stesso oggetto due volte. Il
+        prezzo è che si perde la possibilità di ricostruire la soluzione, non solo il suo
+        valore: se serve anche quella, la tabella completa va tenuta.
+    - question: Come riconosci che un problema è DP e non greedy?
+      answer: >-
+        Provo il greedy e cerco un controesempio. Se ne trovo uno, serve la DP. Il caso
+        tipico è coin change: con monete da 1, 3 e 4 e un totale di 6, il greedy prende la
+        moneta più grande e ottiene 4+1+1, tre monete, mentre l'ottimo è 3+3, due monete.
+        Il greedy è corretto solo quando si può dimostrare che la scelta localmente
+        migliore non preclude l'ottimo globale, come accade con il sistema di monete
+        dell'euro ma non in generale.
+    - question: Che differenza c'è fra memoizzazione e tabulazione?
+      answer: >-
+        Sono due modi di realizzare la stessa DP. La memoizzazione è top-down: si scrive la
+        ricorsione naturale e si mette una cache sui risultati, calcolando solo gli stati
+        effettivamente raggiunti; costa però stack e overhead di chiamata. La tabulazione è
+        bottom-up: si riempie una tabella in un ordine che garantisce la disponibilità dei
+        sottoproblemi, senza ricorsione e con costanti più basse, e si presta
+        all'ottimizzazione dello spazio. Quando lo spazio degli stati è molto sparso il
+        top-down vince, perché il bottom-up calcolerebbe anche ciò che non serve.
+    - question: Che cosa significa che lo zaino è pseudo-polinomiale?
+      answer: >-
+        Che la sua complessità O(n·W) è polinomiale nel *valore* della capacità ma
+        esponenziale nella sua *dimensione in bit*: raddoppiando il numero di cifre di W il
+        costo si moltiplica enormemente. È il motivo per cui lo zaino resta un problema
+        NP-difficile pur avendo una soluzione DP che sembra efficiente: funziona finché le
+        capacità sono numeri piccoli, non in generale.
+  related: [dsa-13-recursion-backtracking, dsa-01-complexity, dsa-12-sliding-window, dsa-05-binary-search]
+  resources:
+    - title: "Introduction to Algorithms (CLRS), capitolo 15"
+      url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+      kind: book
+    - title: "NeetCode - 1-D e 2-D Dynamic Programming"
+      url: https://neetcode.io/practice
+      kind: practice
 
 - id: dsa-12-sliding-window
   title: Sliding window
@@ -357,26 +1876,153 @@
     La finestra scorrevole mantiene un intervallo contiguo che si espande e si contrae in
     base a un vincolo. Trasforma in O(n) i problemi su sottoarray o sottostringhe che
     l'approccio ingenuo risolverebbe in O(n^2).
+  deep_dive: |-
+    Il segnale che fa riconoscere il pattern è la parola "contiguo": sottoarray o
+    sottostringhe consecutive con un vincolo da rispettare. La soluzione ingenua prova
+    tutti gli O(n^2) intervalli; la finestra scorrevole ne prova solo O(n) perché sfrutta
+    il fatto che gli intervalli si sovrappongono e il risultato del precedente si può
+    aggiornare invece di ricalcolare.
+
+    Ci sono due varianti. Nella finestra fissa la dimensione è data: si calcola il valore
+    sui primi k elementi e poi, a ogni passo, si sottrae quello che esce e si somma quello
+    che entra. Nella finestra variabile si espande il bordo destro finché il vincolo
+    regge e si contrae il sinistro appena si rompe, aggiornando la risposta nel punto
+    giusto del ciclo. Il punto giusto dipende dal problema: per il massimo valido si
+    aggiorna dopo aver ristabilito il vincolo, per il minimo che lo viola si aggiorna
+    prima di contrarre. Sbagliare quel punto è l'errore più comune e produce risposte
+    fuori di uno.
+
+    L'analisi di complessità è la parte che vale la pena saper spiegare. Sembrano due
+    cicli annidati, ma il bordo sinistro non torna mai indietro: nell'arco di tutto
+    l'algoritmo avanza al massimo n volte, esattamente come il destro. Il totale delle
+    iterazioni del corpo interno è quindi limitato da n, non da n per ogni iterazione
+    esterna, e il costo è lineare. È lo stesso argomento dello stack monotono.
+
+    Il prerequisito è la monotonia rispetto alla dimensione della finestra: allargare
+    deve peggiorare il vincolo in modo prevedibile, così che contrarre sia sempre la
+    mossa giusta. Con numeri negativi questo salta: allargare può diminuire la somma,
+    quindi non si sa in che direzione muoversi e la tecnica non è applicabile. Lì si
+    passa ai prefix sum con una hash map, che costa O(n) di tempo ma O(n) di spazio -
+    è il classico scambio spazio-tempo, e saperlo dire prima che lo chiedano è un buon
+    segnale. Lo stesso vale se il problema non richiede elementi contigui: lì la finestra
+    non c'entra e di solito serve un ordinamento o una DP.
   key_points:
     - "Finestra fissa: media mobile, massimo su k elementi"
     - "Finestra variabile: espandi a destra finché il vincolo regge, contrai da sinistra quando si rompe"
     - "Ogni indice entra ed esce al massimo una volta: O(n) anche con due cicli annidati"
     - "Funziona se il vincolo è monotono rispetto alla dimensione della finestra"
+    - "La parola chiave che la fa riconoscere è 'contiguo': se gli elementi non lo sono, non si applica"
     - "Con valori negativi la monotonia salta: lì serve prefix sum più hash map"
+    - "Il punto in cui si aggiorna la risposta dipende dal problema: è l'errore fuori di uno più comune"
     - "Classici: sottostringa più lunga senza ripetizioni, sottoarray minimo con somma >= target, anagrammi in una stringa"
+  examples:
+    - title: Finestra variabile - la sottostringa più lunga senza ripetizioni
+      language: python
+      code: |
+        def piu_lunga_senza_ripetizioni(s: str) -> int:
+            ultima_posizione: dict[str, int] = {}
+            sinistra = migliore = 0
+            for destra, carattere in enumerate(s):
+                if carattere in ultima_posizione and ultima_posizione[carattere] >= sinistra:
+                    sinistra = ultima_posizione[carattere] + 1   # salta oltre il duplicato
+                ultima_posizione[carattere] = destra
+                migliore = max(migliore, destra - sinistra + 1)  # vincolo già ristabilito
+            return migliore
+        # O(n) di tempo, O(k) di spazio con k la dimensione dell'alfabeto.
+      note: >-
+        Il controllo `>= sinistra` serve: senza, un duplicato ormai uscito dalla finestra
+        farebbe indietreggiare il bordo sinistro, rompendo l'invariante.
+    - title: Finestra fissa e il limite della tecnica
+      language: python
+      code: |
+        def somma_massima_k(nums: list[int], k: int) -> int:
+            somma = sum(nums[:k])
+            migliore = somma
+            for i in range(k, len(nums)):
+                somma += nums[i] - nums[i - k]     # entra uno, esce uno: O(1) per passo
+                migliore = max(migliore, somma)
+            return migliore
+
+        # Con numeri negativi e finestra VARIABILE la tecnica non vale:
+        # [2, -1, 3] con target 4 -> contrarre da sinistra può AUMENTARE la somma,
+        # quindi "il vincolo si è rotto, contraggo" non è più una mossa corretta.
+        # Serve prefix sum + hash map: O(n) tempo, O(n) spazio.
+      note: >-
+        La finestra fissa funziona anche con i negativi, perché la dimensione non cambia:
+        è solo la variante a dimensione variabile a richiedere la monotonia.
+  trade_offs:
+    - option: Sliding window
+      pros: O(n) di tempo e O(1) o O(k) di spazio, una sola passata
+      cons: Richiede contiguità e monotonia del vincolo
+      when: Sottoarray o sottostringhe contigue con valori non negativi
+    - option: Prefix sum con hash map
+      pros: Funziona anche con valori negativi, resta O(n)
+      cons: O(n) di spazio, risponde a "somma esatta" meglio che a "somma almeno"
+      when: Ci sono numeri negativi o serve il conteggio dei sottoarray con somma data
+    - option: Forza bruta su tutti gli intervalli
+      pros: Sempre corretta, nessun prerequisito, facile da usare come riferimento
+      cons: O(n^2) o O(n^3) a seconda del calcolo interno
+      when: Solo come punto di partenza da cui derivare la soluzione lineare
+  numbers:
+    - "Su n = 10^5 la forza bruta fa circa 5·10^9 operazioni, la finestra 10^5: secondi contro ore"
+    - "Il bordo sinistro e quello destro avanzano ciascuno al massimo n volte: il corpo interno gira al più 2n volte in totale"
   interview_answer: >-
     La riconosco quando il problema parla di sottoarray o sottostringhe contigue con un vincolo.
     Lo schema è espandere il bordo destro finché il vincolo regge e contrarre il sinistro quando
     si rompe, aggiornando la risposta a ogni passo. Sembra un doppio ciclo ma è lineare, perché
     ogni indice viene attraversato al massimo una volta da ciascun bordo. Il caso in cui non si
     applica e lo dico subito è quando ci sono numeri negativi: lì la somma non è monotona
-    rispetto alla dimensione della finestra e devo passare ai prefix sum con una hash map.
+    rispetto alla dimensione della finestra e devo passare ai prefix sum con una hash map,
+    barattando O(n) di spazio per mantenere il tempo lineare.
+  senior_signals:
+    - "Dimostra la linearità contando gli avanzamenti totali dei due bordi"
+    - "Dichiara subito il limite con i numeri negativi invece di aspettare la domanda"
+    - "Distingue finestra fissa e variabile e sa che solo la seconda richiede monotonia"
+    - "Sa dove va aggiornata la risposta e perché quel punto dipende dal problema"
   pitfalls:
     - "Applicarla con valori negativi dove la monotonia non vale"
     - "Aggiornare la risposta nel punto sbagliato del ciclo"
     - "Dimenticare di rimuovere l'elemento uscente dalle strutture ausiliarie"
-  follow_up_questions:
-    - "Perché la sliding window non funziona con numeri negativi?"
+    - "Far indietreggiare il bordo sinistro, rompendo la garanzia di linearità"
+  follow_ups:
+    - question: Perché la sliding window non funziona con numeri negativi?
+      answer: >-
+        Perché la tecnica si basa sul fatto che allargare la finestra peggiora il vincolo in
+        modo prevedibile: se la somma supera il target, contrarre da sinistra la riduce.
+        Con valori negativi non è più vero - togliere un elemento negativo aumenta la somma -
+        quindi "il vincolo si è rotto, contraggo" non è più una mossa corretta e posso
+        perdere la soluzione ottima. Il rimedio è il prefix sum con una hash map dei valori
+        già visti: resta O(n) di tempo, ma costa O(n) di spazio.
+    - question: Come troveresti il massimo di ogni finestra di dimensione k?
+      answer: >-
+        Con un deque di indici mantenuti in ordine decrescente di valore: prima di
+        inserire un nuovo indice tolgo dalla coda tutti quelli con valore minore, perché
+        non potranno mai più essere il massimo, e tolgo dalla testa gli indici usciti
+        dalla finestra. La testa è sempre il massimo corrente. Ogni indice entra ed esce
+        una volta sola, quindi O(n) invece dell'O(n·k) della soluzione che ricalcola il
+        massimo a ogni spostamento.
+    - question: Come conteresti i sottoarray con somma esattamente uguale a k?
+      answer: >-
+        Con i prefix sum e una hash map dei prefissi già visti con le loro frequenze: per
+        ogni posizione, il numero di sottoarray che finiscono lì con somma k è il numero di
+        volte in cui ho già visto il prefisso corrente meno k. È O(n) di tempo e O(n) di
+        spazio, e a differenza della finestra scorrevole funziona anche con numeri
+        negativi, perché non fa nessuna ipotesi di monotonia.
+    - question: Dove si aggiorna la risposta, prima o dopo la contrazione?
+      answer: >-
+        Dipende da cosa si cerca. Se cerco la finestra più lunga che soddisfa il vincolo,
+        aggiorno dopo aver contratto, quando la finestra è di nuovo valida. Se cerco la
+        più corta che lo viola o lo raggiunge, aggiorno dentro il ciclo di contrazione,
+        prima di restringere ancora. Confondere i due casi è l'origine della maggior parte
+        degli errori fuori di uno su questo pattern.
+  related: [dsa-02-arrays-two-pointers, dsa-04-strings, dsa-07-stacks-queues, dsa-03-hash-maps]
+  resources:
+    - title: "NeetCode - Sliding Window"
+      url: https://neetcode.io/practice
+      kind: practice
+    - title: "The Algorithms - Python"
+      url: https://github.com/TheAlgorithms/Python
+      kind: repo
 
 - id: dsa-13-recursion-backtracking
   title: Ricorsione e backtracking
@@ -388,28 +2034,180 @@
   summary: >-
     Il backtracking esplora sistematicamente uno spazio di soluzioni costruendo un
     candidato e tornando indietro quando diventa invalido. È DFS su un albero di decisioni,
-    con il potatura come unica difesa contro l'esplosione combinatoria.
+    con la potatura come unica difesa contro l'esplosione combinatoria.
+  deep_dive: |-
+    Ogni ricorsione ha tre parti: il caso base che la ferma, il passo che riduce il
+    problema e la garanzia che ogni chiamata si avvicini al caso base. Se manca la terza
+    si ottiene una ricorsione infinita, che in Python si manifesta come
+    RecursionError dopo circa mille frame. Il costo di spazio è la profondità massima,
+    perché ogni chiamata tiene un frame vivo sullo stack: è la parte che si dimentica
+    più spesso quando si dichiara la complessità.
+
+    Il backtracking è DFS sull'albero delle decisioni, con lo schema scegli, esplora,
+    disfai. Si aggiunge un elemento alla soluzione parziale, si ricorre, e al ritorno lo
+    si toglie per provare l'alternativa. È importante che il "disfai" riporti lo stato
+    esattamente com'era, altrimenti i rami successivi partono da una condizione
+    contaminata: è il bug più subdolo dell'intera tecnica, perché dà risultati
+    parzialmente corretti.
+
+    La differenza fra una soluzione accettata e una che va in timeout è quasi sempre la
+    potatura. Appena si può dimostrare che un ramo non porterà mai a una soluzione
+    valida, lo si taglia senza esplorarlo. Nelle N-regine si controlla la validità prima
+    di scendere invece che alla fine; nelle combinazioni con somma target si smette di
+    scendere appena la somma parziale supera il target; nel sudoku si sceglie la cella
+    con meno candidati per ridurre il fattore di ramificazione. Senza potatura le
+    complessità sono O(2^n) per i sottoinsiemi e O(n!) per le permutazioni, e diventano
+    impraticabili molto presto.
+
+    La gestione dei duplicati è l'altra difficoltà. Se l'input contiene elementi ripetuti
+    e si vogliono soluzioni distinte, si ordina l'input e allo stesso livello di
+    ricorsione si salta ogni elemento uguale al precedente: in questo modo si genera
+    ciascuna combinazione una volta sola, invece di produrre duplicati e deduplicare alla
+    fine, che è più lento e nasconde il ragionamento.
+
+    Infine un dettaglio implementativo che causa bug silenziosi: quando si salva una
+    soluzione parziale bisogna copiarla. Salvare il riferimento alla lista che si continua
+    a modificare porta ad avere, alla fine, N riferimenti alla stessa lista vuota. In
+    Python si scrive `risultato.append(parziale[:])` o `list(parziale)`.
   key_points:
     - "Schema: scegli, ricorri, annulla la scelta (choose, explore, unchoose)"
     - "Il pruning è ciò che rende praticabile l'esplorazione: taglia il ramo appena è certo che non porta a soluzione"
     - "Complessità tipicamente esponenziale: O(2^n) per i sottoinsiemi, O(n!) per le permutazioni"
+    - "Lo spazio è O(profondità) per lo stack, più la soluzione parziale"
     - "Per i duplicati: ordina l'input e salta gli elementi uguali al precedente allo stesso livello"
     - "Ricorda di copiare la soluzione parziale quando la salvi, altrimenti salvi un riferimento che poi muta"
+    - "Il 'disfai' deve riportare lo stato esattamente com'era, o i rami successivi partono contaminati"
     - "Classici: permutazioni, sottoinsiemi, N-regine, sudoku, combinazioni con somma target"
+  examples:
+    - title: Lo schema, con la copia e la potatura al posto giusto
+      language: python
+      code: |
+        def combinazioni_con_somma(candidati: list[int], target: int) -> list[list[int]]:
+            candidati.sort()                       # abilita potatura e salto dei duplicati
+            risultato: list[list[int]] = []
+            parziale: list[int] = []
+
+            def esplora(inizio: int, rimanente: int) -> None:
+                if rimanente == 0:
+                    risultato.append(parziale[:])  # COPIA: senza, si salva un riferimento
+                    return
+                for i in range(inizio, len(candidati)):
+                    if i > inizio and candidati[i] == candidati[i - 1]:
+                        continue                   # duplicati: uno solo per livello
+                    if candidati[i] > rimanente:
+                        break                      # potatura: ordinati, i seguenti sono peggio
+                    parziale.append(candidati[i])  # scegli
+                    esplora(i + 1, rimanente - candidati[i])   # esplora
+                    parziale.pop()                 # disfai: lo stato torna com'era
+
+            esplora(0, target)
+            return risultato
+      note: >-
+        Le tre righe che contano sono la copia, il salto dei duplicati e il break: senza,
+        il codice è rispettivamente sbagliato, ridondante e lento.
+    - title: Perché la potatura cambia tutto
+      language: python
+      code: |
+        def n_regine(n: int) -> int:
+            colonne, diagonali, antidiagonali = set(), set(), set()
+
+            def posiziona(riga: int) -> int:
+                if riga == n:
+                    return 1
+                totale = 0
+                for colonna in range(n):
+                    # Potatura: si verifica PRIMA di scendere, non alla fine.
+                    if (colonna in colonne or riga - colonna in diagonali
+                            or riga + colonna in antidiagonali):
+                        continue
+                    colonne.add(colonna)
+                    diagonali.add(riga - colonna)
+                    antidiagonali.add(riga + colonna)
+                    totale += posiziona(riga + 1)
+                    colonne.discard(colonna)          # disfai, tutti e tre
+                    diagonali.discard(riga - colonna)
+                    antidiagonali.discard(riga + colonna)
+                return totale
+
+            return posiziona(0)
+      note: >-
+        Generare tutte le n^n disposizioni e filtrarle alla fine è impraticabile già per
+        n = 10; con la potatura si arriva tranquillamente a n = 12 o 13.
+  trade_offs:
+    - option: Backtracking con potatura
+      pros: Esplora solo i rami promettenti, spesso pratico su istanze reali
+      cons: Resta esponenziale nel caso peggiore, nessuna garanzia di tempo
+      when: Servono tutte le soluzioni, o una valida in uno spazio strutturato
+    - option: Programmazione dinamica
+      pros: Polinomiale quando i sottoproblemi si ripetono
+      cons: Richiede sottostruttura ottima; non enumera le soluzioni, le conta o ottimizza
+      when: Serve il valore ottimo, non l'elenco delle soluzioni
+    - option: Ricorsione senza disfare, passando copie
+      pros: Nessun rischio di stato contaminato, più facile da scrivere correttamente
+      cons: Allocazione a ogni livello, memoria proporzionale al numero di nodi esplorati
+      when: Spazio di ricerca piccolo o priorità alla chiarezza
+  numbers:
+    - "Le permutazioni di 10 elementi sono 3.628.800; di 13, oltre 6 miliardi: il fattoriale esplode fra n = 10 e n = 13"
+    - "Il limite di ricorsione predefinito di CPython è 1000 frame, modificabile con sys.setrecursionlimit ma a rischio di crash del processo"
   interview_answer: >-
     Il backtracking è una DFS sull'albero delle decisioni con la possibilità di tornare
     indietro. Lo schema è sempre scegli, esplora, disfai: aggiungo un elemento alla soluzione
     parziale, ricorro, e al ritorno lo tolgo per provare l'alternativa. La parte che distingue
     una soluzione accettabile da una che va in timeout è il pruning: appena posso dimostrare che
-    un ramo non porterà a nulla lo taglio. Un dettaglio implementativo che causa bug silenziosi è
-    salvare la soluzione parziale senza copiarla, perché poi continuo a modificarla e alla fine
-    mi ritrovo N riferimenti alla stessa lista vuota.
+    un ramo non porterà a nulla lo taglio, e lo faccio prima di scendere, non dopo. Un dettaglio
+    implementativo che causa bug silenziosi è salvare la soluzione parziale senza copiarla,
+    perché poi continuo a modificarla e alla fine mi ritrovo N riferimenti alla stessa lista.
+  senior_signals:
+    - "Pota prima di scendere invece di filtrare i risultati alla fine"
+    - "Gestisce i duplicati con ordinamento e salto, non deduplicando a posteriori"
+    - "Include la profondità dello stack nella complessità di spazio"
+    - "Sa quando il problema è in realtà DP e non richiede di enumerare le soluzioni"
   pitfalls:
     - "Salvare la soluzione parziale senza copiarla"
     - "Dimenticare di annullare la scelta al ritorno"
     - "Nessun pruning: esplorazione completa e timeout"
-  follow_up_questions:
-    - "Come eviti permutazioni duplicate con elementi ripetuti?"
+    - "Annullare solo una parte dello stato modificato, contaminando i rami successivi"
+  follow_ups:
+    - question: Come eviti permutazioni duplicate con elementi ripetuti?
+      answer: >-
+        Ordino l'input, così gli elementi uguali sono adiacenti, e allo stesso livello di
+        ricorsione salto ogni elemento identico al precedente già provato a quel livello.
+        In questo modo ciascuna configurazione distinta viene generata una volta sola.
+        L'alternativa - generare tutto e deduplicare con un set alla fine - funziona ma
+        spreca lavoro esponenziale e, in colloquio, mostra che non si è capito da dove
+        vengono i duplicati.
+    - question: Quando conviene rendere iterativa una ricorsione?
+      answer: >-
+        Quando la profondità può superare il limite dell'interprete, che in CPython è mille
+        frame di default: una DFS su un grafo con centinaia di migliaia di nodi lo supera
+        facilmente. Si sostituisce lo stack delle chiamate con uno esplicito, mettendoci
+        lo stato che prima veniva salvato automaticamente nei frame. Alzare
+        sys.setrecursionlimit è una soluzione apparente: il limite protegge dallo stack
+        overflow del processo, e alzarlo troppo fa crashare l'interprete invece di
+        sollevare un'eccezione.
+    - question: Che differenza c'è fra backtracking e forza bruta?
+      answer: >-
+        La forza bruta genera tutte le configurazioni e poi scarta quelle non valide; il
+        backtracking costruisce la configurazione un pezzo alla volta e abbandona il ramo
+        appena diventa impossibile completarlo. Nelle N-regine, la forza bruta genererebbe
+        tutte le disposizioni e le filtrerebbe; il backtracking non posiziona nemmeno una
+        regina sotto attacco, tagliando l'intero sottoalbero. Asintoticamente possono
+        coincidere nel caso peggiore, ma in pratica la differenza è fra eseguibile e non.
+    - question: Qual è la complessità di spazio del backtracking?
+      answer: >-
+        O(profondità massima) per lo stack delle chiamate, più lo spazio della soluzione
+        parziale e delle strutture di supporto - nei sottoinsiemi la profondità è n, nelle
+        permutazioni pure. A questo va aggiunto lo spazio dell'output se si raccolgono
+        tutte le soluzioni, che è esponenziale per costruzione: vale la pena distinguere
+        le due voci, perché spesso l'intervistatore intende solo la prima.
+  related: [dsa-09-graphs, dsa-11-dynamic-programming, dsa-08-trees, dsa-07-stacks-queues]
+  resources:
+    - title: "NeetCode - Backtracking"
+      url: https://neetcode.io/practice
+      kind: practice
+    - title: "Introduction to Algorithms (CLRS)"
+      url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+      kind: book
 
 - id: dsa-14-sorting
   title: Algoritmi di ordinamento
@@ -422,6 +2220,40 @@
     Raramente si implementa un sort in produzione, ma conoscerne le proprietà serve a
     scegliere e a rispondere alle domande di follow-up. Le proprietà che contano sono
     complessità, stabilità e spazio.
+  deep_dive: |-
+    Tre proprietà descrivono un algoritmo di ordinamento e sono esattamente quelle che
+    un intervistatore chiede. La complessità, distinguendo caso medio e caso peggiore.
+    Lo spazio extra, cioè se l'algoritmo è in place o richiede memoria proporzionale
+    all'input. E la stabilità: un ordinamento è stabile se elementi con la stessa chiave
+    mantengono l'ordine relativo che avevano prima. La stabilità sembra un dettaglio
+    finché non si ordina per criteri successivi: ordinare per cognome e poi per
+    dipartimento dà il risultato atteso solo se il secondo ordinamento è stabile,
+    altrimenti l'ordine per cognome viene distrutto.
+
+    Merge sort è O(n log n) garantito in ogni caso e stabile, ma richiede O(n) di memoria
+    extra per la fusione. Quick sort è O(n log n) in media e O(n^2) nel caso peggiore,
+    è in place e non stabile: il caso peggiore si presenta quando il pivot è
+    sistematicamente pessimo, per esempio prendendo il primo elemento di un array già
+    ordinato, e si evita scegliendo il pivot a caso o con la mediana di tre. Heap sort dà
+    la garanzia O(n log n) ed è in place, ma non è stabile e in pratica è più lento di
+    quick sort per via della località di memoria peggiore.
+
+    Il limite inferiore O(n log n) vale solo per gli ordinamenti basati su confronti, e
+    la dimostrazione è elegante: con n elementi ci sono n! ordinamenti possibili, un
+    albero di decisione binario alto h distingue al massimo 2^h casi, quindi serve
+    h >= log2(n!) che per Stirling è Theta(n log n). Chi non confronta può fare meglio:
+    counting sort conta le occorrenze di ogni valore ed è O(n + k) con k l'ampiezza del
+    range; radix sort ordina cifra per cifra ed è O(d·(n + k)). Entrambi richiedono
+    ipotesi forti sui dati - interi in un intervallo limitato - e fuori da quelle non si
+    applicano.
+
+    In pratica si usa la libreria standard, e vale la pena sapere cosa c'è dentro. Python
+    e Java per gli oggetti usano Timsort, un ibrido fra merge sort e insertion sort che
+    individua le porzioni già ordinate - i "run" - e le fonde: sui dati reali, che
+    raramente sono casuali, questo lo rende spesso più veloce del limite teorico
+    suggerirebbe, fino a O(n) su un array già ordinato. C++ usa introsort, che parte con
+    quick sort e passa a heap sort se la ricorsione diventa troppo profonda, ottenendo la
+    velocità del primo con la garanzia del secondo.
   key_points:
     - "Merge sort: O(n log n) garantito, stabile, O(n) di spazio extra"
     - "Quick sort: O(n log n) medio ma O(n^2) nel caso peggiore, in place, non stabile. Il pivot casuale rende raro il caso peggiore"
@@ -430,16 +2262,119 @@
     - "Stabile significa che elementi uguali mantengono l'ordine relativo: conta quando si ordina per chiavi successive"
     - "In pratica: Timsort in Python e Java per gli oggetti, introsort in C++"
     - "Il limite inferiore O(n log n) vale solo per gli ordinamenti basati su confronti"
+    - "La dimostrazione del limite: n! permutazioni, albero di decisione binario, h >= log2(n!)"
+  examples:
+    - title: Perché la stabilità conta
+      language: python
+      code: |
+        persone = [("Rossi", "Vendite"), ("Bianchi", "IT"), ("Conti", "Vendite")]
+
+        # Ordinamenti successivi: funziona SOLO perché sorted è stabile.
+        per_cognome = sorted(persone, key=lambda p: p[0])
+        finale = sorted(per_cognome, key=lambda p: p[1])
+        # [('Bianchi','IT'), ('Conti','Vendite'), ('Rossi','Vendite')]
+        # Dentro "Vendite" l'ordine per cognome è preservato.
+
+        # Alternativa senza dipendere dalla stabilità: una chiave sola, composta.
+        finale = sorted(persone, key=lambda p: (p[1], p[0]))
+      note: >-
+        Con un ordinamento non stabile il primo passaggio andrebbe perso. La chiave
+        composta è più robusta perché non dipende da una proprietà dell'implementazione.
+    - title: Counting sort - lineare, ma solo sotto ipotesi
+      language: python
+      code: |
+        def counting_sort(nums: list[int], massimo: int) -> list[int]:
+            """O(n + k). Richiede interi non negativi in [0, massimo]."""
+            conteggi = [0] * (massimo + 1)
+            for valore in nums:
+                conteggi[valore] += 1
+            risultato = []
+            for valore, quante in enumerate(conteggi):
+                risultato.extend([valore] * quante)
+            return risultato
+
+        # Con massimo = 10^9 e n = 100 questa "ottimizzazione" alloca un miliardo di celle:
+        # il vincolo sul range non è un dettaglio, è la condizione di applicabilità.
+      note: >-
+        Non viola il limite O(n log n) perché non fa confronti: usa il valore stesso come
+        indice, il che richiede di conoscere e limitare il dominio.
+  trade_offs:
+    - option: Merge sort
+      pros: O(n log n) garantito, stabile, parallelizzabile, buono per dati esterni
+      cons: O(n) di memoria extra
+      when: Serve stabilità e una garanzia sul caso peggiore; ordinamento su disco
+    - option: Quick sort
+      pros: Il più veloce in media, in place, ottima località di memoria
+      cons: O(n^2) nel caso peggiore, non stabile
+      when: Memoria limitata e nessun requisito sul caso peggiore
+    - option: Heap sort
+      pros: O(n log n) garantito e in place insieme
+      cons: Non stabile, costanti più alte, accessi sparsi alla memoria
+      when: Serve la garanzia senza poter allocare memoria extra
+    - option: Counting o radix sort
+      pros: Lineare, batte il limite dei confronti
+      cons: Solo su interi in un range noto e limitato; memoria proporzionale al range
+      when: Chiavi intere piccole, per esempio età, voti, codici a poche cifre
+  numbers:
+    - "Timsort su un array già ordinato è O(n): riconosce un unico run e non fa altro lavoro"
+    - "Su n = 10^6, O(n log n) sono circa 2·10^7 confronti, O(n^2) circa 10^12: la differenza fra un secondo e giorni"
   interview_answer: >-
     In produzione uso quello della libreria standard, che è Timsort in Python: è stabile,
     O(n log n) nel caso peggiore e sfrutta le porzioni già ordinate, che nei dati reali sono
     frequenti. Quando la domanda è di scegliere l'algoritmo, guardo tre cose: se mi serve la
     stabilità, se posso permettermi O(n) di spazio extra e se ho garanzie da rispettare nel caso
     peggiore. Quick sort è il più veloce in media ma il suo caso peggiore quadratico lo rende
-    inadatto dove serve una garanzia; merge sort me la dà ma paga in memoria.
+    inadatto dove serve una garanzia; merge sort me la dà ma paga in memoria. E se le chiavi
+    sono interi in un range piccolo, ricordo che counting sort scende a lineare.
+  senior_signals:
+    - "Valuta stabilità, spazio e caso peggiore insieme, non solo la complessità media"
+    - "Sa perché il limite O(n log n) vale solo per gli ordinamenti a confronti"
+    - "Conosce Timsort e il motivo per cui va bene sui dati reali"
+    - "Propone la chiave composta invece di affidarsi alla stabilità di ordinamenti successivi"
   pitfalls:
     - "Dire che quick sort è O(n log n) senza menzionare il caso peggiore"
     - "Ignorare la stabilità quando si ordina per più criteri in sequenza"
-  follow_up_questions:
-    - "Perché Python usa Timsort e non quicksort?"
-    - "Quando un ordinamento può essere lineare?"
+    - "Proporre counting sort senza verificare l'ampiezza del range"
+    - "Riscrivere un sort a mano quando la libreria standard fa meglio"
+  follow_ups:
+    - question: Perché Python usa Timsort e non quicksort?
+      answer: >-
+        Per tre motivi. È stabile, e per gli oggetti la stabilità è una garanzia che il
+        linguaggio vuole offrire. Ha O(n log n) garantito anche nel caso peggiore, mentre
+        quick sort può degradare a quadratico. E sfrutta le porzioni già ordinate: i dati
+        reali raramente sono casuali - spesso sono parzialmente ordinati o concatenazioni
+        di sequenze ordinate - e in quei casi Timsort si avvicina a O(n). Il prezzo è O(n)
+        di memoria temporanea, che in Python è accettabile.
+    - question: Quando un ordinamento può essere lineare?
+      answer: >-
+        Quando non si basa sui confronti. Counting sort usa il valore come indice in un
+        array di conteggi ed è O(n + k) con k l'ampiezza del range; radix sort ordina cifra
+        per cifra usando counting sort come passo stabile ed è O(d·(n + k)). Entrambi
+        richiedono chiavi intere in un dominio noto e limitato: con valori fino a un
+        miliardo il conteggio allocherebbe un miliardo di celle, e l'ottimizzazione
+        diventa un disastro di memoria.
+    - question: Perché il limite inferiore degli ordinamenti a confronti è O(n log n)?
+      answer: >-
+        Perché ogni confronto ha due esiti, quindi l'esecuzione dell'algoritmo è un
+        cammino in un albero di decisione binario, e ogni foglia deve corrispondere a una
+        delle n! permutazioni possibili dell'input. Un albero binario di altezza h ha al
+        massimo 2^h foglie, quindi serve 2^h >= n!, cioè h >= log2(n!), che per
+        l'approssimazione di Stirling è Theta(n log n). Nessun algoritmo basato solo su
+        confronti può fare meglio nel caso peggiore.
+    - question: Come si evita il caso peggiore di quick sort?
+      answer: >-
+        Scegliendo bene il pivot. Il caso peggiore arriva quando il pivot è
+        sistematicamente vicino a un estremo, per esempio prendendo sempre il primo
+        elemento di un array già ordinato: le partizioni sono allora di dimensione 1 e
+        n-1, e la ricorsione diventa profonda n. Le difese sono il pivot casuale, che
+        rende il caso peggiore improbabile, la mediana di tre, o l'introsort, che conta la
+        profondità di ricorsione e passa a heap sort quando supera una soglia, garantendo
+        O(n log n) in ogni caso.
+  related: [dsa-01-complexity, dsa-05-binary-search, dsa-10-heaps, db-12-indexes]
+  resources:
+    - title: "Timsort - descrizione originale di Tim Peters"
+      url: https://github.com/python/cpython/blob/main/Objects/listsort.txt
+      kind: doc
+    - title: "VisuAlgo - algoritmi di ordinamento"
+      url: https://visualgo.net/en/sorting
+      kind: practice
