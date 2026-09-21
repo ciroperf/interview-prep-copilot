@@ -94,27 +94,46 @@ else
 fi
 
 OBJ_ID=$(az ad app show --id "$APP_ID" --query id -o tsv)
-SUBJECT="repo:${REPO}:environment:${ENVIRONMENT}"
 
-if [ -z "$(az ad app federated-credential list --id "$OBJ_ID" --query "[?subject=='$SUBJECT'] | [0].id" -o tsv 2>/dev/null || true)" ]; then
+# GitHub ha due formati di subject e un repository ne usa uno solo, ma quale
+# dipende da quando e' stato creato: dal 15 luglio 2026 i nuovi repository -
+# e quelli rinominati o trasferiti dopo quella data - presentano il formato
+# "immutabile", che accanto ai nomi porta gli ID numerici di proprietario e
+# repository. I nomi si possono riciclare, gli ID no, ed e' il motivo del
+# cambio. Creiamo entrambe le credenziali: costano nulla, e cosi' lo script
+# funziona senza sapere in che regime sta il repository - e continua a
+# funzionare se il repository ci passa domani.
+OWNER_ID=$(gh api "repos/$REPO" --jq .owner.id) || fail "Non riesco a leggere l'ID del proprietario"
+REPO_ID=$(gh api "repos/$REPO" --jq .id)        || fail "Non riesco a leggere l'ID del repository"
+OWNER_NAME="${REPO%%/*}"
+REPO_NAME="${REPO##*/}"
+
+NOMI_CRED=("github-${ENVIRONMENT}" "github-${ENVIRONMENT}-immutable")
+SUBJECTS=("repo:${REPO}:environment:${ENVIRONMENT}"
+          "repo:${OWNER_NAME}@${OWNER_ID}/${REPO_NAME}@${REPO_ID}:environment:${ENVIRONMENT}")
+
+for i in "${!NOMI_CRED[@]}"; do
+    nome_cred="${NOMI_CRED[$i]}"; subject="${SUBJECTS[$i]}"
+    if [ -n "$(az ad app federated-credential list --id "$OBJ_ID" --query "[?subject=='$subject'] | [0].id" -o tsv 2>/dev/null || true)" ]; then
+        ok "Credenziale '$nome_cred' gia' presente"
+        continue
+    fi
     # Il JSON passa da un file: sulla riga di comando le virgolette si
     # comportano in modo diverso fra le shell e si rompono facilmente.
     tmp=$(mktemp)
-    trap 'rm -f "$tmp"' EXIT
     cat > "$tmp" <<JSON
 {
-  "name": "github-${ENVIRONMENT}",
+  "name": "${nome_cred}",
   "issuer": "https://token.actions.githubusercontent.com",
-  "subject": "${SUBJECT}",
+  "subject": "${subject}",
   "audiences": ["api://AzureADTokenExchange"]
 }
 JSON
     az ad app federated-credential create --id "$OBJ_ID" --parameters "@$tmp" --output none \
-        || fail "Creazione della credenziale federata fallita"
-    ok "Credenziale federata creata per $SUBJECT"
-else
-    ok "Credenziale federata gia' presente"
-fi
+        || { rm -f "$tmp"; fail "Creazione della credenziale '$nome_cred' fallita"; }
+    rm -f "$tmp"
+    ok "Credenziale '$nome_cred' creata per $subject"
+done
 
 # --- segreti ---------------------------------------------------------------
 

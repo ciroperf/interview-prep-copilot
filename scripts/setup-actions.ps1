@@ -138,13 +138,35 @@ if (-not $esistente) {
     Ok "Ruolo gia' assegnato"
 }
 
-$objId  = az ad app show --id $appId --query id -o tsv
-$subject = "repo:${repo}:environment:$Environment"
+$objId = az ad app show --id $appId --query id -o tsv
 
-$credEsiste = az ad app federated-credential list --id $objId --query "[?subject=='$subject'] | [0].id" -o tsv 2>$null
-if (-not $credEsiste) {
+# GitHub ha due formati di subject e un repository ne usa uno solo, ma quale
+# dipende da quando e' stato creato: dal 15 luglio 2026 i nuovi repository -
+# e quelli rinominati o trasferiti dopo quella data - presentano il formato
+# "immutabile", che accanto ai nomi porta gli ID numerici di proprietario e
+# repository. I nomi si possono riciclare, gli ID no, ed e' il motivo del
+# cambio. Creiamo entrambe le credenziali: costano nulla, e cosi' lo script
+# funziona senza sapere in che regime sta il repository - e continua a
+# funzionare se il repository ci passa domani.
+$ids = gh api "repos/$repo" --jq '{owner: .owner.id, repo: .id}' 2>$null | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or -not $ids) { Fail "Non riesco a leggere gli ID numerici del repository" }
+
+$ownerName, $repoName = $repo -split "/", 2
+$soggetti = [ordered]@{
+    "github-$Environment"           = "repo:${repo}:environment:$Environment"
+    "github-$Environment-immutable" = "repo:$ownerName@$($ids.owner)/$repoName@$($ids.repo):environment:$Environment"
+}
+
+foreach ($nome in $soggetti.Keys) {
+    $subject = $soggetti[$nome]
+    $credEsiste = az ad app federated-credential list --id $objId --query "[?subject=='$subject'] | [0].id" -o tsv 2>$null
+    if ($credEsiste) {
+        Ok "Credenziale '$nome' gia' presente"
+        continue
+    }
+
     $parametri = @{
-        name      = "github-$Environment"
+        name      = $nome
         issuer    = "https://token.actions.githubusercontent.com"
         subject   = $subject
         audiences = @("api://AzureADTokenExchange")
@@ -156,11 +178,9 @@ if (-not $credEsiste) {
     try {
         Set-Content -Path $tmp -Value $parametri -Encoding utf8
         az ad app federated-credential create --id $objId --parameters "@$tmp" --output none
-        if ($LASTEXITCODE -ne 0) { Fail "Creazione della credenziale federata fallita" }
+        if ($LASTEXITCODE -ne 0) { Fail "Creazione della credenziale '$nome' fallita" }
     } finally { Remove-Item $tmp -ErrorAction SilentlyContinue }
-    Ok "Credenziale federata creata per $subject"
-} else {
-    Ok "Credenziale federata gia' presente"
+    Ok "Credenziale '$nome' creata per $subject"
 }
 
 # --- segreti ---------------------------------------------------------------

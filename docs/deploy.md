@@ -309,6 +309,33 @@ az ad app federated-credential create --id "$OBJ_ID" --parameters '{
 > `repo:owner/repo:environment:production`. Se togli l'environment, diventa
 > `repo:owner/repo:ref:refs/heads/main`.
 
+### Subject immutabili
+
+Dal 15 luglio 2026 GitHub presenta un subject diverso: accanto ai nomi ci sono
+gli ID numerici di proprietario e repository, separati da `@`.
+
+```
+repo:owner@45690237/repo@1378319406:environment:production
+```
+
+Vale per i repository **creati** dopo quella data, e per quelli rinominati o
+trasferiti dopo. Il motivo è che un nome si può riciclare — se rilasci
+`owner/repo` e qualcun altro lo riprende, i suoi workflow possono presentare il
+tuo stesso subject — mentre un ID no.
+
+Se la credenziale è nel formato vecchio e il repository presenta quello nuovo,
+il login fallisce con:
+
+```
+AADSTS700213: No matching federated identity record found for presented
+assertion subject 'repo:owner@.../repo@...:environment:production'
+```
+
+Il subject citato nell'errore è quello che GitHub ha davvero presentato: si può
+copiare da lì. `setup-actions.ps1` crea **entrambe** le credenziali, leggendo
+gli ID con `gh api repos/OWNER/REPO`, così funziona in tutti e due i regimi e
+continua a funzionare se il repository ci passa in futuro.
+
 ### Secret da configurare
 
 | Secret | Da dove si prende |
