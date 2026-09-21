@@ -1,4 +1,6 @@
-# Categoria "Reliability & Real-World Problems" - concetti 31-40 della checklist.
+# Categoria "Reliability" - cosa succede quando qualcosa si rompe, e come fare in modo
+# che si rompa poco, in modo prevedibile e senza trascinare giù il resto.
+
 - id: rel-31-delivery-semantics
   title: Exactly-once vs at-least-once
   category: reliability
@@ -11,29 +13,163 @@
     duplicare), exactly-once (nessuna delle due). L'exactly-once end-to-end sulla rete non
     è realizzabile: quello che si ottiene è at-least-once più idempotenza, che produce un
     effetto exactly-once.
+  deep_dive: |-
+    La scelta si riduce a dove metti l'ack. Se confermi *prima* di elaborare hai
+    at-most-once: veloce, e se il processo muore nel mezzo il messaggio è perso. Se
+    confermi *dopo* hai at-least-once: non perdi nulla, ma un crash fra l'elaborazione e
+    l'ack fa rielaborare il messaggio. Non esiste una terza posizione per l'ack, ed è
+    questo il nocciolo della questione.
+
+    Il motivo teorico ha un nome: il problema dei due generali. Due parti che comunicano
+    su un canale inaffidabile non possono raggiungere la certezza comune, perché
+    l'ultimo messaggio potrebbe sempre essersi perso. Tradotto: il mittente non può mai
+    sapere con certezza se il destinatario ha ricevuto ed elaborato. Può solo ritentare.
+    Da qui l'affermazione, corretta, che "exactly-once delivery" non esiste; esiste
+    invece l'*exactly-once processing*, cioè un effetto osservabile identico a quello di
+    una sola esecuzione.
+
+    Come si ottiene: at-least-once per la consegna, più deduplicazione o idempotenza per
+    l'effetto. La forma concreta più solida è un registro dei messaggi già elaborati
+    scritto *nella stessa transazione* dell'effetto. Se sono in due transazioni diverse,
+    esiste un istante in cui una è committata e l'altra no, e si torna al punto di
+    partenza. Se l'effetto è su un sistema che non condivide transazione con il
+    registro, serve un altro meccanismo: idempotency key propagata al sistema esterno,
+    oppure outbox.
+
+    L'exactly-once di Kafka va capito nei suoi confini, perché è la domanda trabocchetto
+    più comune. Il produttore idempotente elimina i duplicati dovuti ai retry interni
+    del producer; le transazioni rendono atomica la sequenza leggi-elabora-scrivi
+    *dentro Kafka*, offset incluso. Tutto vero, e tutto limitato a Kafka: se
+    l'elaborazione scrive su Postgres o chiama un'API di pagamento, quella garanzia non
+    si estende.
+
+    Gli effetti collaterali esterni vanno trattati caso per caso. Un'email inviata non
+    si annulla: si rende idempotente a monte, per esempio registrando "email di conferma
+    per ordine X già inviata" prima di inviarla e accettando il rischio opposto (un
+    crash fra registrazione e invio significa mail mancata, che è quasi sempre il danno
+    minore). Un pagamento si rende idempotente con la chiave che il PSP già supporta. Un
+    webhook in uscita si rende idempotente lato ricevente, documentando che potrà
+    arrivare due volte.
   key_points:
     - "At-most-once: ack prima di elaborare. Veloce, perde messaggi se il consumer muore"
     - "At-least-once: ack dopo aver elaborato. Non perde nulla, può rielaborare. È il default quasi ovunque"
     - "Exactly-once processing esiste dentro un singolo sistema (Kafka transactions, read-process-write atomico), non verso l'esterno"
     - "Il problema dei due generali dimostra che con canali inaffidabili l'accordo certo è impossibile"
     - "La soluzione pratica: at-least-once + deduplicazione tramite chiave idempotente persistita"
-    - "Effetti collaterali esterni (email, pagamenti) vanno resi idempotenti a parte"
+    - "Il registro dei messaggi visti va scritto nella stessa transazione dell'effetto, altrimenti non garantisce nulla"
+    - "Effetti collaterali esterni (email, pagamenti) vanno resi idempotenti a parte, con la loro chiave"
+    - "Quando l'atomicità è impossibile, si sceglie da che parte sbagliare: meglio una mail mancata o una mail doppia?"
+  examples:
+    - title: Dove metti l'ack decide la semantica
+      language: python
+      code: |-
+        # AT-MOST-ONCE: conferma subito. Un crash qui sotto = messaggio perso.
+        await consumer.commit()
+        await elabora(msg)
+
+        # AT-LEAST-ONCE: conferma dopo. Un crash qui sotto = messaggio rielaborato.
+        await elabora(msg)
+        await consumer.commit()
+
+        # "EXACTLY-ONCE" osservabile: at-least-once + registro nella stessa transazione
+        async with conn.transaction():
+            inserito = await conn.fetchval(
+                """INSERT INTO messaggi_visti (chiave) VALUES ($1)
+                   ON CONFLICT DO NOTHING RETURNING 1""", msg.chiave)
+            if inserito:
+                await applica(conn, msg)      # effetto e registro insieme
+        await consumer.commit()               # solo dopo il commit del database
+      note: >-
+        L'ordine delle ultime due righe non è negoziabile: commit del dato, poi commit
+        dell'offset. Invertirli significa perdere messaggi invece di duplicarli.
+    - title: Rendere idempotente un effetto che non si annulla
+      language: python
+      code: |-
+        async def invia_conferma(ordine_id: str, conn) -> None:
+            # Si "prenota" l'invio: se due esecuzioni concorrenti arrivano qui,
+            # una sola vince sul vincolo di unicità.
+            preso = await conn.fetchval(
+                """INSERT INTO email_inviate (ordine_id, tipo) VALUES ($1, 'conferma')
+                   ON CONFLICT DO NOTHING RETURNING 1""", ordine_id)
+            if not preso:
+                return                       # già inviata (o in corso): non duplicare
+            await smtp.invia(ordine_id)      # se muore qui, la mail non partirà
+      note: >-
+        Si sceglie consapevolmente il rischio: prenotando prima si rischia una mail
+        mancata, prenotando dopo si rischia una mail doppia. Per una conferma d'ordine la
+        doppia è più tollerabile; per un addebito no.
+  trade_offs:
+    - option: At-most-once
+      pros: Latenza minima, nessun duplicato, nessuno stato da tenere
+      cons: Perdita di messaggi a ogni crash
+      when: Telemetria, metriche campionate, dati sostituibili dal prossimo campione
+    - option: At-least-once + idempotenza
+      pros: Nessuna perdita, effetto osservabile identico a una sola esecuzione
+      cons: Serve un registro dei visti e una chiave di deduplicazione stabile
+      when: Praticamente sempre, per tutto ciò che conta
+    - option: Transazioni Kafka (EOS)
+      pros: Atomicità di leggi-elabora-scrivi dentro Kafka, offset compreso
+      cons: Vale solo dentro Kafka, throughput inferiore, complessità operativa
+      when: Pipeline di stream processing interamente su Kafka
+  numbers:
+    - "Ritenzione del registro dei messaggi visti: più lunga della finestra di replay del broker (7 giorni è comune)"
+    - "Nel dubbio su quale errore preferire: il duplicato costa una riconciliazione, la perdita costa un cliente"
   interview_answer: >-
     Nella pratica scelgo at-least-once e rendo idempotente il consumer, perché è l'unica
     combinazione che regge sul serio. At-most-once perde messaggi e non è accettabile per
     nulla di importante, mentre exactly-once vero end-to-end non esiste: appena c'è una
-    rete di mezzo, un ack perso è indistinguibile da un'elaborazione non avvenuta. Quello
-    che Kafka chiama exactly-once è una transazione interna che copre leggi-elabora-scrivi
-    dentro Kafka, ma se nel mezzo mando una mail quella garanzia non la copre. Quindi
-    salvo un id del messaggio già elaborato in modo transazionale insieme all'effetto, e
-    ottengo un comportamento osservabile exactly-once.
+    rete di mezzo, un ack perso è indistinguibile da un'elaborazione non avvenuta - è il
+    problema dei due generali. Quello che Kafka chiama exactly-once è una transazione
+    interna che copre leggi-elabora-scrivi dentro Kafka, ma se nel mezzo mando una mail
+    quella garanzia non la copre. Quindi salvo un id del messaggio già elaborato in modo
+    transazionale insieme all'effetto, committo l'offset solo dopo, e ottengo un
+    comportamento osservabile exactly-once.
+  senior_signals:
+    - "Spiega la semantica a partire da dove si mette l'ack, non ripetendo le definizioni"
+    - "Conosce i confini dell'exactly-once di Kafka e sa dire dove smette di valere"
+    - "Insiste sull'atomicità fra registro ed effetto, e sull'ordine dei commit"
+    - "Sugli effetti non annullabili sceglie esplicitamente da che parte sbagliare"
   pitfalls:
     - "Promettere exactly-once dove c'è un effetto esterno non idempotente"
     - "Deduplicare in memoria: il riavvio azzera la memoria"
     - "Salvare il marker di deduplicazione in una transazione diversa da quella dell'effetto"
-  follow_up_questions:
-    - "Perché l'exactly-once end-to-end è impossibile?"
-    - "Come rendi idempotente un consumer che invia email?"
+    - "Committare l'offset prima di aver reso durevole l'effetto"
+  follow_ups:
+    - question: Perché l'exactly-once end-to-end è impossibile?
+      answer: >-
+        Per il problema dei due generali: su un canale inaffidabile nessuna delle due
+        parti può avere la certezza che l'ultimo messaggio sia arrivato. Il mittente che
+        non riceve l'ack non sa distinguere fra "non è arrivato" e "è arrivato ma l'ack
+        si è perso"; può solo ritentare, e ritentare significa possibile duplicato.
+        L'unica via d'uscita è spostare il problema: consegna at-least-once più effetto
+        idempotente, che è indistinguibile dall'exactly-once per chi osserva il sistema.
+    - question: Come rendi idempotente un consumer che invia email?
+      answer: >-
+        Registrando l'invio in modo unico prima o dopo l'operazione, a seconda di quale
+        errore preferisco. Prenotando prima (INSERT con vincolo unico, poi invio) rischio
+        una mail mancata se il processo muore nel mezzo; registrando dopo rischio la
+        mail doppia. Per una conferma d'ordine tollero la doppia, per una notifica di
+        pagamento preferisco la mancata e un job di riconciliazione che la recupera.
+        L'importante è che la scelta sia esplicita.
+    - question: Il messaggio arriva due volte ma con contenuto leggermente diverso. Che fai?
+      answer: >-
+        Significa che la chiave di deduplicazione è sbagliata: sto deduplicando su
+        qualcosa che non identifica il fatto. Rifaccio la chiave a partire dall'identità
+        di business dell'evento (id ordine + tipo evento + versione), non dal contenuto
+        completo. Se le differenze sono legittime - due aggiornamenti successivi - allora
+        non sono duplicati e vanno applicati entrambi, in ordine, il che riporta al tema
+        dell'ordinamento per chiave.
+  related: [core-10-idempotency, dist-30-message-queues, db-19-duplicate-records, rel-35-event-driven]
+  resources:
+    - title: "Confluent - Exactly-once semantics in Apache Kafka"
+      url: "https://www.confluent.io/blog/exactly-once-semantics-are-possible-heres-how-apache-kafka-does-it/"
+      kind: article
+    - title: "Two Generals' Problem"
+      url: "https://en.wikipedia.org/wiki/Two_Generals%27_Problem"
+      kind: article
+    - title: "Kleppmann - DDIA, cap. 11 (Stream Processing)"
+      url: "https://dataintensive.net/"
+      kind: book
 
 - id: rel-32-retries-timeouts-breakers
   title: Retry, timeout e circuit breaker
@@ -46,14 +182,131 @@
     Sono le tre difese di base contro le dipendenze lente o rotte. Usate male, i retry
     amplificano un guasto invece di assorbirlo: il retry storm è una delle cause più
     comuni di incidente.
+  deep_dive: |-
+    Il timeout viene prima di tutto, perché senza timeout non esiste nessuna delle altre
+    difese: una chiamata che non scade tiene occupato un thread o una connessione per
+    sempre, e quando le dipendenze rallentano il pool si esaurisce e il servizio smette
+    di rispondere *anche* alle richieste che non c'entrano nulla. Molti client HTTP hanno
+    timeout di default infiniti o altissimi: vanno impostati esplicitamente, e meglio se
+    separati per fase (connessione, lettura, scrittura, attesa di una connessione dal
+    pool).
+
+    I timeout vanno poi messi in gerarchia. Se il mio chiamante attende al massimo 2
+    secondi e io attendo 5 secondi la mia dipendenza, sto lavorando per nessuno: il
+    client se n'è già andato. La forma corretta è la *propagazione della deadline*:
+    ricevo un tempo massimo, ne sottraggo quanto ho già consumato e passo il resto alla
+    chiamata successiva. gRPC lo fa nativamente; in HTTP si fa a mano.
+
+    I retry sono utili solo su errori transitori: timeout, connection reset, 502, 503,
+    429 con Retry-After. Su un 4xx ritentare è inutile per definizione. E vanno fatti
+    con backoff esponenziale *più jitter*, perché senza casualità tutti i client
+    rifiutati nello stesso istante tornano nello stesso istante: si sincronizzano e
+    creano un'onda che tiene giù il servizio proprio mentre prova a rialzarsi.
+
+    Il pericolo più sottile è l'amplificazione. Se tre livelli fanno ciascuno tre
+    tentativi, una richiesta utente può diventare ventisette chiamate al servizio in
+    fondo, proprio quando è in difficoltà. Le difese: ritentare a *un solo livello*
+    (tipicamente il più esterno che conosce l'idempotenza), e imporre un *retry budget*,
+    cioè un tetto alla percentuale di traffico aggiuntivo generata dai retry sull'intero
+    servizio, non per singola richiesta.
+
+    Il circuit breaker sta un livello sopra: osserva il tasso di errore verso una
+    dipendenza e, superata una soglia, *apre* il circuito e fa fallire immediatamente
+    tutte le chiamate successive, senza nemmeno provarci. Dopo un periodo passa in
+    *half-open* e lascia passare poche richieste di sondaggio: se vanno bene chiude, se
+    vanno male riapre. Il beneficio è doppio: il chiamante non spreca risorse in attese
+    inutili, e il servizio in difficoltà riceve meno carico e può riprendersi.
+
+    Accanto ci sono due tecniche meno note che vale la pena citare. Il *bulkhead*: pool
+    di connessioni e di concorrenza separati per dipendenza, così una lenta non consuma
+    tutta la capacità e non trascina le altre. E le *hedged request*: se la risposta non
+    arriva entro il 95° percentile atteso, si manda una seconda richiesta in parallelo e
+    si prende la prima che risponde. Costa qualche percento di traffico in più e taglia
+    drasticamente la coda della latenza; funziona solo su operazioni idempotenti.
   key_points:
     - "Ogni chiamata di rete deve avere un timeout esplicito: il default di molte librerie è infinito"
-    - "Il timeout del chiamante deve essere minore di quello del chiamante a monte, altrimenti si accumulano"
+    - "Timeout separati per fase: connessione, lettura, scrittura, attesa di una connessione dal pool"
+    - "Il timeout del chiamato deve essere minore di quello del chiamante, altrimenti si lavora per un client che se n'è già andato"
+    - "Propagazione della deadline: passo alla chiamata successiva il tempo che resta, non un valore fisso"
     - "Retry solo su errori transitori (5xx, timeout, connection reset), mai su 4xx"
     - "Exponential backoff + jitter: senza jitter tutti i client ritentano nello stesso istante"
-    - "Budget di retry: limita il numero totale, non solo per richiesta"
+    - "Ritenta a un solo livello: tre livelli con tre tentativi fanno ventisette chiamate"
+    - "Retry budget: limita la percentuale di traffico extra dovuta ai retry sull'intero servizio"
     - "Circuit breaker: closed -> open dopo N fallimenti -> half-open per sondare -> closed. Fa fallire subito invece di accodare"
-    - "Bulkhead: pool di connessioni separati per dipendenza, così una lenta non esaurisce tutti i thread"
+    - "Bulkhead: pool separati per dipendenza, così una lenta non esaurisce tutta la capacità"
+    - "Hedged request: seconda richiesta parallela oltre il p95 atteso, taglia la coda della latenza. Solo se idempotente"
+  examples:
+    - title: L'amplificazione dei retry, in numeri
+      language: python
+      code: |-
+        # Tre livelli, tre tentativi ciascuno: il servizio in fondo vede 27 richieste
+        # per OGNI richiesta utente, proprio mentre sta già soffrendo.
+        def chiamate_al_fondo(livelli: int, tentativi: int) -> int:
+            return tentativi ** livelli
+
+        chiamate_al_fondo(3, 3)   # 27
+        chiamate_al_fondo(2, 3)   # 9
+        chiamate_al_fondo(1, 3)   # 3   <- ritentare a un solo livello
+
+        # Retry budget: non più del 10% di traffico extra, qualunque cosa accada
+        class Budget:
+            def __init__(self, quota: float = 0.10):
+                self.quota, self.normali, self.extra = quota, 0, 0
+            def consenti(self) -> bool:
+                return self.extra <= self.quota * max(self.normali, 1)
+      note: >-
+        Il budget è la difesa che manca quasi sempre: limita i retry a livello di
+        servizio, non di singola richiesta, quindi regge anche quando tutto fallisce
+        insieme.
+    - title: Circuit breaker, i tre stati
+      language: python
+      code: |-
+        class CircuitBreaker:
+            def __init__(self, soglia=5, attesa=30.0, sonde=3):
+                self.stato, self.errori, self.aperto_da = "closed", 0, 0.0
+                self.soglia, self.attesa, self.sonde = soglia, attesa, sonde
+
+            async def chiama(self, fn):
+                if self.stato == "open":
+                    if time.monotonic() - self.aperto_da < self.attesa:
+                        raise CircuitoAperto()          # fallisce SUBITO, senza provarci
+                    self.stato = "half_open"            # tempo scaduto: sondiamo
+
+                try:
+                    esito = await fn()
+                except Exception:
+                    self.errori += 1
+                    if self.stato == "half_open" or self.errori >= self.soglia:
+                        self.stato, self.aperto_da = "open", time.monotonic()
+                    raise
+                else:
+                    self.errori, self.stato = 0, "closed"
+                    return esito
+      note: >-
+        Il valore del breaker non è per chi chiama: è per chi è chiamato. Togliergli
+        carico è ciò che gli permette di rialzarsi invece di restare sotto pressione.
+  trade_offs:
+    - option: Solo timeout
+      pros: Semplice, protegge il chiamante dall'esaurimento delle risorse
+      cons: Ogni richiesta fallisce comunque durante il guasto
+      when: Base minima, sempre
+    - option: Timeout + retry con backoff
+      pros: Assorbe i guasti transitori, migliora la percentuale di successo
+      cons: Amplifica il carico se il guasto non è transitorio
+      when: Operazioni idempotenti con errori brevi e sporadici
+    - option: Circuit breaker
+      pros: Fallisce in fretta, dà tregua alla dipendenza, protegge la latenza
+      cons: Taglia fuori anche le richieste che sarebbero riuscite, soglie da tarare
+      when: Dipendenze che possono degradare a lungo
+    - option: Hedged request
+      pros: Riduce moltissimo la coda di latenza (p99)
+      cons: Traffico extra, solo su operazioni idempotenti
+      when: Letture critiche per la latenza, repliche multiple disponibili
+  numbers:
+    - "Backoff tipico: 100 ms, 200, 400, 800 con jitter del 50-100%"
+    - "Circuit breaker: apertura dopo 5-10 fallimenti o oltre il 50% di errori su una finestra; attesa 15-60 secondi"
+    - "Retry budget usato in pratica (es. da Envoy e gRPC): 10-20% di traffico aggiuntivo"
+    - "Hedged request oltre il p95: costa circa il 5% di richieste in più e può dimezzare il p99"
   interview_answer: >-
     Il timeout viene prima di tutto: senza, una dipendenza lenta esaurisce i thread e il
     guasto si propaga a monte. Poi i retry, ma solo sugli errori che ha senso ritentare e
@@ -62,14 +315,56 @@
     il livello sopra: se una dipendenza sta chiaramente fallendo, smetto di provarci e
     fallisco subito, dando al servizio a valle la possibilità di riprendersi invece di
     tenerlo sotto carico. La gerarchia dei timeout è il dettaglio che si dimentica: se il
-    mio timeout è più lungo di quello di chi mi chiama, sto lavorando per nessuno.
+    mio timeout è più lungo di quello di chi mi chiama, sto lavorando per nessuno. E
+    ritento a un solo livello della catena, con un budget sul traffico extra, perché tre
+    livelli da tre tentativi fanno ventisette chiamate al servizio che sta già soffrendo.
+  senior_signals:
+    - "Ordina le difese: prima il timeout, poi il retry, poi il breaker"
+    - "Calcola l'amplificazione dei retry annidati e propone il budget"
+    - "Parla di deadline propagata, non solo di timeout fisso"
+    - "Conosce bulkhead e hedged request e sa quando valgono"
   pitfalls:
     - "Retry senza jitter: tempesta sincronizzata"
     - "Retry annidati a più livelli: tre livelli con tre tentativi fanno ventisette chiamate"
     - "Nessun timeout, o timeout più lunghi di quelli del chiamante"
-  follow_up_questions:
-    - "Perché il jitter è indispensabile nel backoff?"
-    - "In quali stati può essere un circuit breaker e cosa li fa cambiare?"
+    - "Ritentare operazioni non idempotenti: duplicati invece di resilienza"
+    - "Circuit breaker con soglie mai tarate: si apre sul rumore o non si apre mai"
+  follow_ups:
+    - question: Perché il jitter è indispensabile nel backoff?
+      answer: >-
+        Perché senza, tutti i client che hanno fallito nello stesso istante ritentano
+        nello stesso istante: il backoff esponenziale sposta l'onda ma non la disperde.
+        Con il jitter i tentativi si distribuiscono nel tempo e il servizio in ripresa
+        riceve un carico graduale invece di picchi sincronizzati. La variante
+        raccomandata da AWS è il "full jitter": si attende un valore casuale fra zero e
+        il backoff calcolato.
+    - question: In quali stati può essere un circuit breaker e cosa li fa cambiare?
+      answer: >-
+        Closed, dove tutto passa e si contano gli errori; open, quando la soglia è
+        superata, dove tutto fallisce immediatamente senza chiamare la dipendenza;
+        half-open, dopo un periodo di attesa, dove passano poche richieste di sondaggio.
+        Se le sonde riescono si torna a closed, se falliscono si torna a open e il
+        contatore dell'attesa riparte. La transizione più delicata è half-open: far
+        passare troppe sonde significa riportare subito sotto carico un servizio che si
+        stava rialzando.
+    - question: Come scegli il valore di un timeout?
+      answer: >-
+        Guardando la distribuzione reale della latenza della dipendenza, non a sensazione:
+        un buon punto di partenza è poco sopra il p99 osservato, perché oltre quel punto
+        aspettare non aumenta la probabilità di successo ma consuma risorse. Poi lo
+        inserisco nella gerarchia: deve stare dentro il tempo che il mio chiamante è
+        disposto ad aspettare, sottraendo quanto ho già speso.
+  related: [dist-29-service-communication, rel-37-graceful-degradation, core-04-http-status-codes, rel-40-traffic-spikes]
+  resources:
+    - title: "AWS Builders' Library - Timeouts, retries, and backoff with jitter"
+      url: "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/"
+      kind: article
+    - title: "Martin Fowler - Circuit Breaker"
+      url: "https://martinfowler.com/bliki/CircuitBreaker.html"
+      kind: article
+    - title: "Dean & Barroso - The Tail at Scale (hedged requests)"
+      url: "https://cacm.acm.org/research/the-tail-at-scale/"
+      kind: article
 
 - id: rel-33-race-conditions
   title: Gestire le race condition
@@ -80,30 +375,170 @@
   estimated_minutes: 30
   summary: >-
     Una race condition c'è quando il risultato dipende dall'ordine con cui si intrecciano
-    operazioni concorrenti. Il pattern colpevole è quasi sempre lo stesso: controlla
-    poi agisci, con una finestra fra i due momenti.
+    operazioni concorrenti. Il pattern colpevole è quasi sempre lo stesso: controlla poi
+    agisci, con una finestra fra i due momenti.
+  deep_dive: |-
+    Quasi tutte le race che si incontrano davvero appartengono a due famiglie.
+    *Check-then-act*: si verifica una condizione e si agisce presumendo che sia ancora
+    vera - il classico "controllo se l'email esiste, poi inserisco". *Read-modify-write*:
+    si legge un valore, lo si modifica in memoria e lo si riscrive - "leggo 10, sommo 1,
+    scrivo 11", e due processi concorrenti scrivono entrambi 11 invece di 12. In
+    entrambe la colpa è la finestra fra le due operazioni, che in produzione è
+    abbastanza larga da essere colpita spesso.
+
+    La cura più efficace non è aggiungere lock nel codice applicativo, è *spostare
+    l'atomicità dove i dati vivono*. Un `UPDATE contatori SET n = n + 1 WHERE id = :id`
+    è atomico per costruzione: non c'è finestra perché lettura e scrittura avvengono
+    nella stessa operazione. Lo stesso vale per `INCR` di Redis, per gli upsert con
+    `ON CONFLICT`, per i vincoli `UNIQUE` che fanno arbitrare il database, e per gli
+    aggiornamenti condizionali stile compare-and-swap (`WHERE version = :letta`).
+
+    Quando l'invariante coinvolge più righe o più letture, le opzioni sono bloccare le
+    righe lette (`SELECT ... FOR UPDATE`), alzare l'isolamento a SERIALIZABLE con retry,
+    oppure esprimere l'invariante come vincolo che il database sa verificare. La scelta
+    fra queste dipende dal tasso di contesa, come per il locking ottimistico contro
+    pessimistico.
+
+    In un sistema con più istanze c'è una trappola specifica: il lock applicativo in
+    memoria (un mutex, un `synchronized`, un semaforo di processo) protegge solo dentro
+    quel processo. Con tre repliche ci sono tre mutex indipendenti e zero mutua
+    esclusione. Se serve davvero coordinare fra processi, serve un lock distribuito -
+    con tutte le fragilità che ha - oppure, meglio, si ridisegna il problema per non
+    averne bisogno.
+
+    La parte davvero difficile è accorgersene. Un test sequenziale non vedrà mai una
+    race: bisogna scrivere test che lanciano N operazioni in parallelo e verificano
+    l'invariante alla fine, e farlo contro un database vero, non contro un doppio in
+    memoria che serializza tutto. Quando una race è già in produzione, i sintomi tipici
+    sono duplicati inspiegabili, contatori che non tornano, stati impossibili: conviene
+    cercare nel codice i punti in cui si legge, si decide e si scrive, invece di
+    rincorrere il log.
   key_points:
     - "Check-then-act: SELECT per verificare, poi INSERT/UPDATE. Fra i due un'altra transazione può intervenire"
     - "Read-modify-write: leggi 10, aggiungi 1, scrivi 11. Due processi in parallelo scrivono entrambi 11 invece di 12"
     - "Soluzione database-first: vincoli UNIQUE, UPDATE atomici (SET n = n + 1), SELECT FOR UPDATE, upsert"
-    - "Soluzione ottimistica: colonna di versione e retry sul conflitto"
+    - "Aggiornamento condizionale (compare-and-swap): UPDATE ... WHERE version = :letta, e si controlla il numero di righe"
     - "Le operazioni atomiche del datastore (INCR di Redis, update atomici) eliminano la finestra per costruzione"
+    - "Un mutex in memoria non serve a niente con più istanze: sono N mutex indipendenti"
     - "Riprodurre una race richiede carico concorrente: un test seriale non la vede mai"
+    - "Sintomi tipici in produzione: duplicati, contatori che non tornano, stati impossibili"
+  examples:
+    - title: La stessa funzione, con e senza finestra
+      language: python
+      code: |-
+        # RACE: fra SELECT e UPDATE un'altra richiesta può leggere lo stesso valore.
+        async def aggiungi_punto(conn, utente_id: str) -> int:
+            n = await conn.fetchval("SELECT punti FROM utenti WHERE id=$1", utente_id)
+            n += 1
+            await conn.execute("UPDATE utenti SET punti=$1 WHERE id=$2", n, utente_id)
+            return n
+
+        # ATOMICO: nessuna finestra, il database fa lettura e scrittura insieme.
+        async def aggiungi_punto(conn, utente_id: str) -> int:
+            return await conn.fetchval(
+                "UPDATE utenti SET punti = punti + 1 WHERE id=$1 RETURNING punti",
+                utente_id,
+            )
+      note: >-
+        Nessun lock, nessuna transazione esplicita, nessun retry: la seconda versione è
+        semplicemente priva del problema. È quasi sempre la strada migliore.
+    - title: Un test che una race la vede davvero
+      language: python
+      code: |-
+        async def test_prenotazioni_concorrenti_non_superano_i_posti(pool):
+            await pool.execute("UPDATE eventi SET posti = 1 WHERE id = 'e1'")
+
+            async def prova():
+                try:
+                    return await prenota(pool, evento="e1", utente=uuid4())
+                except PostiEsauriti:
+                    return None
+
+            # 50 tentativi davvero in parallelo, su un database vero
+            esiti = await asyncio.gather(*[prova() for _ in range(50)])
+
+            assert sum(1 for e in esiti if e) == 1, "più di una prenotazione sull'ultimo posto"
+            posti = await pool.fetchval("SELECT posti FROM eventi WHERE id='e1'")
+            assert posti == 0, f"posti negativi o incoerenti: {posti}"
+      note: >-
+        Due asserzioni, non una: quante operazioni sono riuscite *e* lo stato finale. Un
+        test che guarda solo il valore finale può passare per caso.
+  trade_offs:
+    - option: Operazione atomica nel datastore
+      pros: Nessuna finestra, nessun lock, nessun retry
+      cons: Esprimibile solo per invarianti semplici su una riga
+      when: Contatori, stock, flag, upsert
+    - option: Lock pessimistico (FOR UPDATE)
+      pros: Copre invarianti su più righe, semantica chiara
+      cons: Serializza, rischio deadlock, transazione più lunga
+      when: Contesa alta, invariante su poche righe identificabili
+    - option: Ottimistico con versione + retry
+      pros: Nessun lock tenuto, ottimo throughput
+      cons: Serve gestire il conflitto e il retry
+      when: Conflitti rari, modifiche che attraversano più richieste
+    - option: Serializable
+      pros: Copre anche gli invarianti che nessuno ha pensato a proteggere
+      cons: Aborti da ritentare, throughput inferiore
+      when: Invarianti complessi, contesa moderata
+  numbers:
+    - "Una finestra di race di pochi millisecondi viene colpita regolarmente a poche centinaia di richieste al secondo"
+    - "Un test di concorrenza utile lancia almeno 20-50 operazioni in parallelo, ripetute più volte"
+    - "sleep(0.1) come rimedio a una race: riduce la probabilità, non elimina il bug"
   interview_answer: >-
     Cerco il pattern controlla-poi-agisci, perché è lì che si annidano quasi tutte. Il
     rimedio che preferisco è spostare l'atomicità nel database invece di tenerla nel
     codice: invece di leggere il contatore, incrementarlo in memoria e riscriverlo, faccio
     un UPDATE SET n = n + 1 che è atomico per costruzione. Dove serve davvero coordinare
     più righe uso SELECT FOR UPDATE o un vincolo unique che lasci vincere una sola
-    transazione. La parte difficile non è risolverle ma accorgersene: un test unitario
-    seriale non le vede, quindi quando sospetto una race scrivo un test che lancia N
-    operazioni in parallelo e verifica l'invariante.
+    transazione. Diffido dei lock in memoria, perché con più istanze del servizio sono N
+    lock indipendenti e non garantiscono niente. La parte difficile non è risolverle ma
+    accorgersene: un test unitario seriale non le vede, quindi quando sospetto una race
+    scrivo un test che lancia decine di operazioni in parallelo contro un database vero e
+    verifica l'invariante alla fine.
+  senior_signals:
+    - "Nomina i due pattern (check-then-act, read-modify-write) invece di parlare genericamente di concorrenza"
+    - "Preferisce eliminare la finestra piuttosto che proteggerla con un lock"
+    - "Sa che un mutex di processo è inutile con più repliche"
+    - "Descrive un test di concorrenza concreto, con verifica dell'invariante"
   pitfalls:
     - "Correggere una race con uno sleep"
     - "Lock applicativo in memoria con più istanze del servizio"
     - "Test solo sequenziali su codice concorrente"
-  follow_up_questions:
-    - "Come testeresti una race condition in modo riproducibile?"
+    - "Usare il livello di isolamento sbagliato credendo che protegga da tutto"
+    - "Verificare solo il valore finale in un test di concorrenza, senza contare quante operazioni sono riuscite"
+  follow_ups:
+    - question: Come testeresti una race condition in modo riproducibile?
+      answer: >-
+        Con un test che esegue davvero in parallelo (asyncio.gather o un pool di thread)
+        contro un database reale, ripetuto più volte perché la race è probabilistica, e
+        con asserzioni sia sul numero di operazioni riuscite sia sullo stato finale. Dove
+        serve determinismo assoluto si possono inserire punti di sincronizzazione nel
+        codice di test - barriere che forzano l'intreccio peggiore - ma già il test
+        parallelo ripetuto scopre la stragrande maggioranza dei casi.
+    - question: Un contatore di like va incrementato migliaia di volte al secondo. Come lo fai?
+      answer: >-
+        Non con un UPDATE sulla stessa riga, che diventerebbe un punto di serializzazione:
+        userei un contatore partizionato (N righe sommate in lettura) oppure
+        l'incremento in Redis con persistenza periodica sul database. Se il valore può
+        essere approssimato, va benissimo aggregare in finestre e scrivere una volta al
+        secondo. La correttezza qui non è "il numero esatto in ogni istante" ma "il numero
+        non perde incrementi": due cose diverse, e la seconda costa molto meno.
+    - question: Che differenza c'è fra una race e un deadlock?
+      answer: >-
+        Una race produce un risultato sbagliato e il sistema prosegue: il danno è nei
+        dati. Un deadlock blocca due o più transazioni in attesa circolare: il database
+        lo rileva e ne aborta una, quindi il danno è nel throughput e in un errore
+        ritentabile. Sono anche opposti come cura: contro la race si aggiunge
+        coordinamento, e proprio il coordinamento aggiunto male è ciò che produce i
+        deadlock.
+  related: [db-20-locking, db-14-transactions-isolation, rel-34-distributed-locking, db-19-duplicate-records]
+  resources:
+    - title: "PostgreSQL - Explicit Locking"
+      url: "https://www.postgresql.org/docs/current/explicit-locking.html"
+      kind: doc
+    - title: "Redis - Transazioni e operazioni atomiche"
+      url: "https://redis.io/docs/latest/develop/interact/transactions/"
+      kind: doc
 
 - id: rel-34-distributed-locking
   title: Lock distribuito
@@ -116,31 +551,178 @@
     Un lock distribuito serializza un'operazione fra processi diversi. È utile ma
     intrinsecamente fragile: nessun lock distribuito può garantire mutua esclusione
     perfetta in presenza di pause GC e clock sfasati.
+  deep_dive: |-
+    L'implementazione minima su Redis è una riga: `SET chiave valore_univoco NX PX ttl`.
+    `NX` fa sì che vinca solo chi arriva per primo, `PX` mette una scadenza. Il TTL è
+    obbligatorio, perché senza, un titolare che muore lascia il lock preso per sempre; il
+    valore univoco serve al rilascio, che deve verificare la proprietà - altrimenti si
+    rischia di cancellare il lock di qualcun altro. La verifica e la cancellazione vanno
+    fatte atomicamente, quindi con uno script Lua: un `GET` seguito da `DEL` lascia una
+    finestra in cui il lock può scadere e passare a un altro.
+
+    Il TTL però crea il problema opposto, ed è il cuore della questione. Se il lavoro
+    dura più del TTL, il lock scade mentre il titolare sta ancora lavorando: un secondo
+    processo lo acquisisce, e ora *due* processi si credono titolari. Non è un caso di
+    scuola: basta una pausa di garbage collection, un'istanza sospesa
+    dall'hypervisor, una rete lenta. E non è risolvibile allungando il TTL, perché
+    allungarlo significa che un crash blocca tutti più a lungo.
+
+    L'unica difesa solida è il *fencing token*: il servizio che concede il lock
+    restituisce un numero monotòno crescente, il titolare lo passa alla risorsa
+    protetta, e la risorsa *rifiuta* le operazioni con un token minore dell'ultimo
+    visto. Così il titolare scaduto, quando finalmente si sveglia e prova a scrivere,
+    viene respinto. Richiede però che la risorsa collabori: se stai scrivendo su un
+    object storage che non conosce i token, non puoi implementarlo, ed è la ragione per
+    cui questa protezione manca quasi sempre.
+
+    Su Redlock - l'algoritmo che acquisisce il lock su N istanze Redis indipendenti - la
+    discussione fra Martin Kleppmann e Salvatore Sanfilippo è lettura obbligata per
+    un colloquio senior. In sintesi: Redlock dipende dalla misura del tempo su nodi
+    diversi, quindi un clock drift o una pausa lunga possono violare la mutua
+    esclusione; per l'*efficienza* (evitare lavoro duplicato) va benissimo, per la
+    *correttezza* (due processi non devono mai scrivere insieme) non basta senza
+    fencing.
+
+    La conclusione pratica è spesso la più utile da dire: quando puoi, evita il lock.
+    Un vincolo `UNIQUE` che fa arbitrare il database, un `FOR UPDATE SKIP LOCKED` che
+    distribuisce il lavoro senza mutua esclusione esplicita, un'operazione resa
+    idempotente: tutte queste risolvono lo stesso problema senza dipendere dalla
+    sincronia degli orologi. Quando il lock serve sul serio - una vera elezione di leader
+    - conviene un sistema costruito per questo (etcd, ZooKeeper, Consul), che usa
+    lease e consenso invece di un TTL su una chiave.
   key_points:
     - "Implementazione base su Redis: SET chiave valore_univoco NX PX ttl"
     - "Il TTL è obbligatorio: senza, un client che muore lascia il lock per sempre"
     - "Il rilascio deve verificare il proprietario (script Lua con GET+DEL atomico), o rischi di rilasciare il lock di un altro"
     - "Il TTL crea il problema opposto: se il lavoro dura più del TTL, due processi lavorano insieme credendosi soli"
+    - "Una pausa GC o un'istanza sospesa bastano: non è un caso teorico"
     - "Fencing token: un contatore monotono passato alla risorsa, che rifiuta token vecchi. È l'unica difesa solida"
-    - "Redlock è discusso: Martin Kleppmann ne ha criticato le garanzie sotto pause e clock drift"
+    - "Il fencing richiede la collaborazione della risorsa protetta: senza, non è implementabile"
+    - "Redlock è discusso: per l'efficienza va bene, per la correttezza serve comunque il fencing"
+    - "Per un'elezione di leader vera, usa etcd/ZooKeeper/Consul con lease e consenso, non una chiave con TTL"
     - "Spesso l'alternativa è migliore: rendere l'operazione idempotente, o usare un vincolo unique sul database"
+  examples:
+    - title: Lock su Redis, fatto correttamente
+      language: python
+      code: |-
+        import uuid
+
+        RILASCIO = """
+        if redis.call("GET", KEYS[1]) == ARGV[1] then
+          return redis.call("DEL", KEYS[1])
+        else
+          return 0
+        end
+        """   # atomico: senza Lua, fra GET e DEL il lock può passare a un altro
+
+        async def con_lock(redis, nome: str, ttl_ms: int, lavoro):
+            token = uuid.uuid4().hex
+            if not await redis.set(f"lock:{nome}", token, nx=True, px=ttl_ms):
+                return None                        # qualcun altro sta lavorando
+            try:
+                return await lavoro()
+            finally:
+                await redis.eval(RILASCIO, 1, f"lock:{nome}", token)
+      note: >-
+        Resta il buco strutturale: se `lavoro()` dura più di ttl_ms, il lock scade e un
+        altro processo entra mentre questo sta ancora lavorando.
+    - title: Il fencing token, l'unica difesa vera
+      language: python
+      code: |-
+        # Chi concede il lock restituisce anche un numero crescente.
+        async def acquisisci(redis, nome: str, ttl_ms: int) -> tuple[str, int] | None:
+            token = uuid.uuid4().hex
+            if not await redis.set(f"lock:{nome}", token, nx=True, px=ttl_ms):
+                return None
+            fencing = await redis.incr(f"fence:{nome}")    # monotono, mai riusato
+            return token, fencing
+
+        # La RISORSA protetta rifiuta le scritture con un token vecchio.
+        UPDATE risorse
+           SET dati = :dati, fencing = :fencing
+         WHERE id = :id AND fencing < :fencing;    -- 0 righe = titolare scaduto, rifiutato
+      note: >-
+        Il titolare che si risveglia dopo una pausa lunga presenta un fencing basso e
+        viene respinto: la mutua esclusione diventa una proprietà della risorsa, non del
+        lock.
+  trade_offs:
+    - option: Nessun lock, operazione idempotente
+      pros: Nessuna dipendenza da orologi o TTL, nessun fallimento nuovo
+      cons: Richiede di poter riprogettare l'operazione
+      when: Quasi sempre la scelta migliore se è possibile
+    - option: Vincolo unique sul database
+      pros: Arbitro affidabile e transazionale, zero componenti in più
+      cons: Solo per "una sola esecuzione per chiave", non per sezioni critiche generiche
+      when: Deduplicazione, esecuzione singola per entità
+    - option: Lock su Redis con TTL
+      pros: Semplice, veloce, sufficiente per evitare lavoro duplicato
+      cons: "Nessuna garanzia forte: TTL, pause, clock drift"
+      when: Efficienza (non eseguire due volte lo stesso job), non correttezza
+    - option: Lease su etcd/ZooKeeper
+      pros: Consenso vero, lease rinnovabili, notifiche di perdita del lock
+      cons: Un sistema in più da operare, latenza maggiore
+      when: Elezione di leader, coordinamento che deve essere corretto
+  numbers:
+    - "TTL del lock: più lungo del lavoro peggiore previsto, ma il più corto possibile. Spesso 10-60 secondi con rinnovo periodico"
+    - "Una pausa GC di una JVM sotto carico può superare il secondo: abbastanza per far scadere un lock"
+    - "Clock drift tipico fra macchine sincronizzate via NTP: millisecondi, ma nessuna garanzia in caso di guasto"
   interview_answer: >-
     Li uso con parsimonia, perché sono più fragili di quanto sembrino. Un lock su Redis con
     SET NX PX e rilascio via script Lua che controlla il proprietario copre il caso normale,
     ma resta il problema che il TTL deve essere più lungo del lavoro, e se il processo va in
-    pausa GC oltre il TTL due esecuzioni si sovrappongono credendosi entrambe titolari del
-    lock. L'unica difesa reale è il fencing token, cioè passare alla risorsa un contatore
-    crescente che le permette di rifiutare le scritture provenienti da un titolare scaduto.
-    Per questo, quando posso, preferisco evitare il lock del tutto: un vincolo unique sul
-    database o un'operazione idempotente risolvono lo stesso problema senza queste
-    complicazioni.
+    pausa GC oltre il TTL due esecuzioni si sovrappongono credendosi entrambe titolari.
+    L'unica difesa reale è il fencing token, cioè passare alla risorsa un contatore
+    crescente che le permette di rifiutare le scritture provenienti da un titolare scaduto,
+    e richiede che la risorsa collabori. Per questo, quando posso, preferisco evitare il
+    lock del tutto: un vincolo unique sul database o un'operazione idempotente risolvono lo
+    stesso problema senza dipendere dagli orologi. Se mi serve davvero un'elezione di
+    leader, uso etcd o ZooKeeper, che sono costruiti per quello.
+  senior_signals:
+    - "Distingue lock per efficienza da lock per correttezza"
+    - "Conosce il fencing token e il suo prerequisito (la risorsa deve collaborare)"
+    - "Cita la discussione su Redlock senza trattarla come una polemica astratta"
+    - "Propone di eliminare il lock come prima alternativa"
   pitfalls:
     - "Lock senza TTL: deadlock permanente al crash del titolare"
     - "DEL senza verifica del proprietario: rilasci il lock di qualcun altro"
     - "Assumere mutua esclusione perfetta senza fencing token"
-  follow_up_questions:
-    - "Perché serve un fencing token se il lock ha già un TTL?"
-    - "Che alternativa proporresti a un lock distribuito?"
+    - "TTL più corto del lavoro, senza rinnovo periodico"
+    - "Usare un lock distribuito per proteggere un invariante che un vincolo del database garantirebbe meglio"
+  follow_ups:
+    - question: Perché serve un fencing token se il lock ha già un TTL?
+      answer: >-
+        Perché il TTL protegge dal titolare morto, non dal titolare *sospeso*. Un
+        processo in pausa GC o su una VM congelata non sa che il suo lock è scaduto:
+        quando riparte, continua a lavorare convinto di essere titolare, mentre un altro
+        lo è già diventato. Il fencing token risolve spostando il controllo sulla
+        risorsa: essa ricorda l'ultimo numero visto e rifiuta i numeri più bassi, quindi
+        il titolare scaduto non può fare danni.
+    - question: Che alternativa proporresti a un lock distribuito?
+      answer: >-
+        Nell'ordine: rendere l'operazione idempotente, così eseguirla due volte non è un
+        problema; usare un vincolo UNIQUE nel database, che fa arbitrare il database e
+        non l'orologio; usare FOR UPDATE SKIP LOCKED se il problema è distribuire lavoro
+        fra worker; partizionare per chiave, in modo che ogni chiave sia trattata sempre
+        dallo stesso consumatore e la mutua esclusione diventi un fatto di routing. Il
+        lock distribuito lo tengo per quando nessuna di queste è praticabile.
+    - question: Come gestisci un job che deve girare una sola volta fra tre repliche?
+      answer: >-
+        Se il job è idempotente, un lock Redis con TTL è sufficiente: al peggio parte due
+        volte e non fa danni. Se non lo è, o uso uno scheduler esterno che garantisce
+        l'esecuzione singola, oppure sposto il vincolo nel database - una riga "esecuzione
+        del giorno X" con chiave unica, inserita nella stessa transazione del lavoro.
+        Quest'ultima è la soluzione che preferisco, perché non dipende da orologi.
+  related: [rel-33-race-conditions, db-20-locking, core-05-stateless-vs-stateful, rel-31-delivery-semantics]
+  resources:
+    - title: "Kleppmann - How to do distributed locking"
+      url: "https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html"
+      kind: article
+    - title: "Redis - Distributed Locks (Redlock)"
+      url: "https://redis.io/docs/latest/develop/use/patterns/distributed-locks/"
+      kind: doc
+    - title: "etcd - Distributed locks e lease"
+      url: "https://etcd.io/docs/latest/dev-guide/interacting_v3/#lease"
+      kind: doc
 
 - id: rel-35-event-driven
   title: Architettura event-driven
@@ -153,29 +735,183 @@
     In un'architettura a eventi i servizi pubblicano fatti accaduti e chi è interessato
     reagisce. Il produttore non sa chi lo ascolta: questo è il disaccoppiamento che si
     cerca, ed è anche ciò che rende difficile capire cosa succede davvero.
+  deep_dive: |-
+    La distinzione da cui parte tutto è fra evento e comando. Un *evento* è un fatto
+    accaduto, si scrive al passato (`OrdineCreato`) e non presume nessun destinatario:
+    chi vuole reagisce. Un *comando* è una richiesta, si scrive all'imperativo
+    (`CreaOrdine`) e ha un destinatario preciso che deve eseguirlo. Mandare comandi
+    travestiti da eventi (`InviaEmailDiConferma` pubblicato su un topic) ricrea
+    l'accoppiamento che si voleva togliere, solo in modo meno visibile.
+
+    Gli eventi si progettano lungo un asse: quanto stato portano con sé. Un *event
+    notification* è magro - "ordine 42 creato" - e chi reagisce deve richiamare il
+    produttore per i dettagli: poco accoppiamento sul formato, molto traffico e una
+    dipendenza sincrona che torna dalla finestra. Un *event-carried state transfer* è
+    grasso e autosufficiente: il consumatore non richiama nessuno e può tenersi una
+    copia locale, al prezzo di eventi più grandi e di un contratto più ampio da
+    mantenere. Non c'è una scelta giusta in assoluto: la domanda è se i consumatori
+    debbano poter funzionare quando il produttore è giù.
+
+    Il problema tecnico numero uno di queste architetture è la *doppia scrittura*:
+    salvare sul database e pubblicare sul broker sono due operazioni distinte e un
+    crash in mezzo lascia il sistema incoerente - un ordine senza il suo evento, o
+    peggio un evento per un ordine che non è stato salvato. La soluzione standard è
+    l'*outbox*: nella stessa transazione si scrive il dato e una riga nella tabella
+    degli eventi da pubblicare; un processo separato (un relay, o direttamente il CDC
+    del database con strumenti come Debezium) legge la tabella e pubblica. La consegna
+    resta at-least-once, quindi i consumatori restano idempotenti, ma l'incoerenza fra
+    dato ed evento sparisce.
+
+    Gli eventi sono un contratto pubblico, spesso più pubblico di un'API REST, perché
+    chi li consuma può essere chiunque e i messaggi restano nel log. Vanno quindi
+    versionati con le stesse regole: aggiungere campi opzionali è sicuro, rimuoverli o
+    cambiarne il significato no. Uno schema registry (Avro, Protobuf, JSON Schema) rende
+    la compatibilità verificabile automaticamente invece che sperata.
+
+    Infine, event-driven ed *event sourcing* non sono sinonimi, anche se vengono
+    confusi in continuazione. Event-driven è uno stile di integrazione: i servizi
+    comunicano con eventi. Event sourcing è una scelta di persistenza: lo stato *è* la
+    riduzione del log degli eventi, e non si salva lo stato corrente. Il secondo è
+    potente - audit completo, viaggio nel tempo, proiezioni multiple - ma costoso:
+    versionamento degli eventi passati, snapshot per non rileggere tutto, e un modello
+    mentale che tutto il team deve possedere.
   key_points:
-    - "Evento = fatto al passato (OrderPlaced), comando = richiesta all'imperativo (PlaceOrder). Non confonderli"
+    - "Evento = fatto al passato (OrdineCreato), comando = richiesta all'imperativo (CreaOrdine). Non confonderli"
     - "Event notification (evento magro, il consumer richiama) vs event-carried state transfer (evento grasso, autosufficiente)"
-    - "Event sourcing: lo stato è la riduzione del log degli eventi. Potente ma impegnativo, non è sinonimo di event-driven"
+    - "L'evento grasso permette al consumatore di funzionare anche se il produttore è giù: è il criterio di scelta"
     - "Outbox pattern: scrivi evento e dato nella stessa transazione DB, un relay li pubblica. Risolve la doppia scrittura"
-    - "Gli eventi sono un contratto pubblico: vanno versionati e resi retrocompatibili"
+    - "Il relay può essere un processo che legge la tabella o il CDC del database (Debezium)"
+    - "Gli eventi sono un contratto pubblico: vanno versionati e resi retrocompatibili, meglio con uno schema registry"
+    - "Event sourcing: lo stato è la riduzione del log degli eventi. Potente ma impegnativo, non è sinonimo di event-driven"
     - "Debug: senza correlation id e tracing distribuito ricostruire un flusso è quasi impossibile"
+    - "La consegna resta at-least-once: i consumatori devono essere idempotenti comunque"
+  examples:
+    - title: Outbox, la tabella e il relay
+      language: sql
+      code: |-
+        CREATE TABLE outbox (
+          id            bigserial PRIMARY KEY,
+          aggregato     text NOT NULL,        -- "ordine"
+          aggregato_id  text NOT NULL,        -- "42"     (diventa la chiave di partizione)
+          tipo          text NOT NULL,        -- "OrdineCreato"
+          versione      int  NOT NULL DEFAULT 1,
+          payload       jsonb NOT NULL,
+          creato_il     timestamptz NOT NULL DEFAULT now(),
+          pubblicato_il timestamptz
+        );
+        CREATE INDEX ON outbox (id) WHERE pubblicato_il IS NULL;  -- indice parziale: piccolo
+
+        -- Nella stessa transazione del dato: o ci sono entrambi, o nessuno dei due.
+        BEGIN;
+          INSERT INTO ordini (id, utente_id, totale_cents) VALUES ('42', :u, :t);
+          INSERT INTO outbox (aggregato, aggregato_id, tipo, payload)
+               VALUES ('ordine', '42', 'OrdineCreato', :payload);
+        COMMIT;
+      note: >-
+        L'indice parziale sulle righe non ancora pubblicate resta minuscolo anche con
+        milioni di eventi archiviati: il relay trova subito il lavoro da fare.
+    - title: Evento versionato e retrocompatibile
+      language: json
+      code: |-
+        {
+          "tipo": "OrdineCreato",
+          "versione": 2,
+          "id_evento": "01JD3Z8K7P4V2Q",      // ULID: unico e ordinabile, chiave di dedup
+          "occorso_il": "2026-02-11T09:14:03Z",
+          "correlation_id": "req_8f2a1c",     // lo stesso di tutta la catena
+          "aggregato": { "tipo": "ordine", "id": "42" },
+          "dati": {
+            "utente_id": "u_7",
+            "totale_cents": 4990,
+            "valuta": "EUR",
+            "canale": "web"                   // campo AGGIUNTO in v2: opzionale, non rompe
+          }
+        }
+      note: >-
+        Tre campi fanno il grosso del lavoro operativo: `id_evento` per deduplicare,
+        `correlation_id` per il tracing, `versione` per l'evoluzione dello schema.
+  trade_offs:
+    - option: Evento magro (notification)
+      pros: Contratto minimo, eventi piccoli, nessuna duplicazione di dati
+      cons: "Il consumatore deve richiamare: torna la dipendenza sincrona"
+      when: Pochi consumatori, dati che cambiano spesso
+    - option: Evento grasso (state transfer)
+      pros: Consumatori autonomi anche se il produttore è giù, nessuna chiamata di ritorno
+      cons: Contratto più ampio, dati duplicati, versioning più delicato
+      when: Molti consumatori, resilienza importante
+    - option: Outbox + relay
+      pros: Nessuna doppia scrittura, funziona con qualunque broker
+      cons: Una tabella e un processo in più, ordine da curare
+      when: Sempre, quando si pubblicano eventi da un servizio con database
+    - option: Event sourcing
+      pros: Audit completo, proiezioni multiple, possibilità di ricostruire il passato
+      cons: Costo cognitivo alto, versioning degli eventi storici, snapshot necessari
+      when: Domini dove la storia è il valore (contabilità, compliance)
+  numbers:
+    - "Ritenzione dell'outbox: si archiviano le righe pubblicate dopo qualche giorno, per tenere la tabella piccola"
+    - "Latenza tipica dell'outbox con relay a polling: 100 ms - 1 s; con CDC: decine di millisecondi"
+    - "Uno schema registry con compatibilità BACKWARD impedisce di pubblicare una versione che romperebbe i consumatori esistenti"
   interview_answer: >-
     Il vantaggio è che posso aggiungere un consumatore nuovo senza toccare il produttore:
     se domani serve mandare gli ordini a un sistema di analytics, mi iscrivo all'evento e
     basta. Il problema che risolvo per primo è la doppia scrittura: salvare sul database e
     pubblicare sulla coda non è atomico, quindi un crash nel mezzo lascia il sistema
     incoerente. Uso l'outbox pattern, scrivendo l'evento in una tabella nella stessa
-    transazione del dato e lasciando che un relay lo pubblichi. Il costo principale è
-    l'osservabilità: senza correlation id propagato e tracing distribuito, capire perché
-    un ordine non è arrivato in fondo diventa archeologia.
+    transazione del dato e lasciando che un relay o il CDC lo pubblichi. Faccio attenzione
+    a pubblicare eventi e non comandi travestiti, perché altrimenti ricreo l'accoppiamento
+    che volevo togliere, e tratto lo schema degli eventi come un contratto pubblico da
+    versionare. Il costo principale è l'osservabilità: senza correlation id propagato e
+    tracing distribuito, capire perché un ordine non è arrivato in fondo diventa
+    archeologia.
+  senior_signals:
+    - "Distingue eventi e comandi, e riconosce i comandi travestiti"
+    - "Porta l'outbox come risposta alla doppia scrittura, non come dettaglio implementativo"
+    - "Sceglie evento magro o grasso in base all'autonomia dei consumatori"
+    - "Separa event-driven da event sourcing e conosce il costo del secondo"
   pitfalls:
     - "Doppia scrittura DB + broker senza outbox"
     - "Eventi che sono comandi travestiti, ricreando accoppiamento"
     - "Nessuna strategia di versioning degli eventi"
-  follow_up_questions:
-    - "Cos'è l'outbox pattern e quale problema risolve?"
-    - "Differenza tra event sourcing ed event-driven?"
+    - "Consumatori non idempotenti, dando per scontata una consegna singola"
+    - "Nessun id evento stabile: impossibile deduplicare a valle"
+  follow_ups:
+    - question: Cos'è l'outbox pattern e quale problema risolve?
+      answer: >-
+        Risolve la doppia scrittura: scrivere nel database e pubblicare sul broker non
+        possono stare nella stessa transazione, quindi un crash fra le due lascia il
+        sistema incoerente. Con l'outbox l'evento viene scritto in una tabella nella
+        stessa transazione del dato, quindi l'atomicità è garantita dal database; un
+        relay separato - o il CDC, con Debezium - legge quella tabella e pubblica,
+        marcando le righe inviate. La pubblicazione resta at-least-once, ma non può più
+        esistere un dato senza il suo evento.
+    - question: Differenza tra event sourcing ed event-driven?
+      answer: >-
+        Event-driven è come i servizi comunicano: pubblicano fatti e reagiscono a quelli
+        altrui. Event sourcing è come un servizio *persiste* il proprio stato: invece di
+        salvare lo stato corrente salva la sequenza di eventi che lo hanno prodotto, e lo
+        stato si ricostruisce riducendo il log. Si può essere event-driven senza event
+        sourcing, ed è il caso più comune; l'inverso è raro. Il secondo costa: snapshot
+        per non rileggere tutto, versionamento degli eventi storici, e un modello mentale
+        che tutti devono avere.
+    - question: Come versioni un evento quando devi cambiare un campo?
+      answer: >-
+        Non lo cambio: aggiungo. Un campo nuovo opzionale è retrocompatibile, e i vecchi
+        consumatori lo ignorano. Se devo cambiare semantica pubblico un nuovo tipo di
+        evento o incremento la versione e, per un periodo, pubblico entrambe le forme,
+        finché i consumatori non hanno migrato. Con uno schema registry configurato in
+        compatibilità backward il controllo è automatico: una modifica incompatibile
+        viene rifiutata prima del rilascio.
+  related: [dist-30-message-queues, rel-36-saga, rel-31-delivery-semantics, pat-11-cqrs]
+  resources:
+    - title: "Martin Fowler - What do you mean by Event-Driven?"
+      url: "https://martinfowler.com/articles/201701-event-driven.html"
+      kind: article
+    - title: "microservices.io - Transactional outbox"
+      url: "https://microservices.io/patterns/data/transactional-outbox.html"
+      kind: article
+    - title: "Debezium - Change data capture"
+      url: "https://debezium.io/documentation/reference/stable/architecture.html"
+      kind: doc
 
 - id: rel-36-saga
   title: Saga pattern (transazioni distribuite)
@@ -185,33 +921,190 @@
   tags: [distribuito, architettura, transazioni]
   estimated_minutes: 35
   summary: >-
-    Una saga sostituisce la transazione distribuita con una sequenza di transazioni locali,
-    ciascuna con la propria operazione di compensazione da eseguire se un passo successivo
-    fallisce. Non c'è rollback atomico: c'è un annullamento esplicito.
+    Una saga sostituisce la transazione distribuita con una sequenza di transazioni
+    locali, ciascuna con la propria operazione di compensazione da eseguire se un passo
+    successivo fallisce. Non c'è rollback atomico: c'è un annullamento esplicito.
+  deep_dive: |-
+    Quando un'operazione attraversa più servizi con database separati, la transazione
+    ACID non è disponibile. L'alternativa tradizionale, il two-phase commit, esiste ma è
+    raramente praticabile fra servizi: tiene i lock per tutta la durata del protocollo,
+    richiede un coordinatore affidabile e blocca se il coordinatore cade nel momento
+    sbagliato. La saga accetta un compromesso diverso: niente atomicità, ma nemmeno
+    blocchi.
+
+    Il meccanismo è semplice da enunciare: ogni passo è una transazione locale che
+    committa subito, e per ogni passo esiste una *compensazione* che ne annulla
+    l'effetto in termini di business. Prenota lo stock → rilascia lo stock. Addebita →
+    rimborsa. Spedisci → richiama la spedizione. Se il passo N fallisce, si eseguono le
+    compensazioni dei passi da N-1 a 1, in ordine inverso.
+
+    Il punto che distingue chi ha capito è che le compensazioni sono *semantiche*, non
+    tecniche. Non si torna indietro nel tempo: si esegue un'azione di dominio che
+    rimedia. Una mail inviata non si annulla, si manda una mail di correzione. Un
+    addebito eseguito non sparisce dall'estratto conto, appare un rimborso. Ne segue
+    anche che alcune azioni vanno *ritardate* fino a quando la saga è quasi certa di
+    riuscire: si spedisce dopo aver incassato, non prima.
+
+    L'altra conseguenza è che durante la saga il sistema è in uno stato intermedio
+    *visibile*: l'isolamento non c'è. Un altro utente può vedere lo stock prenotato ma
+    non ancora venduto. Questo va modellato esplicitamente nel dominio - "in attesa di
+    pagamento", "prenotato" - invece di essere nascosto; il termine tecnico per questa
+    tecnica è *semantic lock*. Fingere che gli stati intermedi non esistano è la causa
+    più comune di bug in queste architetture.
+
+    Sulla struttura ci sono due stili. Nella *coreografia* ogni servizio reagisce agli
+    eventi altrui: nessun coordinatore, massimo disaccoppiamento, ma il flusso
+    complessivo non è scritto da nessuna parte e diventa impossibile rispondere alla
+    domanda "a che punto è l'ordine 42". Nell'*orchestrazione* un componente dirige i
+    passi e conserva lo stato della saga: il flusso è esplicito, testabile e
+    osservabile, al prezzo di un componente in più. La regola pratica che uso: fino a
+    tre passi, coreografia; oltre, orchestrazione. Motori come Temporal o AWS Step
+    Functions nascono proprio per non dover scrivere a mano la macchina a stati, i
+    timer e i retry.
+
+    Ultimo requisito, spesso dimenticato: *anche le compensazioni devono essere
+    idempotenti e ritentabili*, perché il fallimento può colpire anche loro. Una saga
+    che non sa cosa fare quando la compensazione fallisce lascia il sistema in uno stato
+    inconsistente e richiede intervento umano: per questo serve una coda di
+    riconciliazione e un allarme.
   key_points:
     - "Coreografia: ogni servizio reagisce agli eventi altrui. Niente coordinatore, ma il flusso complessivo non è scritto da nessuna parte"
-    - "Orchestrazione: un orchestratore dirige i passi. Flusso esplicito e testabile, ma il coordinatore è un componente in più"
+    - "Orchestrazione: un orchestratore dirige i passi e conserva lo stato. Flusso esplicito e testabile, ma il coordinatore è un componente in più"
     - "Ogni passo ha una compensazione: addebita -> rimborsa, prenota -> rilascia"
     - "Le compensazioni sono semantiche, non tecniche: una mail inviata non si annulla, si manda una mail di scuse"
-    - "Durante la saga il sistema è in uno stato intermedio visibile: niente isolamento"
+    - "Le azioni irreversibili vanno ritardate: si spedisce dopo aver incassato, non prima"
+    - "Durante la saga il sistema è in uno stato intermedio visibile: niente isolamento. Va modellato (semantic lock)"
+    - "Anche le compensazioni devono essere idempotenti e ritentabili: possono fallire a loro volta"
+    - "Serve una coda di riconciliazione e un allarme per le saghe bloccate: qualcuna richiederà intervento umano"
     - "2PC dà atomicità ma blocca le risorse e richiede un coordinatore affidabile: raramente praticabile fra servizi"
+    - "Regola pratica: fino a tre passi coreografia, oltre orchestrazione"
+  examples:
+    - title: Una saga di checkout, con le compensazioni
+      language: python
+      code: |-
+        PASSI = [
+            # (azione,            compensazione)
+            (riserva_stock,       rilascia_stock),
+            (addebita_pagamento,  rimborsa_pagamento),
+            (crea_spedizione,     annulla_spedizione),   # irreversibile: sta per ultimo
+        ]
+
+        async def esegui_saga(ctx: Contesto) -> None:
+            completati = []
+            try:
+                for azione, _ in PASSI:
+                    await azione(ctx)                    # transazione locale, committa subito
+                    completati.append(azione)
+                    await salva_stato(ctx, azione.__name__)   # ripartenza dopo un crash
+            except Exception:
+                # compensazione in ordine inverso, saltando ciò che non è stato fatto
+                for azione, compensazione in reversed(PASSI):
+                    if azione in completati:
+                        await con_retry(compensazione, ctx)   # anche queste possono fallire
+                await segnala_saga_fallita(ctx)
+                raise
+      note: >-
+        Due dettagli non decorativi: lo stato persistito a ogni passo (altrimenti un
+        crash lascia la saga in un limbo) e il retry sulle compensazioni.
+    - title: Lo stato intermedio modellato, non nascosto
+      language: text
+      code: |-
+        MALE: l'ordine è "creato" o "completato", e nel mezzo il sistema mente.
+
+        BENE: la macchina a stati è parte del dominio e visibile all'utente.
+          creato
+            -> stock_riservato      (semantic lock: quei pezzi non sono disponibili)
+            -> pagamento_in_corso
+            -> pagato
+            -> in_spedizione
+            -> completato
+          e i rami di uscita:
+            -> annullato_stock_insufficiente
+            -> annullato_pagamento_rifiutato   (compensazione: rilascio stock)
+            -> rimborsato                       (compensazione: rimborso + rilascio)
+      note: >-
+        Se lo stato intermedio non ha un nome nel dominio, apparirà comunque - come bug,
+        come richiesta di assistenza o come riga incoerente nel database.
+  trade_offs:
+    - option: Coreografia
+      pros: Nessun coordinatore, servizi realmente disaccoppiati, semplice con pochi passi
+      cons: Il flusso non esiste in nessun punto del codice, debug e modifica difficili
+      when: Saghe di due o tre passi, poco variabili
+    - option: Orchestrazione
+      pros: Flusso esplicito, stato osservabile, retry e timeout in un solo posto
+      cons: Un servizio in più, rischio di concentrare troppa logica di dominio
+      when: Flussi con molti passi, rami condizionali, requisiti di visibilità
+    - option: Motore di workflow (Temporal, Step Functions)
+      pros: Stato durevole, retry, timer e compensazioni già risolti; codice lineare
+      cons: Dipendenza da una piattaforma, curva di apprendimento
+      when: Processi lunghi e critici, dove riscrivere tutto a mano non ha senso
+    - option: 2PC
+      pros: Atomicità vera fra risorse che lo supportano
+      cons: Lock tenuti, blocco se il coordinatore cade, scarso supporto fra servizi
+      when: Fra database o broker che lo supportano nativamente, non fra microservizi
+  numbers:
+    - "Ogni passo aggiunge un ramo di compensazione: una saga a 5 passi ha 5 compensazioni e altrettanti modi di fallire a metà"
+    - "Timeout per passo: pochi secondi per le azioni sincrone, ore o giorni per quelle che attendono un essere umano"
+    - "Una percentuale di saghe finirà comunque bloccata: serve una coda di riconciliazione, non solo un allarme"
   interview_answer: >-
     Quando un'operazione attraversa più servizi con database separati non posso usare una
     transazione, quindi la spezzo in transazioni locali e per ognuna definisco la
     compensazione. Per un ordine: riservo lo stock, addebito, spedisco; se l'addebito
-    fallisce eseguo la compensazione del passo precedente rilasciando lo stock. Scelgo
+    fallisce eseguo la compensazione del passo precedente rilasciando lo stock, e metto
+    l'azione irreversibile - la spedizione - il più tardi possibile. Scelgo
     l'orchestrazione quando il flusso ha più di tre o quattro passi, perché con la
     coreografia il processo complessivo non è scritto da nessuna parte e diventa
-    impossibile ragionarci. La cosa che dico sempre è che le compensazioni sono semantiche:
-    non sto tornando indietro nel tempo, sto eseguendo un'azione di business che rimedia, e
-    nel frattempo lo stato intermedio è visibile agli utenti.
+    impossibile ragionarci o rispondere alla domanda "a che punto è l'ordine 42". La cosa
+    che dico sempre è che le compensazioni sono semantiche: non sto tornando indietro nel
+    tempo, sto eseguendo un'azione di business che rimedia, e nel frattempo lo stato
+    intermedio è visibile, quindi lo modello esplicitamente nel dominio.
+  senior_signals:
+    - "Dice che le compensazioni sono semantiche e porta l'esempio dell'azione irreversibile"
+    - "Modella gli stati intermedi nel dominio invece di nasconderli"
+    - "Ricorda che anche le compensazioni falliscono e prevede riconciliazione"
+    - "Sceglie coreografia o orchestrazione con un criterio, non per gusto"
   pitfalls:
     - "Progettare la saga senza definire le compensazioni per ogni passo"
     - "Compensazioni non idempotenti"
     - "Usare la coreografia per flussi complessi e perdere la visione d'insieme"
-  follow_up_questions:
-    - "Come compensi un passo che ha già inviato una email al cliente?"
-    - "Coreografia o orchestrazione per un checkout a sei passi?"
+    - "Eseguire presto l'azione irreversibile e scoprire che non si può compensare"
+    - "Nessuno stato persistito fra i passi: un crash lascia la saga in un limbo"
+  follow_ups:
+    - question: Come compensi un passo che ha già inviato una email al cliente?
+      answer: >-
+        Non lo compenso tecnicamente, perché la mail è uscita: eseguo un'azione di
+        dominio che rimedia, cioè una seconda comunicazione che annulla o corregge la
+        prima. La lezione progettuale però è a monte: le azioni irreversibili vanno
+        spostate il più tardi possibile nella saga, oppure rese revocabili con un
+        ritardo - per esempio mettendo la mail in coda con qualche minuto di attesa, in
+        modo che un fallimento successivo possa ancora annullarla prima dell'invio.
+    - question: Coreografia o orchestrazione per un checkout a sei passi?
+      answer: >-
+        Orchestrazione. Con sei passi, rami condizionali e compensazioni, la coreografia
+        disperde il flusso in sei servizi e nessuno può dire a che punto sia un ordine
+        senza ricostruirlo dai log. Un orchestratore tiene lo stato, applica timeout e
+        retry in un punto solo e rende il processo testabile. Userei un motore di
+        workflow se l'organizzazione già ne ha uno, perché stato durevole, timer e
+        ripartenze sono esattamente ciò che è noioso e rischioso riscrivere.
+    - question: Cosa fai quando una saga resta bloccata a metà?
+      answer: >-
+        La tratto come un caso previsto, non come un incidente inatteso: ogni saga ha uno
+        stato persistito e un timeout, e allo scadere finisce in una coda di
+        riconciliazione con un allarme. Da lì, o un job automatico riprende il passo
+        (se è idempotente) o interviene una persona con gli strumenti per forzare
+        l'avanzamento o la compensazione. La cosa da non fare è lasciare che resti
+        invisibile: le saghe bloccate non si accorgono di esserlo.
+  related: [rel-35-event-driven, dist-28-microservices-monolith, db-13-acid, core-10-idempotency]
+  resources:
+    - title: "microservices.io - Saga pattern"
+      url: "https://microservices.io/patterns/data/saga.html"
+      kind: article
+    - title: "Garcia-Molina & Salem - Sagas (paper originale, 1987)"
+      url: "https://www.cs.cornell.edu/andru/cs711/2002fa/reading/sagas.pdf"
+      kind: article
+    - title: "Temporal - Workflow durevoli"
+      url: "https://docs.temporal.io/workflows"
+      kind: doc
 
 - id: rel-37-graceful-degradation
   title: Degrado graduale (graceful degradation)
@@ -224,27 +1117,174 @@
     Degradare con grazia significa continuare a servire la funzione principale anche
     quando una dipendenza secondaria è rotta. Richiede di aver deciso in anticipo cosa è
     essenziale e cosa è accessorio.
+  deep_dive: |-
+    Il lavoro comincia prima del codice: classificare le dipendenze. Una dipendenza è
+    *critica* se senza di essa la funzione non ha senso - il database degli ordini per
+    un checkout - e *non critica* se la funzione resta utile anche senza, magari in
+    forma ridotta: raccomandazioni, recensioni, punteggi fedeltà, anteprime. La regola
+    che ne discende è netta: una dipendenza non critica che fa fallire la richiesta è un
+    errore di progettazione, non un guasto.
+
+    Le tecniche concrete sono quattro. *Fallback statico*: se il motore di
+    raccomandazioni non risponde, si mostrano i best seller calcolati una volta al
+    giorno. *Cache stantia servita consapevolmente*: si tiene una copia dell'ultima
+    risposta buona e la si usa quando l'origine è giù, dichiarandolo (è l'equivalente
+    applicativo di `stale-if-error`). *Risposta parziale*: si restituisce ciò che si ha,
+    con un campo che indica cosa manca, invece di fallire tutto. *Feature flag*: si
+    spegne una funzionalità costosa durante il picco, senza rilasciare codice.
+
+    Perché questo funzioni servono timeout molto più aggressivi sulle dipendenze non
+    critiche che su quelle critiche: se il servizio di raccomandazioni può prendersi tre
+    secondi, sta di fatto decidendo la latenza della tua pagina. Duecento millisecondi e
+    poi fallback è una scelta migliore, e va accompagnata da un bulkhead, cioè un pool di
+    concorrenza separato, perché altrimenti le chiamate lente verso il servizio
+    accessorio consumano la capacità che serve a quello critico.
+
+    Quando la capacità complessiva non basta, il degrado diventa una scelta su *chi*
+    servire: è il *load shedding*. Rifiutare subito una quota di traffico con un 503
+    onesto e un `Retry-After` permette di servire bene il resto, mentre degradare per
+    tutti porta a un sistema in cui nessuno riesce a completare nulla e tutti ritentano.
+    La scelta di cosa scartare non deve essere casuale: prima il traffico di priorità
+    bassa (bot, prefetch, batch), poi le funzionalità accessorie, infine, solo se
+    necessario, una percentuale del traffico utente - preferibilmente preservando le
+    sessioni già iniziate, perché un utente a metà checkout è più prezioso di uno che
+    apre la home.
+
+    Il degrado va reso *visibile*. Mostrare dati incompleti come se fossero completi
+    è peggio di un errore: l'utente prende decisioni su informazioni sbagliate e il team
+    non si accorge del problema. Un banner, un campo `parziale: true` nella risposta, una
+    metrica dedicata: servono tutti e tre.
+
+    Infine: il codice di fallback è codice che in condizioni normali non gira mai, quindi
+    è codice non testato. Va esercitato deliberatamente - fault injection, game day,
+    esperimenti di chaos engineering - altrimenti si scoprirà che era rotto esattamente
+    nel momento in cui serviva.
   key_points:
     - "Classifica le dipendenze: critiche (senza, il servizio non ha senso) e non critiche (accessorie)"
     - "Una dipendenza non critica che fa fallire la richiesta è un errore di design"
+    - "Timeout molto più aggressivi sulle dipendenze non critiche: altrimenti decidono loro la tua latenza"
+    - "Bulkhead: pool separati, così le chiamate accessorie non consumano la capacità di quelle critiche"
     - "Tecniche: valori di fallback, cache stantia servita consapevolmente, feature flag per spegnere funzioni, risposte parziali"
     - "Load shedding: rifiutare una quota di traffico per salvare il resto, invece di degradare per tutti"
-    - "Il degrado va reso visibile: un banner è meglio di dati sbagliati mostrati come buoni"
+    - "Cosa scartare va deciso per priorità: prima bot e batch, poi funzioni accessorie, infine traffico utente, preservando le sessioni in corso"
+    - "Il degrado va reso visibile: un banner o un campo 'parziale' è meglio di dati incompleti mostrati come buoni"
     - "Va testato: senza game day o fault injection, il percorso di fallback è codice mai eseguito"
+  examples:
+    - title: Dipendenza accessoria, trattata come tale
+      language: python
+      code: |-
+        # Pool separato e timeout corto: le raccomandazioni non possono rallentare la pagina
+        RACCOMANDAZIONI = asyncio.Semaphore(10)       # bulkhead
+
+        async def raccomandazioni(utente_id: str) -> tuple[list[Prodotto], bool]:
+            """Restituisce (elenco, degradato)."""
+            try:
+                async with RACCOMANDAZIONI:
+                    return await asyncio.wait_for(motore.per(utente_id), timeout=0.2), False
+            except (asyncio.TimeoutError, Exception):
+                metriche.incr("raccomandazioni.fallback")
+                return await best_seller_del_giorno(), True    # fallback statico
+
+        # Nella risposta il degrado è dichiarato, non nascosto
+        return {"prodotti": prodotti, "raccomandati": rec, "raccomandazioni_parziali": degradato}
+      note: >-
+        Il flag nella risposta permette al frontend di mostrare un messaggio e al team di
+        avere una metrica: senza, il degrado è invisibile a entrambi.
+    - title: Load shedding per priorità
+      language: python
+      code: |-
+        PRIORITA = {"checkout": 0, "browse": 1, "search": 2, "batch": 3, "bot": 4}
+
+        def accetta(richiesta, carico: float) -> bool:
+            """carico = 0..1 (saturazione osservata). Più siamo carichi,
+            più alto deve essere il rango per passare."""
+            soglia = {0.0: 5, 0.7: 3, 0.85: 2, 0.95: 1}   # sopra 0.95 passa solo il checkout
+            limite = next(v for k, v in sorted(soglia.items(), reverse=True) if carico >= k)
+            return PRIORITA.get(richiesta.classe, 4) < limite
+
+        # Rifiuto esplicito e onesto, non un timeout silenzioso
+        if not accetta(req, carico_attuale()):
+            raise HTTPException(503, headers={"Retry-After": "10"})
+      note: >-
+        Rifiutare subito costa pochissimo e lascia capacità a chi sta completando un
+        acquisto. Degradare per tutti, invece, spesso significa non servire nessuno.
+  trade_offs:
+    - option: Fallback statico
+      pros: Sempre disponibile, costo nullo, esperienza accettabile
+      cons: Contenuto non personalizzato, va tenuto aggiornato
+      when: Raccomandazioni, classifiche, contenuti accessori
+    - option: Cache stantia servita consapevolmente
+      pros: Dati reali, anche se vecchi; transizione quasi invisibile
+      cons: Rischio di mostrare informazioni superate senza dirlo
+      when: Dati che invecchiano lentamente, con indicazione esplicita
+    - option: Risposta parziale
+      pros: L'utente ottiene ciò che è disponibile subito
+      cons: Il client deve saper gestire l'assenza di una sezione
+      when: Pagine composte da più fonti indipendenti
+    - option: Load shedding
+      pros: Protegge il sistema e chi sta facendo l'operazione più importante
+      cons: Una parte degli utenti riceve un errore esplicito
+      when: Saturazione vera, quando degradare per tutti non basta
+  numbers:
+    - "Timeout su dipendenza accessoria: 100-300 ms. Su dipendenza critica: fino al p99 osservato"
+    - "Una dipendenza al 99% di disponibilità trattata come critica abbassa il servizio al 99%: la classificazione ha un effetto numerico diretto"
+    - "Game day: almeno un esercizio di fault injection per dipendenza critica prima di dire che il fallback funziona"
   interview_answer: >-
     Parto classificando le dipendenze. In un e-commerce il catalogo e il checkout sono
     critici, il motore di raccomandazioni no: se quest'ultimo è giù devo mostrare una lista
-    statica di best seller, non una pagina di errore. In pratica significa timeout aggressivi
-    sulle dipendenze non critiche e un fallback esplicito per ognuna. La parte che fa la
-    differenza è testarlo: il codice di fallback è codice che non gira mai in condizioni
-    normali, quindi se non lo esercito con fault injection scoprirò che era rotto proprio
-    nel momento in cui serviva.
+    statica di best seller, non una pagina di errore. In pratica significa timeout
+    aggressivi sulle dipendenze non critiche, un pool di concorrenza separato perché non mi
+    consumino la capacità, e un fallback esplicito per ognuna. Se la capacità complessiva
+    non basta passo al load shedding, perché rifiutare una quota di traffico con un 503
+    onesto è meglio che degradare per tutti fino al collasso, e scelgo cosa scartare per
+    priorità, proteggendo chi è già a metà di un acquisto. La parte che fa la differenza è
+    testarlo: il codice di fallback è codice che non gira mai in condizioni normali, quindi
+    se non lo esercito con fault injection scoprirò che era rotto proprio nel momento in cui
+    serviva.
+  senior_signals:
+    - "Classifica le dipendenze e ne trae conseguenze su timeout e pool"
+    - "Distingue degradare da rifiutare, e sa quando il secondo è preferibile"
+    - "Rende il degrado visibile con un campo nella risposta e una metrica"
+    - "Dice esplicitamente che il fallback va esercitato, non solo scritto"
   pitfalls:
     - "Fallback mai testati che falliscono proprio durante l'incidente"
     - "Degradare in silenzio mostrando dati incompleti come se fossero completi"
     - "Trattare ogni dipendenza come critica"
-  follow_up_questions:
-    - "Cos'è il load shedding e quando lo preferisci al degrado per tutti?"
+    - "Timeout lunghi su servizi accessori: la loro latenza diventa la tua"
+    - "Load shedding casuale invece che per priorità: si scartano anche i checkout"
+  follow_ups:
+    - question: Cos'è il load shedding e quando lo preferisci al degrado per tutti?
+      answer: >-
+        È rifiutare deliberatamente una parte delle richieste per mantenere la qualità
+        sulle altre. Lo preferisco quando il collo di bottiglia è capacità vera e non una
+        singola dipendenza: se provo a servire tutti, le code crescono, le latenze
+        esplodono, i client vanno in timeout e ritentano, e il sistema peggiora da solo.
+        Rifiutare subito il 20% con un 503 e un Retry-After costa quasi nulla e mantiene
+        l'80% in condizioni normali. La scelta di chi scartare deve essere per priorità,
+        non casuale.
+    - question: Come verifichi che i tuoi fallback funzionino davvero?
+      answer: >-
+        Con fault injection deliberata: in ambiente di prova - e, quando l'organizzazione
+        è matura, in produzione su una quota di traffico - si rende indisponibile o
+        lentissima la dipendenza e si verifica che la funzione principale regga e che le
+        metriche di degrado si accendano. Un game day periodico, con scenari scritti,
+        trasforma il "dovrebbe funzionare" in un fatto osservato. Senza, il percorso di
+        fallback è codice morto che tutti credono vivo.
+    - question: Quando servire dati stantii è sbagliato?
+      answer: >-
+        Quando l'utente prende una decisione irreversibile su quei dati: disponibilità in
+        fase di acquisto, saldo prima di un bonifico, prezzo al momento del pagamento. Lì
+        è meglio un errore esplicito che un dato vecchio. Per tutto il resto - conteggi,
+        classifiche, contenuti editoriali, profili - servire l'ultima copia buona
+        dichiarando la staleness è quasi sempre preferibile a una pagina di errore.
+  related: [rel-32-retries-timeouts-breakers, rel-40-traffic-spikes, cache-25-cache-danger, rel-38-observability]
+  resources:
+    - title: "Google SRE Book - Handling Overload"
+      url: "https://sre.google/sre-book/handling-overload/"
+      kind: book
+    - title: "AWS Builders' Library - Using load shedding to avoid overload"
+      url: "https://aws.amazon.com/builders-library/using-load-shedding-to-avoid-overload/"
+      kind: article
 
 - id: rel-38-observability
   title: Observability (log, metriche, tracing)
@@ -257,15 +1297,122 @@
     Monitoring risponde a domande che sapevi di dover fare; observability ti permette di
     farne di nuove su un sistema già in produzione. I tre pilastri sono log, metriche e
     trace, e servono a scopi diversi.
+  deep_dive: |-
+    I tre segnali servono a tre momenti diversi di un incidente, e confonderli è il modo
+    più comune per spendere molto e vedere poco. Le *metriche* sono aggregate e
+    economiche: dicono *che* qualcosa non va e fanno scattare gli allarmi. I *trace*
+    mostrano il percorso di una singola richiesta attraverso i servizi con la latenza di
+    ogni salto: dicono *dove*. I *log* contengono il dettaglio di un evento specifico:
+    dicono *perché*. Un sistema osservabile permette di passare dall'uno all'altro senza
+    interruzioni, e il collante è il correlation id (o trace id) propagato ovunque.
+
+    Sulle metriche il vincolo da conoscere è la *cardinalità*. Una metrica con etichette
+    a valori illimitati - user id, request id, URL con parametri - genera una serie
+    temporale per ogni combinazione, e i costi e la memoria del sistema di monitoraggio
+    esplodono. La regola: etichette a bassa cardinalità (servizio, endpoint
+    normalizzato, codice di stato, regione); tutto il resto sta nei log o nei trace.
+
+    Sulle misure di latenza: la media è quasi sempre fuorviante, perché nasconde la coda.
+    Se il p50 è 80 ms e il p99 è 4 secondi, l'1% degli utenti sta vivendo un'esperienza
+    pessima e la media non lo dirà mai. Vanno guardati p50, p95, p99 e, nei sistemi con
+    fan-out, anche il p99.9: se una pagina fa 20 chiamate interne, la probabilità che
+    almeno una cada nella coda lenta è altissima - è il fenomeno descritto in "The Tail
+    at Scale". Attenzione anche a un errore statistico frequente: i percentili *non si
+    mediano*; vanno calcolati sugli istogrammi aggregati, non facendo la media dei p99
+    di ogni istanza.
+
+    Come struttura di riferimento si usano i *quattro golden signal* - latenza, traffico,
+    errori, saturazione - oppure RED per i servizi (Rate, Errors, Duration) e USE per le
+    risorse (Utilization, Saturation, Errors). Sono checklist: servono a non dimenticare
+    la saturazione, che è quella che quasi sempre manca e che è l'unica a predire un
+    problema *prima* che diventi visibile.
+
+    Sugli allarmi vale una regola sola, e vale più di tutte le altre: si allerta sui
+    *sintomi percepiti dall'utente*, non sulle cause. "Il tasso di errore del checkout
+    supera l'1%" o "la p99 del login è sopra i 2 secondi" sono allarmi che significano
+    qualcosa; "la CPU è all'80%" no, perché la CPU alta a volte è desiderabile e la CPU
+    bassa non garantisce che gli utenti stiano bene. Formalizzare questo porta a SLO ed
+    error budget: si definisce l'obiettivo (99,9% di richieste sotto 300 ms) e si allerta
+    quando il consumo del budget accelera, non a ogni singolo errore. L'effetto pratico è
+    molto meno rumore, e quindi molta meno assuefazione agli allarmi.
+
+    Infine i log: strutturati (JSON), con livello, timestamp, servizio, trace id e
+    campi tipizzati, mai stringhe concatenate. E il tracing: con OpenTelemetry si
+    strumenta una volta sola senza legarsi a un fornitore, e si sceglie una strategia di
+    campionamento - head-based (si decide all'inizio, semplice ed economica) o tail-based
+    (si decide dopo, tenendo le tracce lente o fallite, molto più utile ma più costosa).
   key_points:
     - "Metriche: aggregate, economiche, ottime per allarmi e trend. Cardinalità alta = costo esplosivo"
     - "Log: dettaglio per singolo evento. Strutturati in JSON, con correlation id, altrimenti sono inutilizzabili"
     - "Trace: il percorso di una richiesta fra i servizi, con la latenza di ogni salto. Indispensabile nel distribuito"
-    - "Usa le percentili, non le medie: la media nasconde la coda. p50, p95, p99"
+    - "Usa le percentili, non le medie: la media nasconde la coda. p50, p95, p99 (e p99.9 con molto fan-out)"
+    - "I percentili non si mediano: vanno calcolati su istogrammi aggregati, non facendo la media dei p99 per istanza"
     - "Quattro golden signal: latenza, traffico, errori, saturazione"
     - "RED per i servizi (Rate, Errors, Duration), USE per le risorse (Utilization, Saturation, Errors)"
     - "Gli alert vanno sui sintomi percepiti dall'utente, non sulle cause: 'il checkout fallisce' e non 'la CPU è all'80%'"
+    - "SLO ed error budget: si allerta sul consumo accelerato del budget, non sul singolo errore. Molto meno rumore"
     - "OpenTelemetry è lo standard di fatto per strumentare senza legarsi a un vendor"
+    - "Campionamento: head-based (economico) o tail-based (tiene le tracce lente e fallite, più utile)"
+  examples:
+    - title: Log strutturato che si collega al trace
+      language: python
+      code: |-
+        import structlog
+        from opentelemetry import trace
+
+        def log_con_contesto(**campi):
+            span = trace.get_current_span().get_span_context()
+            return structlog.get_logger().bind(
+                trace_id=format(span.trace_id, "032x"),   # aggancio al trace
+                span_id=format(span.span_id, "016x"),
+                **campi,
+            )
+
+        log = log_con_contesto(servizio="ordini", utente_id=u.id, ordine_id=o.id)
+        log.info("ordine_creato", totale_cents=o.totale, canale="web")
+        # {"event":"ordine_creato","trace_id":"4bf92f...","utente_id":"u_7",...}
+      note: >-
+        Con il trace_id nei log si passa dall'allarme alla traccia al log della singola
+        richiesta in due clic. Senza, ogni indagine ricomincia da zero.
+    - title: Metriche con cardinalità sotto controllo
+      language: python
+      code: |-
+        from prometheus_client import Counter, Histogram
+
+        # BENE: etichette a bassa cardinalità, path NORMALIZZATO
+        RICHIESTE = Counter("http_richieste_totali", "", ["metodo", "rotta", "stato"])
+        LATENZA = Histogram("http_durata_secondi", "", ["metodo", "rotta"],
+                            buckets=(.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10))
+
+        RICHIESTE.labels("GET", "/ordini/{id}", "200").inc()     # NON /ordini/8f2a
+
+        # MALE: una serie temporale per ogni utente e per ogni id
+        # RICHIESTE.labels(metodo="GET", utente=u.id, ordine=o.id).inc()
+      note: >-
+        L'istogramma è ciò che permette di calcolare correttamente i percentili
+        aggregando più istanze: con un semplice "gauge della latenza media" non si può.
+  trade_offs:
+    - option: Metriche
+      pros: Economiche, ritenzione lunga, ideali per allarmi e tendenze
+      cons: "Aggregate: non spiegano il singolo caso; la cardinalità va limitata"
+      when: Allarmi, SLO, dashboard
+    - option: Log strutturati
+      pros: Dettaglio completo, ricerca libera, spiegano il perché
+      cons: Volume e costo, inutili senza struttura e correlation id
+      when: Indagine su casi specifici, audit
+    - option: Trace distribuiti
+      pros: Mostrano dove si perde il tempo lungo la catena
+      cons: Strumentazione da propagare, costo di archiviazione, campionamento necessario
+      when: Sistemi con più servizi, problemi di latenza
+    - option: Campionamento tail-based
+      pros: Tiene proprio le tracce interessanti (lente o in errore)
+      cons: Richiede di bufferizzare le tracce, infrastruttura più costosa
+      when: Volume alto e necessità di analizzare la coda
+  numbers:
+    - "Cardinalità di una metrica: si tenga sotto le poche migliaia di serie per metrica; user id come etichetta le fa esplodere"
+    - "Con 20 chiamate interne per pagina e p99 di 1 s per chiamata, è molto probabile che almeno una cada nella coda: il p99 del servizio diventa il p50 dell'utente"
+    - "Campionamento head-based tipico: 1-10% delle tracce, con il 100% sulle richieste in errore"
+    - "SLO comune per un'API interattiva: 99,9% delle richieste sotto i 300 ms su finestra di 30 giorni"
   interview_answer: >-
     Le tre cose servono a momenti diversi dell'incidente. Le metriche mi dicono che c'è un
     problema e mi svegliano, i trace mi dicono dove nella catena di servizi, i log mi dicono
@@ -273,16 +1420,59 @@
     propagato ovunque, perché senza quello non riesco a collegare i tre livelli. Sugli alert
     ho una regola: allerto sui sintomi visibili all'utente, come il tasso di errore del
     checkout o la p99 della latenza, non sulle cause come la CPU, perché la CPU alta a volte
-    è normale e la CPU bassa non garantisce che gli utenti stiano bene. E guardo le
-    percentili, perché una media di 200ms può nascondere un 1% di utenti a dieci secondi.
+    è normale e la CPU bassa non garantisce che gli utenti stiano bene; e dove posso li lego
+    al consumo dell'error budget di uno SLO, così il rumore crolla. Guardo le percentili
+    perché una media di 200 ms può nascondere un 1% di utenti a dieci secondi, e sto attento
+    alla cardinalità delle metriche, perché mettere l'user id come etichetta fa esplodere i
+    costi.
+  senior_signals:
+    - "Assegna a ciascun segnale una domanda precisa (che, dove, perché)"
+    - "Conosce il problema della cardinalità e quello dei percentili che non si mediano"
+    - "Allerta su sintomi e parla di SLO ed error budget invece che di soglie arbitrarie"
+    - "Cita il fan-out e l'effetto della coda quando una pagina fa molte chiamate"
   pitfalls:
     - "Monitorare la latenza media e non accorgersi della coda"
     - "Log non strutturati e senza correlation id"
     - "Alert rumorosi che generano assuefazione"
     - "Metriche ad alta cardinalità (user id come label) che fanno esplodere i costi"
-  follow_up_questions:
-    - "Perché la p99 conta più della media?"
-    - "Su quali segnali metteresti un alert paging?"
+    - "Mediare i percentili delle singole istanze per ottenere quello globale: è matematicamente sbagliato"
+  follow_ups:
+    - question: Perché la p99 conta più della media?
+      answer: >-
+        Perché la media è dominata dai casi normali e nasconde la coda, mentre la coda è
+        proprio dove vive l'esperienza peggiore. Con p50 a 80 ms e p99 a 4 secondi, un
+        utente su cento sta aspettando quattro secondi, e se l'utente fa più chiamate per
+        pagina la probabilità di incontrarne una diventa alta. In più la media si può
+        abbassare aggiungendo richieste veloci, mentre il p99 no: è molto più difficile
+        da falsificare involontariamente.
+    - question: Su quali segnali metteresti un alert paging?
+      answer: >-
+        Solo su sintomi che l'utente percepisce e che richiedono intervento immediato:
+        tasso di errore su un percorso critico oltre soglia, latenza p99 oltre lo SLO,
+        consumo dell'error budget che accelera, impossibilità di completare un'operazione
+        chiave. Tutto il resto - saturazione in crescita, code che si allungano, dischi
+        che si riempiono - va su ticket o su allarmi non urgenti. Se una notifica non
+        richiede un'azione immediata, non deve svegliare nessuno: è il modo più rapido
+        per rendere inutili tutti gli allarmi.
+    - question: Un servizio è lento ma tutte le sue dipendenze sembrano veloci. Come indaghi?
+      answer: >-
+        Guardo il trace di una richiesta lenta reale e cerco il tempo non attribuito a
+        nessun span: di solito è lì che si nasconde la verità - attesa di una connessione
+        dal pool, coda interna, contesa su un lock, garbage collection, o tempo speso in
+        serializzazione. Le dipendenze "veloci" spesso lo sono solo nel percentile
+        sbagliato: se guardo la media sembrano a posto, se guardo il p99 no. Poi controllo
+        la saturazione, che è il segnale che quasi sempre manca nelle dashboard.
+  related: [rel-32-retries-timeouts-breakers, rel-39-deployments, dist-29-service-communication, rel-37-graceful-degradation]
+  resources:
+    - title: "Google SRE Book - Monitoring Distributed Systems (golden signals)"
+      url: "https://sre.google/sre-book/monitoring-distributed-systems/"
+      kind: book
+    - title: "OpenTelemetry - Concetti e strumentazione"
+      url: "https://opentelemetry.io/docs/concepts/"
+      kind: doc
+    - title: "Google SRE Workbook - Alerting on SLOs"
+      url: "https://sre.google/workbook/alerting-on-slos/"
+      kind: book
 
 - id: rel-39-deployments
   title: Strategie di deploy (blue-green, rolling, canary)
@@ -295,30 +1485,179 @@
     L'obiettivo di una strategia di deploy è ridurre il raggio d'impatto di una versione
     difettosa e rendere il ritorno indietro rapido. Le strategie differiscono per quanti
     utenti vedono la nuova versione e per quanto velocemente si torna indietro.
+  deep_dive: |-
+    Le tre strategie si distinguono su due assi: quanti utenti vedono la versione nuova
+    e quanto costa tornare indietro. *Rolling*: si sostituiscono le istanze poche per
+    volta; nessun costo infrastrutturale aggiuntivo, ma per tutta la durata due versioni
+    convivono e il rollback richiede un altro giro di sostituzioni. *Blue-green*: due
+    ambienti completi, si sposta il traffico da uno all'altro; il rollback è istantaneo
+    perché basta riportare indietro il router, al prezzo di tenere due ambienti durante
+    la finestra. *Canary*: la versione nuova riceve una piccola frazione del traffico -
+    l'1-5% - si osservano le metriche e si procede o si torna indietro; è la strategia
+    che limita davvero il raggio d'impatto, ma richiede metriche capaci di distinguere
+    una regressione dal rumore su quel campione.
+
+    Sopra tutte c'è una distinzione che cambia il ragionamento: *deploy* e *rilascio* non
+    sono la stessa cosa. Con i feature flag il codice va in produzione spento e si accende
+    quando si vuole, per una percentuale di utenti o per un gruppo: il rollback diventa
+    spegnere un flag, che è più veloce e meno rischioso di un rollback di artefatti. Il
+    costo è la disciplina di rimuovere i flag vecchi, altrimenti il codice diventa un
+    labirinto di rami morti.
+
+    Il vincolo che condiziona tutto, però, è il database. Con rolling e canary due
+    versioni del codice girano *contemporaneamente sullo stesso schema*, quindi ogni
+    migrazione deve essere compatibile con entrambe. La tecnica standard è
+    *expand-migrate-contract*, in tre rilasci separati: prima si *espande* lo schema
+    aggiungendo la nuova struttura senza toccare la vecchia; poi si *migra*, scrivendo su
+    entrambe e copiando i dati storici a lotti; infine, in un rilascio successivo e solo
+    quando nessuna versione in esecuzione usa più la vecchia, si *contrae* rimuovendola.
+    Rinominare una colonna in un solo rilascio rende il rollback impossibile: è
+    l'errore che trasforma un problema piccolo in un incidente lungo.
+
+    Anche il modo in cui si applicano le migrazioni conta. Aggiungere una colonna con un
+    valore di default su una tabella grande, creare un indice senza `CONCURRENTLY`,
+    aggiungere una foreign key senza `NOT VALID`: ognuna di queste prende un lock che
+    blocca le scritture, e su una tabella calda significa un'interruzione. La regola è
+    `lock_timeout` basso su ogni migrazione, così fallisce in fretta invece di bloccare
+    la produzione, e operazioni eseguite in più passi.
+
+    Infine il criterio di ritorno indietro. Un canary senza *rollback automatico* basato
+    su metriche non è un canary, è un deploy con una persona che guarda un grafico: va
+    definito in anticipo cosa significa "male" (tasso di errore sopra X, p99 sopra Y per
+    Z minuti) e chi ha il potere di fermare, preferibilmente il sistema stesso. Vanno
+    confrontate le due popolazioni, non il valore assoluto: il traffico varia, e se non
+    si confronta canary contro baseline si finisce per scambiare l'ora di punta per una
+    regressione.
   key_points:
     - "Rolling: sostituisci le istanze poche per volta. Nessun costo extra, ma due versioni convivono e il rollback è lento"
     - "Blue-green: due ambienti completi, si scambia il traffico. Rollback istantaneo, costo doppio durante la finestra"
     - "Canary: la nuova versione riceve l'1-5% del traffico, si osservano le metriche, si procede o si torna indietro"
+    - "Il canary va valutato confrontando canary e baseline, non il valore assoluto: il traffico varia da solo"
     - "Feature flag: separano il deploy dal rilascio. Il codice va in produzione spento e si accende quando serve"
+    - "I flag vanno rimossi dopo: un flag dimenticato è debito che rende il codice illeggibile"
     - "Le migrazioni di schema devono essere retrocompatibili: expand-migrate-contract, mai una colonna rinominata in un colpo solo"
+    - "Attenzione ai lock delle migrazioni: CREATE INDEX CONCURRENTLY, FK con NOT VALID, lock_timeout basso"
     - "Serve sempre un criterio automatico di rollback basato su metriche, non sull'occhio di chi guarda"
+  examples:
+    - title: Rinominare una colonna senza fermare nulla
+      language: sql
+      code: |-
+        -- RILASCIO 1 (expand): aggiungo, non tocco nulla di esistente
+        ALTER TABLE utenti ADD COLUMN nome_completo text;
+        -- il codice scrive su ENTRAMBE le colonne, legge ancora dalla vecchia
+
+        -- RILASCIO 2 (migrate): copio lo storico a lotti, senza lock lunghi
+        UPDATE utenti SET nome_completo = nome
+         WHERE nome_completo IS NULL AND id IN (
+           SELECT id FROM utenti WHERE nome_completo IS NULL LIMIT 5000
+         );          -- ripetuto fino a esaurimento
+        -- il codice ora legge dalla NUOVA colonna, continua a scrivere su entrambe
+
+        -- RILASCIO 3 (contract): solo quando nessuna versione usa più la vecchia
+        ALTER TABLE utenti DROP COLUMN nome;
+      note: >-
+        Tre rilasci separati nel tempo, ciascuno reversibile da solo. Fare tutto insieme
+        significa che il rollback del codice lascerebbe lo schema incompatibile.
+    - title: Migrazioni che non bloccano la produzione
+      language: sql
+      code: |-
+        -- Fallisci in fretta invece di bloccare le scritture in attesa di un lock
+        SET lock_timeout = '3s';
+
+        -- Indice senza bloccare le scritture (fuori transazione)
+        CREATE INDEX CONCURRENTLY idx_ordini_stato ON ordini (stato);
+
+        -- Foreign key in due passi: aggiungila non validata, poi validala senza lock forte
+        ALTER TABLE ordini ADD CONSTRAINT fk_utente
+          FOREIGN KEY (utente_id) REFERENCES utenti(id) NOT VALID;
+        ALTER TABLE ordini VALIDATE CONSTRAINT fk_utente;
+
+        -- Colonna con default: su Postgres 11+ non riscrive la tabella, su versioni
+        -- precedenti sì. Conoscere la propria versione fa la differenza.
+      note: >-
+        Il `lock_timeout` è la protezione più economica che esista: trasforma "la
+        produzione è bloccata" in "la migrazione è fallita, riprovo stanotte".
+  trade_offs:
+    - option: Rolling
+      pros: Nessun costo aggiuntivo, integrato in Kubernetes e nei servizi gestiti
+      cons: Due versioni convivono, rollback lento quanto il deploy
+      when: Default per cambiamenti a basso rischio
+    - option: Blue-green
+      pros: Rollback istantaneo, la versione nuova si verifica prima di ricevere traffico
+      cons: Doppio ambiente, e il database resta condiviso comunque
+      when: Rilasci rischiosi, finestre di manutenzione, requisiti di rollback immediato
+    - option: Canary
+      pros: Raggio d'impatto minimo, regressioni scoperte su pochi utenti
+      cons: Richiede metriche buone, traffico sufficiente e automazione
+      when: Servizi ad alto traffico e cambiamenti significativi
+    - option: Feature flag
+      pros: Rilascio disaccoppiato dal deploy, attivazione per gruppo, spegnimento istantaneo
+      cons: Debito se non si rimuovono, combinazioni difficili da testare
+      when: Funzionalità nuove, esperimenti, rollout graduali
+  numbers:
+    - "Canary tipico: 1-5% del traffico per 10-60 minuti prima di procedere"
+    - "Rollback: blue-green in secondi, feature flag in secondi, rolling in minuti"
+    - "lock_timeout per le migrazioni: 3-5 secondi. Oltre, si sta bloccando la produzione"
+    - "Un flag dimenticato costa: ogni combinazione di due flag raddoppia i percorsi possibili"
   interview_answer: >-
     Il default per me è rolling con health check seri, perché non costa nulla in
     infrastruttura. Passo al canary quando il cambiamento è rischioso e ho metriche
-    abbastanza buone da accorgermi di una regressione sull'1% del traffico. Il blue-green lo
-    uso quando il rollback istantaneo vale il costo di tenere due ambienti. Il vincolo che
-    condiziona tutto però è il database: con rolling e canary due versioni del codice girano
-    insieme sullo stesso schema, quindi le migrazioni devono essere retrocompatibili in
-    entrambe le direzioni. Per rinominare una colonna faccio expand-migrate-contract: aggiungo
-    la nuova, scrivo su entrambe, migro i dati, sposto le letture e solo in un rilascio
-    successivo tolgo la vecchia.
+    abbastanza buone da accorgermi di una regressione sull'1% del traffico, confrontando
+    canary e baseline invece di guardare valori assoluti. Il blue-green lo uso quando il
+    rollback istantaneo vale il costo di tenere due ambienti. Il vincolo che condiziona
+    tutto però è il database: con rolling e canary due versioni del codice girano insieme
+    sullo stesso schema, quindi le migrazioni devono essere retrocompatibili in entrambe le
+    direzioni. Per rinominare una colonna faccio expand-migrate-contract: aggiungo la
+    nuova, scrivo su entrambe, migro i dati a lotti, sposto le letture e solo in un rilascio
+    successivo tolgo la vecchia. E metto sempre un lock_timeout basso sulle migrazioni, così
+    una ALTER che non riesce a prendere il lock fallisce invece di bloccare la produzione.
+  senior_signals:
+    - "Mette il database al centro del discorso invece di parlare solo di istanze"
+    - "Conosce expand-migrate-contract e lo descrive come tre rilasci distinti"
+    - "Cita i lock delle migrazioni e il lock_timeout"
+    - "Pretende un criterio automatico di rollback e il confronto canary/baseline"
   pitfalls:
     - "Migrazione distruttiva rilasciata insieme al codice: il rollback diventa impossibile"
     - "Canary senza metriche sufficienti a distinguere il rumore dalla regressione"
     - "Health check che non verificano le dipendenze reali"
-  follow_up_questions:
-    - "Come rinomini una colonna senza downtime?"
-    - "Perché i feature flag cambiano il discorso sul rollback?"
+    - "CREATE INDEX senza CONCURRENTLY su una tabella calda: scritture bloccate per minuti"
+    - "Feature flag mai rimossi: il codice diventa un labirinto di rami morti"
+  follow_ups:
+    - question: Come rinomini una colonna senza downtime?
+      answer: >-
+        In tre rilasci. Primo: aggiungo la colonna nuova e faccio scrivere il codice su
+        entrambe, leggendo ancora dalla vecchia. Secondo: copio i dati storici a lotti e
+        sposto le letture sulla nuova, continuando a scrivere su entrambe. Terzo, dopo
+        aver verificato che nessuna versione in esecuzione usa più la vecchia: la
+        rimuovo. Ogni passo è reversibile da solo, che è esattamente ciò che manca
+        quando si fa tutto in un colpo.
+    - question: Perché i feature flag cambiano il discorso sul rollback?
+      answer: >-
+        Perché separano il momento in cui il codice arriva in produzione da quello in cui
+        diventa attivo. Il rollback non è più ridistribuire l'artefatto precedente - che
+        richiede minuti e può collidere con le migrazioni - ma spegnere un interruttore,
+        che è istantaneo e non tocca lo schema. In più permettono l'attivazione graduale
+        e per gruppi, quindi il canary si può fare a livello di funzionalità invece che
+        di versione.
+    - question: Cosa controlli prima di dichiarare riuscito un deploy?
+      answer: >-
+        Tasso di errore e latenza (p50 e p99) confrontati con la baseline, saturazione
+        delle risorse, consumer lag se ci sono code, e i log di errore nuovi comparsi
+        dopo il rilascio. Guardo anche una metrica di business - ordini al minuto,
+        login riusciti - perché un deploy può essere tecnicamente sano e rompere un
+        percorso funzionale. E aspetto abbastanza da coprire almeno un ciclo completo di
+        traffico, non trenta secondi.
+  related: [rel-38-observability, dist-26-load-balancing, db-14-transactions-isolation, eng-02-git]
+  resources:
+    - title: "Martin Fowler - Blue Green Deployment"
+      url: "https://martinfowler.com/bliki/BlueGreenDeployment.html"
+      kind: article
+    - title: "Martin Fowler - Feature Toggles"
+      url: "https://martinfowler.com/articles/feature-toggles.html"
+      kind: article
+    - title: "PostgreSQL - ALTER TABLE e lock richiesti"
+      url: "https://www.postgresql.org/docs/current/sql-altertable.html"
+      kind: doc
 
 - id: rel-40-traffic-spikes
   title: Picchi di traffico e carico virale
@@ -331,28 +1670,177 @@
     Un picco improvviso mette sotto stress il componente meno elastico, che di solito è il
     database. L'autoscaling da solo non basta: impiega minuti, mentre il picco arriva in
     secondi.
+  deep_dive: |-
+    Il primo fatto da accettare è temporale: un picco virale arriva in secondi,
+    l'autoscaling reagisce in minuti. Fra la metrica, la decisione, l'avvio del
+    container e il riscaldamento passano decine di secondi nel caso migliore. Quindi
+    serve qualcosa che assorba *nel frattempo*, e quel qualcosa è una pila di difese
+    che si attivano in ordine, dalla più esterna alla più interna.
+
+    Primo strato, la CDN. Nel traffico virale quasi tutti chiedono la *stessa* risorsa,
+    quindi la percentuale di richieste servibili senza toccare l'origine è altissima. Con
+    `s-maxage` breve e `stale-while-revalidate` lungo, l'origine riceve una richiesta al
+    minuto per URL invece di diecimila al secondo. È la leva con il miglior rapporto fra
+    effetto e sforzo, e va predisposta prima.
+
+    Secondo strato, la cache applicativa, con protezione dallo stampede: senza
+    single-flight, il momento in cui la chiave calda scade coincide con il momento in
+    cui tutte le richieste arrivano al database insieme. Terzo strato, spostare le
+    *scritture* su una coda: un picco di traffico diventa una coda più lunga, che è un
+    problema molto più gestibile di un database saturo - purché la coda abbia un limite
+    e una politica per quando lo supera.
+
+    Il vincolo che salta per primo, quasi sempre, non è la CPU: è il *pool di
+    connessioni al database*. Ogni istanza applicativa ne apre un certo numero, e
+    l'autoscaling che aggiunge istanze moltiplica le connessioni fino a saturare il
+    database - che a quel punto rallenta per tutti, peggiorando la situazione che
+    l'autoscaling voleva risolvere. Per questo un pooler come PgBouncer in modalità
+    transaction è spesso il prerequisito dell'autoscaling, non un dettaglio.
+
+    Le *hot key* meritano un discorso a parte: un singolo contenuto virale concentra il
+    carico su una chiave, e nessuna distribuzione aiuta, perché tutti chiedono quella. Le
+    difese sono replicare la chiave su N varianti (`post:42#0..15`, scegliendone una a
+    caso in lettura), usare una cache locale di processo con TTL di pochi secondi davanti
+    a quella distribuita, e servire quel contenuto dalla CDN. Il sintomo diagnostico è
+    inconfondibile: un nodo in fiamme e tutti gli altri scarichi.
+
+    Quando le difese non bastano, la scelta giusta è il *load shedding*: rifiutare una
+    quota di traffico con un 503 e un `Retry-After` è molto meglio che degradare per
+    tutti fino al collasso, perché un sistema che risponde lentamente a tutti genera
+    timeout, retry e un'amplificazione che si autoalimenta. E se il picco è *previsto*
+    - un lancio, una diretta, il Black Friday - si fa pre-scaling: è l'unica cosa che
+    funziona davvero all'istante zero.
+
+    Infine il secondo picco, quello che sorprende: il *riavvio*. Quando il sistema torna
+    su, tutte le cache sono fredde e tutti i client stanno ritentando insieme. Serve
+    riaprire il traffico gradualmente e, se possibile, riscaldare le chiavi più calde
+    prima di riaprire.
   key_points:
     - "Difese a strati: CDN davanti, cache applicativa, code per assorbire le scritture, rate limiting, load shedding"
     - "Prescaling per i picchi noti (lancio, Black Friday): l'autoscaling reattivo arriva sempre tardi"
     - "Il database è il vincolo: il pool di connessioni satura molto prima della CPU. PgBouncer o equivalente"
+    - "L'autoscaling che aggiunge istanze moltiplica le connessioni al database: senza pooler peggiora il problema"
     - "Hot key: un singolo contenuto virale concentra il carico su una chiave. Serve replica della chiave o cache locale"
+    - "Sintomo diagnostico della hot key: un nodo saturo e tutti gli altri scarichi"
     - "Load shedding: meglio servire bene il 70% che fallire per tutti"
     - "Le code trasformano un picco di traffico in una coda più lunga, che è un problema molto più gestibile"
     - "Il thundering herd al riavvio: tutte le cache fredde insieme sono un secondo picco"
+    - "Riapertura graduale del traffico dopo un incidente, non tutto in una volta"
+  examples:
+    - title: Hot key, la difesa in due righe
+      language: python
+      code: |-
+        # Problema: tutti chiedono post:42. Una sola chiave, un solo nodo, un solo core.
+        REPLICHE = 16
+
+        async def leggi_caldo(post_id: str, redis: Redis, carica):
+            k = f"post:{post_id}#{random.randrange(REPLICHE)}"   # lettura distribuita
+            if (v := await redis.get(k)) is not None:
+                return json.loads(v)
+            dato = await carica()
+            # si scrivono tutte le repliche: la scrittura è rara, la lettura è tutto
+            async with redis.pipeline() as p:
+                for i in range(REPLICHE):
+                    p.set(f"post:{post_id}#{i}", json.dumps(dato), ex=60 + random.randint(0, 15))
+                await p.execute()
+            return dato
+      note: >-
+        In più, davanti a Redis conviene una cache locale di processo con TTL di 1-5
+        secondi: assorbe migliaia di letture al secondo senza nemmeno uscire dal processo.
+    - title: Il conto che spiega perché satura il database
+      language: python
+      code: |-
+        # Ogni istanza apre un pool: l'autoscaling moltiplica le connessioni.
+        istanze, pool_per_istanza = 40, 20
+        print(istanze * pool_per_istanza)          # 800 connessioni al database
+
+        # Postgres: ogni connessione è un processo. Oltre qualche centinaio
+        # il costo di contesa supera il beneficio, e il database rallenta per TUTTI.
+        # Con PgBouncer in transaction mode:
+        #   4.000 client applicativi  ->  50-100 connessioni reali al database
+      note: >-
+        È il motivo per cui "abbiamo scalato a 40 pod e il sito è andato peggio" è una
+        frase che si sente davvero.
+  trade_offs:
+    - option: CDN e cache HTTP
+      pros: Assorbe la parte maggiore del traffico virale, costo bassissimo
+      cons: Solo per contenuti pubblici e cacheabili
+      when: Prima difesa, sempre, per tutto ciò che è pubblico
+    - option: Code per le scritture
+      pros: Trasforma un picco in una coda, protegge il database
+      cons: Consistenza eventuale, l'utente non ha l'esito immediato
+      when: Scritture che tollerano di completare qualche secondo dopo
+    - option: Load shedding
+      pros: Preserva la qualità per la maggioranza, evita il collasso
+      cons: Una parte degli utenti riceve un errore
+      when: Saturazione reale, quando non c'è altro da tagliare
+    - option: Pre-scaling
+      pros: Capacità pronta all'istante zero
+      cons: Costa anche se il picco non arriva, serve saperlo in anticipo
+      when: Eventi programmati
+  numbers:
+    - "Autoscaling: decine di secondi o minuti dalla metrica alla capacità utile. Un picco virale arriva in secondi"
+    - "40 istanze × 20 connessioni = 800 connessioni: molto oltre il comodo per Postgres senza pooler"
+    - "Con PgBouncer in transaction mode, migliaia di client condividono 50-100 connessioni reali"
+    - "Cache locale con TTL 1-5 s davanti a Redis: assorbe la stragrande maggioranza delle letture su una hot key"
   interview_answer: >-
     Parto dal presupposto che l'autoscaling reagisce in minuti e il picco arriva in secondi,
     quindi serve qualcosa che assorba nel frattempo. Il primo strato è la CDN, perché la
     maggior parte del traffico virale chiede la stessa identica risorsa e può essere servita
     senza toccare l'origine. Il secondo è la cache applicativa con protezione dallo
     stampede. Il terzo è spostare le scritture su una coda, così il picco diventa una coda
-    più lunga invece di un database in ginocchio. Se nonostante tutto la capacità non basta
-    faccio load shedding, perché rifiutare una quota di traffico con un 503 onesto è meglio
-    che degradare per tutti fino al collasso. E se il picco è previsto, prescalo: è l'unica
-    cosa che funziona davvero sul momento zero.
+    più lunga invece di un database in ginocchio. Guardo con attenzione il pool di
+    connessioni, perché è lì che si satura prima della CPU: aggiungere istanze senza un
+    pooler moltiplica le connessioni e peggiora le cose. Se nonostante tutto la capacità non
+    basta faccio load shedding, perché rifiutare una quota di traffico con un 503 onesto è
+    meglio che degradare per tutti fino al collasso. E se il picco è previsto, prescalo: è
+    l'unica cosa che funziona davvero sul momento zero.
+  senior_signals:
+    - "Ragiona per strati di difesa e per tempi di reazione, non per singola tecnologia"
+    - "Nomina il pool di connessioni come vincolo reale prima della CPU"
+    - "Conosce il problema delle hot key e una difesa concreta"
+    - "Prevede il secondo picco al riavvio e la riapertura graduale"
   pitfalls:
     - "Contare solo sull'autoscaling per picchi istantanei"
     - "Scalare le istanze applicative e saturare le connessioni al database"
     - "Non gestire le hot key, e vedere un nodo in fiamme mentre gli altri sono scarichi"
-  follow_up_questions:
-    - "Come gestiresti un singolo contenuto virale che concentra il traffico su una chiave?"
-    - "Perché l'autoscaling non basta per un picco improvviso?"
+    - "Code senza limite: il picco diventa una coda infinita e un guasto più lento"
+    - "Riaprire tutto il traffico insieme dopo un incidente, con le cache fredde"
+  follow_ups:
+    - question: Come gestiresti un singolo contenuto virale che concentra il traffico su una chiave?
+      answer: >-
+        Su tre livelli. Davanti, la CDN: se il contenuto è pubblico, la quasi totalità
+        delle richieste non deve arrivare all'origine. Nella cache distribuita, replico
+        la chiave su N varianti e ne scelgo una a caso in lettura, così il carico si
+        distribuisce fra i nodi. Nel processo, una cache locale con TTL di pochi secondi
+        assorbe le letture ripetute senza nemmeno uscire dall'applicazione. E proteggo la
+        rigenerazione con single-flight, perché il momento della scadenza è esattamente
+        quello in cui tutto arriverebbe insieme al database.
+    - question: Perché l'autoscaling non basta per un picco improvviso?
+      answer: >-
+        Per i tempi. La metrica si aggrega su una finestra, il controller decide, il
+        container si avvia, l'applicazione si scalda, il pool si apre: decine di secondi
+        nel caso migliore. Un picco virale satura in pochi secondi. Inoltre l'autoscaling
+        aggiunge istanze applicative, ma il collo di bottiglia è quasi sempre il
+        database, che non scala allo stesso modo - anzi, più istanze significa più
+        connessioni e più pressione. Serve assorbire prima: CDN, cache, code, e se
+        necessario rifiutare.
+    - question: Cosa fai nei primi cinque minuti di un picco che sta saturando il sistema?
+      answer: >-
+        Prima stabilizzo, poi indago. Accendo il load shedding per priorità e alzo i
+        limiti di rate sui client più aggressivi, spengo con i feature flag le funzioni
+        costose e non essenziali, e verifico il pool di connessioni al database, che è il
+        sospetto numero uno. Solo dopo che la curva si è stabilizzata guardo cosa ha
+        causato il picco e se c'è una hot key. L'errore tipico è invertire l'ordine e
+        mettersi a indagare mentre il sistema affonda.
+  related: [rel-37-graceful-degradation, cache-25-cache-danger, dist-27-horizontal-vertical, core-09-rate-limiting-throttling]
+  resources:
+    - title: "Google SRE Book - Addressing Cascading Failures"
+      url: "https://sre.google/sre-book/addressing-cascading-failures/"
+      kind: book
+    - title: "AWS Builders' Library - Using load shedding to avoid overload"
+      url: "https://aws.amazon.com/builders-library/using-load-shedding-to-avoid-overload/"
+      kind: article
+    - title: "PgBouncer - Modalità di pooling"
+      url: "https://www.pgbouncer.org/features.html"
+      kind: doc

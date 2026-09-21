@@ -1,4 +1,6 @@
-# Categoria "Distributed Systems & Scaling" - concetti 26-30 della checklist.
+# Categoria "Distributed Systems" - distribuire il traffico, scalare, dividere (o non
+# dividere) il sistema in servizi e farli parlare fra loro.
+
 - id: dist-26-load-balancing
   title: Load balancing (round-robin, least connections, hashing)
   category: distributed
@@ -10,29 +12,168 @@
     Il load balancer distribuisce il traffico fra le istanze e le toglie dalla rotazione
     quando non rispondono. L'algoritmo conta meno dell'health check, che è ciò che
     determina se il sistema si accorge di un guasto.
+  deep_dive: |-
+    La prima distinzione è il livello. Un bilanciatore L4 lavora su TCP: vede indirizzi
+    e porte, è velocissimo e non sa nulla di HTTP. Un L7 termina la connessione HTTP,
+    quindi può instradare per path, header o cookie, riscrivere, ritentare una richiesta
+    su un'altra istanza e applicare rate limiting. Il prezzo è più CPU e un punto in cui
+    la connessione viene spezzata (rilevante per TLS e WebSocket).
+
+    Sugli algoritmi: il *round-robin* è equo se tutte le richieste costano uguale, e
+    smette di esserlo appena la durata varia - le richieste lente si accumulano
+    sull'istanza sfortunata. *Least connections* guarda quante richieste sono in corso
+    su ciascuna istanza ed è quasi sempre la scelta migliore con carichi eterogenei. Il
+    *peso* serve quando le macchine non sono identiche. L'*hashing* della chiave manda
+    sempre lo stesso client o lo stesso tenant sullo stesso nodo, il che è prezioso per
+    la località di cache, e in quel caso conviene il consistent hashing per non
+    rimescolare tutto a ogni cambio di flotta. Esiste anche una variante elegante,
+    *power of two choices*: si scelgono due istanze a caso e si manda la richiesta alla
+    meno carica; costa quanto il round-robin e si avvicina molto al least connections.
+
+    La parte che determina davvero l'affidabilità, però, è l'health check. La distinzione
+    che va conosciuta - e che i colloqui su Kubernetes chiedono sempre - è fra *liveness*
+    (il processo è vivo? se no, riavvialo), *readiness* (può servire traffico adesso? se
+    no, toglilo dalla rotazione ma non riavviarlo) e *startup* (sta ancora avviandosi,
+    non applicare gli altri due). Confonderle produce danni concreti: un liveness che
+    interroga il database riavvia in cascata tutte le istanze quando è il database ad
+    avere problemi, trasformando un guasto parziale in una interruzione totale.
+
+    Il secondo errore comune è un health check troppo superficiale: `return 200` dice
+    solo che il processo risponde, non che sia in grado di servire. Un buon readiness
+    verifica le dipendenze *necessarie* con un timeout breve e con un risultato in
+    cache, per non moltiplicare le query. E deve essere veloce: un check lento sotto
+    carico diventa esso stesso una fonte di falsi negativi.
+
+    Infine due meccanismi che fanno la differenza in produzione. Il *connection draining*
+    (deregistration delay): quando un'istanza viene tolta, il bilanciatore smette di
+    mandarle nuove richieste ma lascia finire quelle in corso - senza, ogni deploy
+    genera errori. E lo *slow start*: un'istanza appena aggiunta riceve traffico
+    gradualmente, perché a freddo ha cache vuote, JIT non ancora caldo e pool di
+    connessioni da creare; mandarle subito un quinto del traffico è il modo migliore per
+    farla cadere.
   key_points:
     - "Round-robin: equo se tutte le richieste costano uguale. Weighted round-robin se le istanze sono eterogenee"
     - "Least connections: migliore con richieste di durata variabile"
+    - "Power of two choices: scegli due istanze a caso e manda alla meno carica. Costo di round-robin, qualità vicina a least connections"
     - "IP hash / consistent hashing: stessa chiave sempre sullo stesso nodo, utile per la località di cache"
     - "L4 (TCP) è veloce e cieco; L7 (HTTP) può instradare per path, header, cookie e fare retry"
     - "Health check attivo (il LB interroga) vs passivo (il LB osserva gli errori). Servono entrambi"
-    - "Il consistent hashing evita il rimescolamento totale quando un nodo entra o esce"
+    - "Liveness = riavvia; readiness = togli dalla rotazione; startup = non applicare gli altri due durante l'avvio"
+    - "Mai far dipendere la liveness dal database: un guasto del DB riavvierebbe tutte le istanze insieme"
+    - "Connection draining: le richieste in corso finiscono prima di spegnere l'istanza, altrimenti ogni deploy genera errori"
+    - "Slow start: un'istanza appena avviata ha cache fredde: va caricata gradualmente"
     - "Il LB stesso non deve essere un single point of failure: va reso ridondante"
+  examples:
+    - title: Le tre probe, con la logica giusta in ciascuna
+      language: python
+      code: |-
+        @app.get("/health/live")          # LIVENESS: sono vivo? Nessuna dipendenza.
+        async def live() -> dict:
+            return {"status": "ok"}       # se questo non risponde, riavviami
+
+        @app.get("/health/ready")         # READINESS: posso servire? Dipendenze necessarie.
+        async def ready(db=Depends(get_db)) -> dict:
+            try:
+                await asyncio.wait_for(db.execute("SELECT 1"), timeout=1.0)
+            except Exception:
+                raise HTTPException(503, "database non raggiungibile")
+            return {"status": "ready"}    # se fallisce, toglimi dal traffico, NON riavviarmi
+      note: >-
+        L'errore da non fare: mettere il controllo del database dentro /health/live. Un
+        guasto del database riavvierebbe in cascata ogni istanza, moltiplicando il danno.
+    - title: Perché "due a caso" funziona così bene
+      language: python
+      code: |-
+        import random
+
+        def scegli_casuale(istanze):                     # distribuzione disomogenea
+            return random.choice(istanze)
+
+        def scegli_due(istanze):                         # power of two choices
+            a, b = random.sample(istanze, 2)
+            return a if a.in_corso <= b.in_corso else b
+      note: >-
+        Con la scelta puramente casuale il carico massimo cresce come log(n)/log(log(n));
+        guardando due candidati diventa log(log(n)): una differenza enorme, al costo di
+        una lettura in più.
+  trade_offs:
+    - option: Round-robin
+      pros: Semplicissimo, nessuno stato, prevedibile
+      cons: Pessimo se la durata delle richieste varia molto
+      when: Servizi omogenei con richieste brevi e simili
+    - option: Least connections
+      pros: Si adatta da solo a richieste lente e istanze degradate
+      cons: Richiede stato sul bilanciatore, meno banale in configurazioni distribuite
+      when: Durata delle richieste variabile (il caso normale)
+    - option: Consistent hashing
+      pros: Località di cache, sessioni naturalmente affini, poco rimescolamento
+      cons: Distribuzione meno uniforme, hotspot se una chiave è molto calda
+      when: Cache locali per tenant, shard di connessioni WebSocket
+    - option: L7 con retry
+      pros: Ritenta su un'altra istanza, instrada per contenuto, termina TLS
+      cons: Più latenza e CPU, i retry possono amplificare un sovraccarico
+      when: Traffico HTTP pubblico, API gateway
+  numbers:
+    - "Intervallo tipico di health check: 5-10 secondi, con 2-3 fallimenti consecutivi prima di togliere l'istanza"
+    - "Connection draining: 30-60 secondi coprono la maggior parte delle richieste in corso"
+    - "Timeout della probe di readiness: 1-2 secondi. Più lungo significa accorgersi tardi del degrado"
   interview_answer: >-
     Per un servizio stateless con richieste omogenee round-robin va benissimo. Passo a
     least connections quando la durata delle richieste varia molto, perché il round-robin
-    finisce per accumulare richieste lente sulla stessa istanza. Uso l'hashing quando voglio
-    località, per esempio per far sì che le richieste sullo stesso tenant colpiscano il nodo
-    che ha già la cache calda, e in quel caso scelgo consistent hashing per non rimescolare
-    tutto quando la flotta cambia dimensione. La parte su cui investo più attenzione però è
-    l'health check: un endpoint che risponde 200 perché il processo è vivo ma il database è
-    irraggiungibile è peggio di nessun health check.
+    finisce per accumulare richieste lente sulla stessa istanza. Uso l'hashing quando
+    voglio località, per esempio per far sì che le richieste sullo stesso tenant colpiscano
+    il nodo che ha già la cache calda, e in quel caso scelgo consistent hashing per non
+    rimescolare tutto quando la flotta cambia dimensione. La parte su cui investo più
+    attenzione però è l'health check: un endpoint che risponde 200 perché il processo è
+    vivo ma il database è irraggiungibile è peggio di nessun health check. E tengo separate
+    liveness e readiness, perché far dipendere la liveness dal database significa riavviare
+    tutte le istanze insieme proprio quando il database sta soffrendo.
+  senior_signals:
+    - "Distingue liveness, readiness e startup e spiega il danno di confonderle"
+    - "Cita connection draining e slow start, che si imparano solo dopo qualche deploy andato male"
+    - "Conosce power of two choices o almeno il limite del round-robin con richieste eterogenee"
+    - "Ricorda che il bilanciatore stesso va reso ridondante"
   pitfalls:
     - "Health check che controlla solo che il processo risponda, non che sia in grado di servire"
+    - "Liveness probe che dipende dal database: un guasto esterno riavvia tutta la flotta"
     - "Session affinity usata per compensare un servizio stateful"
-    - "Rimozione troppo aggressiva delle istanze, che causa un effetto valanga"
-  follow_up_questions:
-    - "Differenza tra liveness e readiness probe?"
+    - "Rimozione troppo aggressiva delle istanze, che causa un effetto valanga sulle rimanenti"
+    - "Nessun connection draining: ogni deploy genera errori visibili agli utenti"
+  follow_ups:
+    - question: Differenza tra liveness e readiness probe?
+      answer: >-
+        La liveness risponde a "il processo è irrimediabilmente bloccato?" e la sua
+        conseguenza è il riavvio; deve quindi dipendere solo da sé stessa. La readiness
+        risponde a "posso servire traffico adesso?" e la sua conseguenza è l'uscita
+        temporanea dalla rotazione; può controllare le dipendenze necessarie. La regola
+        pratica: se la risposta a un fallimento non è "riavviami", allora quel controllo
+        non va nella liveness.
+    - question: Come gestisci un deploy senza errori visibili agli utenti?
+      answer: >-
+        Readiness che diventa negativa appena arriva il segnale di spegnimento, così il
+        bilanciatore smette di mandare traffico; poi connection draining per lasciar
+        finire le richieste in corso; infine il processo esce. Sul lato nuovo, slow start
+        per non mandare traffico pieno a un'istanza fredda. Se manca la prima parte, il
+        bilanciatore continua a instradare verso un processo che sta morendo e gli utenti
+        vedono errori 502.
+    - question: Quando l'affinità di sessione è legittima?
+      answer: >-
+        Quando lo stato è intrinsecamente locale e spostarlo costerebbe più del beneficio:
+        connessioni WebSocket, sessioni di gioco, upload multipart in corso. In quei casi
+        uso consistent hashing per limitare il rimescolamento e progetto comunque il
+        client per riconnettersi. Non è legittima quando serve a compensare sessioni
+        tenute in memoria che potrebbero stare in Redis.
+  related: [dist-27-horizontal-vertical, core-05-stateless-vs-stateful, rel-39-deployments, rel-32-retries-timeouts-breakers]
+  resources:
+    - title: "Kubernetes - Liveness, Readiness e Startup Probes"
+      url: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+      kind: doc
+    - title: "Mitzenmacher - The Power of Two Choices in Randomized Load Balancing"
+      url: "https://www.eecs.harvard.edu/~michaelm/postscripts/mythesis.pdf"
+      kind: article
+    - title: "Google SRE Book - Load Balancing"
+      url: "https://sre.google/sre-book/load-balancing-datacenter/"
+      kind: book
 
 - id: dist-27-horizontal-vertical
   title: Scaling orizzontale vs verticale
@@ -45,13 +186,113 @@
     Verticale significa una macchina più grande, orizzontale più macchine. Il verticale è
     banale ma ha un tetto e un single point of failure; l'orizzontale non ha tetto ma
     richiede che il servizio sia stateless.
+  deep_dive: |-
+    Il verticale è la prima mossa perché non costa lavoro: si cambia taglia e si va
+    avanti. Ha due limiti. Il primo è fisico: esiste una macchina più grande di tutte, e
+    il costo cresce in modo superlineare molto prima di arrivarci. Il secondo è
+    l'affidabilità: una macchina sola resta un singolo punto di guasto, e il resize
+    richiede quasi sempre un riavvio.
+
+    L'orizzontale non ha tetto teorico ma ha un prerequisito, la statelessness, e un
+    costo nascosto, il coordinamento. Vale la pena citare la legge di Amdahl nella sua
+    forma pratica: la parte non parallelizzabile del lavoro mette un tetto al guadagno,
+    per quante istanze si aggiungano. Nella maggior parte dei sistemi web quella parte è
+    il database, motivo per cui "scaliamo aggiungendo pod" funziona finché il collo di
+    bottiglia non si sposta sul dato.
+
+    Per l'autoscaling la scelta della metrica è la decisione tecnica vera. La CPU è il
+    default di tutti gli esempi ed è sbagliata per i servizi I/O bound: un servizio che
+    passa il tempo ad aspettare il database o un'API esterna ha CPU bassa mentre le
+    richieste si accodano, quindi non scala mai e i tempi di risposta esplodono. Le
+    metriche buone sono la concorrenza (richieste in volo per istanza), la lunghezza
+    della coda e le richieste al secondo.
+
+    Qui torna utile la legge di Little, che è il singolo strumento più pratico per
+    dimensionare: `L = λ · W`, cioè il numero medio di richieste nel sistema è pari al
+    tasso di arrivo per il tempo di risposta. Con 500 richieste al secondo e 200 ms di
+    latenza media servono in media 100 richieste in volo; se ogni istanza ne regge 25 in
+    parallelo, servono 4 istanze - più margine. È un conto che si fa in trenta secondi
+    in un colloquio di system design e fa una figura eccellente.
+
+    L'autoscaling ha due parametri che vanno impostati con la testa: il *cooldown*, per
+    evitare il flapping (scala su, scala giù, ripete), e la velocità di reazione, che
+    deve essere più rapida in salita che in discesa - perdere capacità durante un picco
+    costa molto più che tenere un'istanza in più per qualche minuto. E va ricordato che
+    l'autoscaling non è istantaneo: fra la metrica, la decisione, l'avvio del container e
+    il riscaldamento passano decine di secondi o minuti, motivo per cui i picchi noti
+    (una campagna, uno spot TV) si gestiscono con il pre-scaling.
+
+    Infine lo scale-to-zero: paghi solo ciò che usi, al prezzo del cold start. Va bene
+    per ambienti di test, per job e per servizi a traffico sporadico dove qualche secondo
+    di attesa alla prima richiesta è accettabile; va male per un'API con SLO di latenza
+    stretto.
   key_points:
     - "Verticale: zero cambi al codice, downtime per il resize, costo superlineare all'aumentare della taglia"
     - "Orizzontale: capacità teoricamente illimitata, ridondanza inclusa, ma richiede statelessness e load balancing"
+    - "Legge di Amdahl: la parte non parallelizzabile mette un tetto al guadagno, per quante istanze si aggiungano"
     - "I database si scalano orizzontalmente molto peggio delle applicazioni: da qui replica e sharding"
-    - "Autoscaling: metrica giusta (RPS o lunghezza coda, spesso meglio della CPU), cooldown per evitare flapping"
+    - "Autoscaling: metrica giusta (concorrenza, lunghezza coda o RPS, spesso meglio della CPU), cooldown per evitare flapping"
+    - "Legge di Little (L = λ·W) dimensiona la concorrenza necessaria: 500 rps a 200 ms = 100 richieste in volo"
+    - "Scalare più in fretta in salita che in discesa: perdere capacità durante un picco costa più di un'istanza in più"
+    - "L'autoscaling non è istantaneo: metrica, decisione, avvio e riscaldamento richiedono decine di secondi"
     - "Scale-to-zero: paghi solo l'uso, al prezzo di un cold start"
     - "In pratica si fa entrambi: verticale finché è economico, poi orizzontale"
+  examples:
+    - title: Dimensionare con la legge di Little
+      language: python
+      code: |-
+        # L = lambda * W : richieste in volo = arrivi/s * tempo di risposta
+        def istanze_necessarie(rps: float, latenza_s: float,
+                               concorrenza_per_istanza: int, margine: float = 1.5) -> int:
+            in_volo = rps * latenza_s
+            return math.ceil(in_volo / concorrenza_per_istanza * margine)
+
+        istanze_necessarie(rps=500, latenza_s=0.2, concorrenza_per_istanza=25)
+        # 500 * 0.2 = 100 richieste in volo -> 100/25 = 4 -> con margine: 6 istanze
+      note: >-
+        Lo stesso conto dice anche cosa succede se la latenza raddoppia: servono il doppio
+        delle istanze a parità di traffico. È il motivo per cui una dipendenza lenta si
+        traduce in costo infrastrutturale.
+    - title: Autoscaling su una metrica sensata
+      language: yaml
+      code: |-
+        # Kubernetes HPA su richieste concorrenti invece che su CPU
+        apiVersion: autoscaling/v2
+        kind: HorizontalPodAutoscaler
+        spec:
+          minReplicas: 2                 # mai 1: nessuna ridondanza
+          maxReplicas: 30
+          metrics:
+            - type: Pods
+              pods:
+                metric: { name: http_requests_in_flight }
+                target: { type: AverageValue, averageValue: "20" }
+          behavior:
+            scaleUp:                     # reagisce in fretta
+              stabilizationWindowSeconds: 0
+            scaleDown:                   # scende con calma, per non fare flapping
+              stabilizationWindowSeconds: 300
+      note: >-
+        Asimmetria voluta: salire subito, scendere piano. L'errore opposto produce un
+        sistema che toglie capacità proprio mentre il picco sta ancora arrivando.
+  trade_offs:
+    - option: Verticale
+      pros: Nessun cambio al codice, immediato, nessun coordinamento
+      cons: Tetto fisico, costo superlineare, riavvio per il resize, singolo punto di guasto
+      when: Primo intervento, database, carichi che stanno ancora su una macchina
+    - option: Orizzontale
+      pros: Nessun tetto pratico, ridondanza inclusa, deploy senza interruzioni
+      cons: Richiede statelessness, load balancing, osservabilità distribuita
+      when: Servizi applicativi, traffico variabile
+    - option: Scale-to-zero
+      pros: Costo proporzionale all'uso reale, ottimo per ambienti secondari
+      cons: Cold start di secondi, pessimo per SLO di latenza stretti
+      when: Ambienti di prova, job periodici, servizi a traffico sporadico
+  numbers:
+    - "Legge di Little: richieste in volo = rps × latenza. 1.000 rps a 100 ms = 100 in volo"
+    - "Cold start tipico di un container: 1-10 secondi; di una funzione serverless: centinaia di ms-qualche secondo"
+    - "Cooldown di scale-down comune: 5 minuti; di scale-up: quasi nullo"
+    - "minReplicas: mai 1 in produzione, altrimenti ogni riavvio è un'interruzione"
   interview_answer: >-
     Il verticale è la prima mossa perché non costa lavoro: una macchina più grossa e si va
     avanti. Ha però due limiti, il tetto fisico della taglia massima e il fatto che resto
@@ -59,13 +300,51 @@
     all'orizzontale, che richiede il prerequisito di avere un servizio stateless. Per
     l'autoscaling evito la CPU come unica metrica: su un servizio I/O bound la CPU resta
     bassa mentre le richieste si accodano, quindi preferisco scalare sulla lunghezza della
-    coda o sulle richieste concorrenti.
+    coda o sulle richieste concorrenti. Per dimensionare uso la legge di Little: richieste
+    in volo uguale traffico per latenza, e da lì ricavo quante istanze servono. E ricordo
+    sempre che scalare l'applicazione sposta il collo di bottiglia sul database, che si
+    scala molto peggio.
+  senior_signals:
+    - "Usa la legge di Little per stimare la capacità invece di andare a sensazione"
+    - "Sa perché la CPU è una metrica sbagliata per servizi I/O bound"
+    - "Rende asimmetriche salita e discesa dell'autoscaling"
+    - "Ricorda che il collo di bottiglia si sposta sul database e non finge di averlo risolto"
   pitfalls:
     - "Autoscaling sulla CPU per un servizio I/O bound"
     - "Scalare l'applicazione lasciando il database come collo di bottiglia"
     - "Soglie di scaling senza cooldown, che causano flapping"
-  follow_up_questions:
-    - "Che metrica useresti per l'autoscaling di un servizio che chiama API esterne lente?"
+    - "Contare su un autoscaling istantaneo per un picco previsto: per quelli serve pre-scaling"
+    - "minReplicas a 1: ogni riavvio diventa un'interruzione"
+  follow_ups:
+    - question: Che metrica useresti per l'autoscaling di un servizio che chiama API esterne lente?
+      answer: >-
+        Le richieste concorrenti in volo, o la lunghezza della coda in ingresso. Un
+        servizio che aspetta risposte esterne consuma pochissima CPU mentre accumula
+        richieste: la CPU direbbe "tutto tranquillo" mentre la latenza esplode. La
+        concorrenza cattura esattamente il fenomeno, ed è anche la metrica che si lega
+        direttamente alla legge di Little.
+    - question: Come gestisci un picco previsto, tipo una campagna che parte a mezzogiorno?
+      answer: >-
+        Non lo lascio all'autoscaling, che reagisce dopo: faccio pre-scaling programmato
+        prima dell'evento, con un margine, e lo lascio scendere dopo. In più verifico a
+        monte le difese - rate limiting, code per assorbire le scritture, cache
+        riscaldata - perché il problema di un picco previsto non è la capacità
+        applicativa ma quello che c'è dietro, in genere il database.
+    - question: Quando il verticale è la risposta giusta anche se sembra antiquato?
+      answer: >-
+        Per i database, quasi sempre, finché è possibile: raddoppiare CPU e memoria del
+        primario costa un riavvio, mentre fare sharding costa mesi. E per carichi con
+        stato intrinseco o con forte località dei dati, dove distribuire significa
+        introdurre coordinamento. Le macchine moderne arrivano a centinaia di core e
+        terabyte di RAM: il tetto è molto più alto di quanto si pensi.
+  related: [core-05-stateless-vs-stateful, db-18-read-replicas, dist-26-load-balancing, rel-40-traffic-spikes]
+  resources:
+    - title: "Legge di Little (Wikipedia)"
+      url: "https://en.wikipedia.org/wiki/Little%27s_law"
+      kind: article
+    - title: "Kubernetes - Horizontal Pod Autoscaling"
+      url: "https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/"
+      kind: doc
 
 - id: dist-28-microservices-monolith
   title: Microservizi vs monolite (trade-off)
@@ -78,13 +357,109 @@
     I microservizi comprano indipendenza di deploy e di scaling pagando in complessità
     operativa e nella perdita delle transazioni locali. La scelta è tanto organizzativa
     quanto tecnica: la legge di Conway non si aggira.
+  deep_dive: |-
+    La domanda giusta non è "monolite o microservizi" ma "quali confini, e dove passa la
+    rete". Un monolite modulare ha confini interni netti - moduli che comunicano solo
+    attraverso interfacce pubbliche, ciascuno padrone delle proprie tabelle - e un solo
+    deploy. Ha quindi il beneficio principale dei microservizi, la separazione delle
+    responsabilità, senza il costo principale, che è trasformare ogni chiamata di
+    funzione in una chiamata di rete che può fallire, essere lenta o arrivare due volte.
+
+    Ciò che si perde passando alla rete va nominato con precisione: la transazione
+    locale (due servizi non condividono un commit, quindi servono saghe e compensazioni),
+    il refactoring atomico (spostare un confine fra due servizi richiede un rilascio
+    coordinato), il debug lineare (serve tracing distribuito con correlation id), e la
+    disponibilità composta. Quest'ultima si calcola: cinque servizi al 99,9% in catena
+    sincrona danno 0,999^5 ≈ 99,5%, cioè da 43 minuti a oltre 3 ore e mezza di
+    indisponibilità al mese. Il rimedio non è chiedere più affidabilità a ciascuno, è
+    ridurre le dipendenze sincrone.
+
+    Ciò che si guadagna è altrettanto concreto: rilascio indipendente (il team A non
+    aspetta il team B), scaling mirato (solo il servizio di ricerca ha bisogno di venti
+    istanze), isolamento dei guasti (se il servizio di raccomandazioni cade, il carrello
+    funziona), libertà tecnologica dove serve davvero, e confini organizzativi chiari.
+    La legge di Conway dice che l'architettura tende a rispecchiare la struttura
+    comunicativa dell'organizzazione: se ci sono tre team con obiettivi distinti, tre
+    servizi sono una scelta naturale; se c'è un team solo, dieci servizi sono dieci volte
+    il lavoro operativo senza alcun beneficio organizzativo.
+
+    L'antipattern da saper nominare è il *monolite distribuito*: servizi separati che
+    condividono lo stesso database, o che devono essere rilasciati insieme perché i loro
+    contratti cambiano in blocco. Ha tutti i costi della rete e nessuna autonomia: è
+    peggio di entrambe le alternative. Il segnale diagnostico è semplice: se per
+    rilasciare il servizio A devi rilasciare anche B e C, non hai microservizi.
+
+    La strada praticata da chi ci è passato è quasi sempre la stessa: partire da un
+    monolite modulare, lasciare che l'uso riveli i confini veri, ed estrarre un servizio
+    quando esiste una ragione precisa - un profilo di carico diverso, un team diverso, un
+    ciclo di rilascio diverso, un requisito di isolamento o di conformità. L'estrazione si
+    fa con lo *strangler fig*: si mette una facciata davanti, si sposta una funzionalità
+    alla volta dietro la facciata, e si spegne il vecchio percorso quando non passa più
+    traffico.
   key_points:
     - "Monolite: transazioni ACID locali, refactor facile, debug lineare, deploy unico"
     - "Microservizi: deploy e scaling indipendenti, isolamento dei guasti, autonomia dei team"
     - "Il costo: chiamate di rete che falliscono, consistenza eventuale, tracing distribuito, versioning dei contratti"
+    - "La disponibilità si compone: cinque servizi al 99,9% in catena sincrona danno circa 99,5%"
     - "Il monolite modulare è quasi sempre il punto di partenza giusto: confini chiari, un solo deploy"
     - "Un microservizio che non ha un proprio database non è un microservizio: è un monolite distribuito, il peggiore dei due mondi"
-    - "Estrai un servizio quando hai una ragione precisa: scaling diverso, team diverso, ciclo di rilascio diverso, requisito di isolamento"
+    - "Segnale diagnostico: se per rilasciare A devi rilasciare anche B e C, non hai microservizi"
+    - "Legge di Conway: l'architettura rispecchia la struttura dei team. Con un team solo, dieci servizi sono solo dieci volte il lavoro"
+    - "Estrai un servizio quando hai una ragione precisa: scaling diverso, team diverso, ciclo di rilascio diverso, isolamento"
+    - "L'estrazione si fa con lo strangler fig: facciata davanti, una funzionalità alla volta, spegnimento del vecchio percorso"
+  examples:
+    - title: La disponibilità composta, in numeri
+      language: python
+      code: |-
+        def disponibilita_catena(singola: float, servizi: int) -> float:
+            return singola ** servizi
+
+        for n in (1, 3, 5, 10):
+            d = disponibilita_catena(0.999, n)
+            minuti_giu = (1 - d) * 30 * 24 * 60
+            print(f"{n} servizi -> {d:.4%}  ({minuti_giu:.0f} minuti/mese giù)")
+        # 1  -> 99.9000%   (43 min)
+        # 3  -> 99.7003%   (130 min)
+        # 5  -> 99.5010%   (216 min)
+        # 10 -> 99.0045%   (430 min)
+      note: >-
+        Ogni dipendenza sincrona in più peggiora il risultato. È l'argomento tecnico più
+        forte per rendere asincrono ciò che non deve rispondere subito.
+    - title: Il confine giusto passa dai dati
+      language: text
+      code: |-
+        MONOLITE DISTRIBUITO (il peggio dei due mondi)
+          servizio-ordini  ─┐
+          servizio-spedizioni ├─> UNICO DATABASE (tabelle condivise)
+          servizio-fatture ─┘
+          -> cambio di schema = rilascio coordinato di tre servizi
+          -> nessuna autonomia, tutta la latenza della rete
+
+        MICROSERVIZI VERI
+          servizio-ordini      -> db_ordini      ─┐
+          servizio-spedizioni  -> db_spedizioni   ├─ eventi (ordine_creato, spedizione_partita)
+          servizio-fatture     -> db_fatture     ─┘
+          -> ciascuno rilascia da solo; i dati altrui si leggono via API o copia locale
+      note: >-
+        La proprietà esclusiva dei dati è ciò che rende un servizio autonomo. Senza,
+        l'indipendenza è solo apparente.
+  trade_offs:
+    - option: Monolite modulare
+      pros: Transazioni locali, refactor atomico, un solo deploy e un solo posto dove guardare
+      cons: Scaling non mirato, un bug può abbattere tutto, rilascio condiviso
+      when: Inizio di qualunque prodotto, team singolo o pochi team
+    - option: Microservizi
+      pros: Autonomia di rilascio e scaling, isolamento dei guasti, confini organizzativi
+      cons: Rete, consistenza eventuale, osservabilità e piattaforma da costruire
+      when: Più team con cicli diversi, parti con carichi molto diversi, requisiti di isolamento
+    - option: Monolite distribuito
+      pros: Nessuno
+      cons: Costi della rete senza autonomia, rilasci coordinati, debugging difficile
+      when: Mai per scelta; ci si finisce dividendo il codice senza dividere i dati
+  numbers:
+    - "0,999^5 ≈ 99,5%: da 43 a 216 minuti di indisponibilità al mese solo per averli messi in catena"
+    - "Un microservizio in più costa: pipeline, monitoraggio, allarmi, rotazione on-call, aggiornamenti di sicurezza"
+    - "Regola pratica diffusa: un servizio per team che lo può mantenere, non un servizio per entità di dominio"
   interview_answer: >-
     Parto da un monolite modulare, con confini di dominio netti dentro un unico deploy.
     Questo mi dà il vantaggio principale dei microservizi, cioè i confini, senza pagare la
@@ -92,14 +467,56 @@
     carico molto diverso, un team che deve rilasciare a ritmo suo, o un requisito di
     isolamento. Quello che evito è il monolite distribuito, cioè servizi separati che
     condividono lo stesso database: lì ho tutti i costi della rete e nessuna autonomia, e
-    ogni cambio di schema diventa un rilascio coordinato.
+    ogni cambio di schema diventa un rilascio coordinato. Un argomento numerico che porto
+    spesso è la disponibilità composta: cinque servizi al 99,9% in catena sincrona danno
+    99,5%, quindi ogni dipendenza sincrona in più va giustificata.
+  senior_signals:
+    - "Calcola la disponibilità composta invece di parlarne in astratto"
+    - "Riconosce e sa nominare il monolite distribuito, con il suo segnale diagnostico"
+    - "Collega i confini dei servizi ai confini dei team (Conway) e alla proprietà dei dati"
+    - "Descrive lo strangler fig come metodo di estrazione, con un percorso reversibile"
   pitfalls:
     - "Partire da microservizi senza conoscere ancora i confini del dominio"
     - "Database condiviso fra servizi"
     - "Chiamate sincrone a catena fra molti servizi: la latenza e i guasti si moltiplicano"
-  follow_up_questions:
-    - "Come gestiresti una transazione che coinvolge tre microservizi?"
-    - "Cos'è un monolite distribuito e perché è il peggiore dei due mondi?"
+    - "Un servizio per entità di dominio, senza un team in grado di mantenerlo"
+    - "Estrarre un servizio senza prima separare i dati: si ottiene solo latenza in più"
+  follow_ups:
+    - question: Come gestiresti una transazione che coinvolge tre microservizi?
+      answer: >-
+        Non con una transazione distribuita: con una saga. Ogni servizio esegue la
+        propria transazione locale e pubblica un evento; se un passo fallisce si
+        eseguono le compensazioni dei passi già completati. Serve idempotenza su ogni
+        passo, perché gli eventi arrivano almeno una volta, e serve rendere visibili gli
+        stati intermedi nel modello di dominio ("ordine in attesa di pagamento") invece
+        di fingere che non esistano.
+    - question: Cos'è un monolite distribuito e perché è il peggiore dei due mondi?
+      answer: >-
+        Sono servizi separati fisicamente ma accoppiati logicamente: condividono il
+        database o hanno contratti che cambiano insieme. Paghi latenza di rete,
+        serializzazione, guasti parziali e complessità operativa, e in cambio non ottieni
+        né l'autonomia di rilascio né l'isolamento dei guasti. Il test è semplice: se non
+        puoi rilasciare un servizio da solo, quel servizio non esiste davvero.
+    - question: Come estrarresti un servizio da un monolite esistente?
+      answer: >-
+        Con lo strangler fig. Primo, isolo il modulo dentro il monolite e gli do
+        un'interfaccia chiara. Secondo, separo i dati: le tabelle diventano di sua
+        proprietà esclusiva, e gli altri moduli le leggono solo tramite quell'interfaccia.
+        Terzo, sposto l'implementazione fuori, dietro una facciata che instrada al vecchio
+        o al nuovo percorso. Quarto, sposto il traffico gradualmente e spengo il vecchio.
+        L'ordine conta: separare i dati per ultimo è l'errore che fa fallire la maggior
+        parte delle estrazioni.
+  related: [dist-29-service-communication, rel-36-saga, pat-06-hexagonal-clean, rel-38-observability]
+  resources:
+    - title: "Martin Fowler - Monolith First"
+      url: "https://martinfowler.com/bliki/MonolithFirst.html"
+      kind: article
+    - title: "Martin Fowler - Strangler Fig Application"
+      url: "https://martinfowler.com/bliki/StranglerFigApplication.html"
+      kind: article
+    - title: "Sam Newman - Building Microservices"
+      url: "https://samnewman.io/books/building_microservices_2nd_edition/"
+      kind: book
 
 - id: dist-29-service-communication
   title: Comunicazione fra servizi (sincrona vs asincrona)
@@ -112,28 +529,174 @@
     Sincrono significa che il chiamante aspetta e quindi eredita la disponibilità e la
     latenza del chiamato. Asincrono disaccoppia in tempo, al prezzo della consistenza
     immediata e di un debugging più complicato.
+  deep_dive: |-
+    La domanda che decide tutto è una: *il chiamante ha bisogno della risposta per
+    proseguire?* Se sto validando una carta di credito sì, quindi sincrono. Se sto
+    inviando una mail di conferma no, e allora metterla in coda significa che l'utente
+    non aspetta il provider SMTP e che un guasto di quel provider non fa fallire
+    l'ordine. La maggior parte degli errori architetturali in questo campo nasce dal
+    rendere sincrono ciò che è un effetto collaterale.
+
+    Nel sincrono il costo nascosto è l'accoppiamento della disponibilità: se A chiama B
+    e B è giù, A è giù. E si compone lungo la catena, come si è visto: cinque salti al
+    99,9% danno 99,5%. Ci sono tre strumenti che rendono il sincrono sopportabile, e
+    vanno usati insieme: *timeout* sempre e ovunque (un client HTTP senza timeout è un
+    bug), *retry con backoff e jitter* solo su operazioni idempotenti, e *circuit
+    breaker* per smettere di chiamare un servizio che sta chiaramente male. Un concetto
+    meno noto e molto utile è il *retry budget*: invece di permettere N tentativi per
+    richiesta, si limita la percentuale di traffico extra generata dai retry (per
+    esempio il 10%), così un guasto diffuso non si trasforma in un'amplificazione che
+    tiene giù il servizio che stava tornando su.
+
+    Sul protocollo, per il traffico interno gRPC ha vantaggi concreti: contratto
+    tipizzato e versionabile (protobuf), HTTP/2 con multiplexing, payload binario più
+    compatto, streaming bidirezionale e scadenze propagate automaticamente. Per il
+    traffico esterno REST resta più semplice da consumare, cacheare e ispezionare.
+
+    Nell'asincrono si guadagna tolleranza ai guasti e assorbimento dei picchi - la coda
+    fa da ammortizzatore fra un produttore veloce e un consumatore lento - e si paga con
+    la consistenza eventuale e con l'osservabilità. Tre cose vanno messe in conto fin
+    dall'inizio: *consumer idempotente* (la consegna è at-least-once, i duplicati
+    arriveranno), *dead letter queue* per i messaggi che continuano a fallire, e
+    *correlation id* propagato in ogni messaggio, altrimenti ricostruire cosa è successo
+    diventa impossibile. Va anche deciso cosa fare quando la coda cresce: la
+    backpressure non è automatica, e una coda che cresce senza limite è solo un guasto
+    più lento.
+
+    C'è poi una terza via spesso dimenticata: il *request-reply asincrono*. Il client
+    invia un comando, riceve subito 202 Accepted con un URL di stato, e recupera il
+    risultato quando è pronto (polling, webhook o WebSocket). È il modo giusto di
+    modellare le operazioni lunghe - generazione di un report, elaborazione di un video -
+    senza tenere una connessione HTTP aperta per minuti.
   key_points:
     - "Sincrono (REST, gRPC): semplice, risposta immediata, ma accoppia disponibilità. Se A chiama B e B è giù, A è giù"
     - "Catene sincrone: la disponibilità si moltiplica. Cinque servizi al 99,9% danno 99,5%"
     - "Asincrono (code, eventi): il chiamante non aspetta, i picchi si assorbono, i consumatori scalano da soli"
-    - "gRPC conviene per il traffico interno: contratti tipizzati, HTTP/2, streaming, payload binario compatto"
+    - "Nel sincrono servono sempre timeout, retry con backoff e jitter (solo su operazioni idempotenti) e circuit breaker"
+    - "Retry budget: si limita la percentuale di traffico extra dovuta ai retry, per non amplificare un guasto"
+    - "gRPC conviene per il traffico interno: contratti tipizzati, HTTP/2, streaming, payload binario compatto, deadline propagate"
     - "Regola pratica: sincrono quando serve la risposta per proseguire, asincrono quando è un effetto collaterale (email, indicizzazione, analytics)"
     - "In asincrono servono sempre: idempotenza del consumer, dead letter queue, tracing con correlation id"
+    - "Una coda che cresce senza limite non è resilienza: è un guasto più lento. Serve backpressure o scarto esplicito"
+    - "Terza via: request-reply asincrono con 202 Accepted e URL di stato, per le operazioni lunghe"
+  examples:
+    - title: Chiamata sincrona con tutte le difese
+      language: python
+      code: |-
+        import httpx
+        from tenacity import retry, stop_after_attempt, wait_exponential_jitter
+
+        # Timeout separati: connessione breve, lettura più lunga ma finita.
+        CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(connect=1.0, read=3.0, write=3.0, pool=1.0))
+
+        @retry(stop=stop_after_attempt(3),
+               wait=wait_exponential_jitter(initial=0.1, max=2.0),
+               reraise=True)
+        async def verifica_pagamento(id_: str) -> dict:
+            # La chiamata è idempotente (GET): ritentarla è sicuro.
+            r = await CLIENT.get(f"https://psp.example/payments/{id_}")
+            r.raise_for_status()
+            return r.json()
+      note: >-
+        Tre dettagli: timeout distinti per fase, jitter sul backoff, e retry solo perché
+        l'operazione è idempotente. Su una POST di addebito servirebbe una idempotency key.
+    - title: Operazione lunga senza tenere aperta la connessione
+      language: http
+      code: |-
+        POST /v1/report
+        {"periodo": "2026-02"}
+
+        HTTP/1.1 202 Accepted
+        Location: /v1/report/job_8f2a
+        Retry-After: 5
+
+        # Il client interroga lo stato finché non è pronto
+        GET /v1/report/job_8f2a
+        -> 200 {"stato": "in_corso", "avanzamento": 0.4}
+        -> 303 See Other, Location: /v1/report/job_8f2a/risultato    (quando finisce)
+      note: >-
+        Meglio di una richiesta HTTP tenuta aperta per tre minuti: sopravvive a proxy,
+        timeout e riavvii, ed è ritentabile.
+  trade_offs:
+    - option: REST sincrono
+      pros: Semplicissimo da consumare e ispezionare, errori immediati
+      cons: Accoppia disponibilità e latenza, nessun assorbimento dei picchi
+      when: Serve la risposta per proseguire, client esterni
+    - option: gRPC sincrono
+      pros: Contratto tipizzato, binario compatto, streaming, deadline propagate
+      cons: Poco amichevole per browser e strumenti generici
+      when: Traffico interno fra servizi
+    - option: Coda / evento
+      pros: Disaccoppia disponibilità, assorbe picchi, consumatori indipendenti
+      cons: Consistenza eventuale, duplicati, debug più difficile
+      when: Effetti collaterali, elaborazioni lunghe, fan-out
+    - option: Request-reply asincrono (202 + stato)
+      pros: Nessuna connessione lunga, resiste a riavvii e timeout
+      cons: Due interazioni invece di una, stato del job da gestire
+      when: Operazioni che durano più di qualche secondo
+  numbers:
+    - "Timeout tipici per chiamata interna: 1 s connessione, 2-5 s lettura. Mai infinito"
+    - "Retry: 2-3 tentativi con backoff esponenziale e jitter; oltre si amplifica il guasto"
+    - "Retry budget comune: non più del 10-20% di traffico aggiuntivo dovuto ai retry"
+    - "Se la latenza di un servizio interno supera i 100-200 ms, va considerato se debba essere davvero sincrono"
   interview_answer: >-
     La domanda che mi faccio è se il chiamante ha davvero bisogno della risposta per
     proseguire. Se sto validando un pagamento sì, quindi sincrono. Se sto mandando una mail
     di conferma no, e allora la metto su una coda: l'utente non deve aspettare il provider
     SMTP e se quello è giù la mail parte dopo invece di far fallire l'ordine. Il rischio
     delle catene sincrone è che la disponibilità si moltiplica, quindi ogni salto in più
-    abbassa il numero finale. Quando vado asincrono metto in conto subito tre cose:
-    consumer idempotente, dead letter queue e correlation id propagato, altrimenti il
-    debugging diventa impossibile.
+    abbassa il numero finale, e per questo metto sempre timeout, retry con jitter solo su
+    operazioni idempotenti e circuit breaker, con un budget sui retry per non amplificare
+    il guasto. Quando vado asincrono metto in conto subito tre cose: consumer idempotente,
+    dead letter queue e correlation id propagato, altrimenti il debugging diventa
+    impossibile.
+  senior_signals:
+    - "Decide in base a 'serve la risposta per proseguire?' e non per gusto architetturale"
+    - "Cita il retry budget, non solo il retry con backoff"
+    - "Propone il 202 + URL di stato per le operazioni lunghe"
+    - "Sa che una coda che cresce è un guasto rimandato e parla di backpressure"
   pitfalls:
     - "Catene sincrone lunghe senza timeout né circuit breaker"
     - "Asincrono dove l'utente si aspetta un esito immediato"
     - "Nessuna dead letter queue: i messaggi problematici girano all'infinito"
-  follow_up_questions:
-    - "Come tracci una richiesta che attraversa una coda?"
+    - "Retry su operazioni non idempotenti: duplicati garantiti"
+    - "Client HTTP senza timeout: una dipendenza lenta esaurisce il pool di connessioni e blocca tutto"
+  follow_ups:
+    - question: Come tracci una richiesta che attraversa una coda?
+      answer: >-
+        Propagando il contesto di tracing nel messaggio: con OpenTelemetry si iniettano
+        `traceparent` e `tracestate` negli header del messaggio e si estraggono nel
+        consumer, che continua la traccia come span figlio (con un collegamento, perché
+        è asincrona). Senza questo si perde il filo esattamente nel punto in cui i
+        problemi sono più difficili. In più, ogni log dovrebbe portare lo stesso
+        correlation id.
+    - question: Quando conviene gRPC rispetto a REST?
+      answer: >-
+        Per il traffico interno, quando i chiamanti sono altri servizi e non browser: il
+        contratto protobuf è tipizzato e versionabile, il payload è più compatto, HTTP/2
+        evita l'head-of-line blocking a livello applicativo, e le deadline si propagano
+        lungo la catena. Resto su REST per le API pubbliche, dove contano
+        l'ispezionabilità, la cache HTTP e il fatto che chiunque sappia usarle con curl.
+    - question: Cosa fai quando la coda cresce e non smette?
+      answer: >-
+        Prima capisco se è un problema di capacità (i consumatori non bastano) o di
+        veleno (un messaggio che fallisce sempre e blocca l'avanzamento). Nel primo caso
+        scalo i consumatori, ma solo se la risorsa a valle regge, altrimenti sposto il
+        collo di bottiglia. Nel secondo isolo il messaggio nella dead letter queue. E
+        decido una politica esplicita per il sovraccarico: scartare i messaggi più
+        vecchi, rifiutare in ingresso con backpressure, o degradare. Lasciar crescere è
+        l'unica opzione che non funziona.
+  related: [dist-30-message-queues, rel-32-retries-timeouts-breakers, dist-28-microservices-monolith, rel-38-observability]
+  resources:
+    - title: "gRPC - Introduction and core concepts"
+      url: "https://grpc.io/docs/what-is-grpc/core-concepts/"
+      kind: doc
+    - title: "AWS Builders' Library - Timeouts, retries and backoff with jitter"
+      url: "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/"
+      kind: article
+    - title: "OpenTelemetry - Context propagation"
+      url: "https://opentelemetry.io/docs/concepts/context-propagation/"
+      kind: doc
 
 - id: dist-30-message-queues
   title: Message queue (Kafka, RabbitMQ, SQS)
@@ -146,29 +709,207 @@
     Le code disaccoppiano produttore e consumatore, assorbono i picchi e permettono di
     ritentare. Log distribuiti come Kafka e broker di messaggi come RabbitMQ risolvono
     però problemi diversi.
+  deep_dive: |-
+    La differenza strutturale è cosa succede al messaggio dopo il consumo. In un broker
+    di messaggi tradizionale (RabbitMQ, SQS) il messaggio viene *rimosso* quando il
+    consumatore conferma: la coda è un elenco di lavori da fare. In un log distribuito
+    (Kafka) il messaggio *resta* per tutto il periodo di ritenzione e ogni consumatore
+    tiene il proprio offset: il log è una cronaca degli eventi, rileggibile. Da qui
+    discende tutto il resto, compresa la possibilità - solo in Kafka - di far entrare un
+    nuovo consumatore che rilegge la storia dall'inizio per costruirsi il proprio stato.
+
+    In Kafka l'unità di parallelismo è la *partizione*. L'ordine è garantito solo dentro
+    una partizione, e la chiave del messaggio decide in quale finisce: se serve l'ordine
+    per utente, la chiave deve essere l'id utente. Dentro un consumer group ogni
+    partizione è assegnata a un solo consumatore, quindi il parallelismo massimo è pari
+    al numero di partizioni: aggiungere consumatori oltre quel numero li lascia
+    semplicemente inattivi. Aumentare le partizioni è possibile ma non retroattivo, e
+    cambia la distribuzione delle chiavi: è una decisione di progetto.
+
+    Il *rebalancing* è il momento in cui le partizioni vengono riassegnate: un
+    consumatore che entra o esce, o che non manda heartbeat in tempo, fa fermare
+    brevemente il gruppo. È la causa più comune di "il consumer si blocca ogni tanto":
+    di solito il lavoro per messaggio supera `max.poll.interval.ms` e il broker considera
+    morto quel consumatore. La cura è ridurre il batch o spostare il lavoro lungo fuori
+    dal ciclo di poll.
+
+    Sulle garanzie: quasi tutto è *at-least-once*. Kafka offre anche l'exactly-once
+    (produttore idempotente più transazioni) ma vale *dentro* Kafka - da topic a topic,
+    incluso l'offset - non verso un sistema esterno: se il consumatore scrive su un
+    database, l'atomicità fra scrittura e commit dell'offset va costruita (pattern
+    outbox, o scrivere l'offset nello stesso database in modo transazionale). Per questo
+    la risposta corretta alla domanda "come garantisci exactly-once?" comincia sempre
+    con "rendo idempotente il consumatore".
+
+    SQS ha due modalità: Standard, at-least-once senza ordine garantito e throughput
+    praticamente illimitato; FIFO, con ordine e deduplicazione per message group, a 300
+    messaggi al secondo senza batching (3.000 con batch da 10; molto di più in
+    high-throughput mode). Il parametro che si sbaglia più spesso è il *visibility
+    timeout*: se il consumatore impiega più tempo di quello per elaborare, il messaggio
+    ricompare e viene processato due volte.
+
+    RabbitMQ brilla dove serve routing: exchange e binding permettono di smistare per
+    chiave, per pattern o in broadcast, con code durabili e priorità. I parametri
+    operativi che contano sono l'ack manuale (mai `autoAck` su lavoro importante) e il
+    *prefetch*: senza, un consumatore si carica centinaia di messaggi che poi resta a
+    elaborare mentre gli altri stanno fermi.
+
+    Due strumenti valgono per tutti: la *dead letter queue*, dove finiscono i messaggi
+    che falliscono ripetutamente, con un numero massimo di tentativi e una procedura
+    umana per esaminarli; e il *consumer lag*, cioè quanto il consumatore è indietro
+    rispetto alla testa della coda. Il lag è la metrica di salute numero uno: se cresce
+    monotonamente, il sistema non sta reggendo il traffico, indipendentemente da quanto
+    sembrino verdi gli altri grafici.
   key_points:
     - "Kafka: log append-only partizionato, i messaggi restano dopo il consumo, i consumer tengono un offset. Ottimo per event streaming e replay"
     - "RabbitMQ: broker con routing ricco (exchange, binding), messaggio rimosso dopo l'ack. Ottimo per task queue e routing complesso"
     - "SQS: coda gestita, zero operatività. Standard (at-least-once, ordine non garantito) o FIFO (ordine e deduplicazione, throughput minore)"
     - "L'ordine in Kafka è garantito solo dentro una partizione: la chiave di partizionamento decide cosa resta ordinato"
-    - "Consumer group: il parallelismo massimo è pari al numero di partizioni"
-    - "Consumer lag è la metrica di salute da monitorare"
+    - "Consumer group: il parallelismo massimo è pari al numero di partizioni; i consumatori in eccesso restano inattivi"
+    - "Il rebalancing ferma brevemente il gruppo: la causa tipica è il lavoro per messaggio che supera max.poll.interval.ms"
+    - "Exactly-once di Kafka vale dentro Kafka (produttore idempotente + transazioni), non verso un database esterno"
     - "Quasi tutti i sistemi sono at-least-once: il consumer deve essere idempotente"
-    - "Dead letter queue per i messaggi che falliscono ripetutamente"
+    - "SQS FIFO: 300 messaggi/s senza batching, 3.000 con batch da 10, di più in high-throughput mode"
+    - "SQS visibility timeout più corto del tempo di elaborazione = messaggio processato due volte"
+    - "RabbitMQ: ack manuale e prefetch limitato, altrimenti un consumatore si accaparra il lavoro e gli altri restano fermi"
+    - "Dead letter queue per i messaggi che falliscono ripetutamente, con un limite di tentativi"
+    - "Consumer lag è la metrica di salute da monitorare: se cresce, non stai reggendo il traffico"
+  examples:
+    - title: Ordine per utente in Kafka, e perché la chiave conta
+      language: python
+      code: |-
+        from aiokafka import AIOKafkaProducer
+
+        # La chiave determina la partizione: stessa chiave -> stessa partizione -> ordine.
+        await producer.send_and_wait(
+            "eventi-utente",
+            key=str(utente_id).encode(),          # <-- senza questo l'ordine si perde
+            value=json.dumps(evento).encode(),
+        )
+
+        # Conseguenze pratiche:
+        #  - eventi dello stesso utente: ordinati fra loro
+        #  - eventi di utenti diversi:   nessuna garanzia di ordine reciproco
+        #  - 12 partizioni -> al massimo 12 consumatori attivi nello stesso gruppo
+      note: >-
+        Se un utente genera molto più traffico degli altri, la sua partizione diventa
+        calda: è il caso in cui conviene una chiave composita o un trattamento separato.
+    - title: Consumo idempotente con offset e dato nella stessa transazione
+      language: python
+      code: |-
+        async def consuma(msg, conn):
+            async with conn.transaction():
+                # 1) registro il messaggio: se è già visto, la UNIQUE fallisce
+                try:
+                    await conn.execute(
+                        "INSERT INTO messaggi_visti (topic, partizione, offset_) VALUES ($1,$2,$3)",
+                        msg.topic, msg.partition, msg.offset,
+                    )
+                except asyncpg.UniqueViolationError:
+                    return
+                # 2) effetto nella STESSA transazione
+                await applica(conn, json.loads(msg.value))
+            # 3) solo dopo il commit confermo l'offset al broker
+            await consumer.commit()
+      note: >-
+        L'ordine conta: commit del database, poi commit dell'offset. Al contrario, un
+        crash fra i due perde il messaggio invece di duplicarlo.
+    - title: Il parametro SQS che genera duplicati
+      language: python
+      code: |-
+        # Se l'elaborazione dura più del visibility timeout, il messaggio TORNA in coda
+        # e viene elaborato di nuovo, mentre il primo consumatore sta ancora lavorando.
+        risposta = sqs.receive_message(QueueUrl=url, VisibilityTimeout=30, MaxNumberOfMessages=10)
+
+        for m in risposta.get("Messages", []):
+            async with prolunga_visibilita(sqs, url, m, ogni=15):   # heartbeat
+                await elabora(m)                                     # anche se dura 5 minuti
+            sqs.delete_message(QueueUrl=url, ReceiptHandle=m["ReceiptHandle"])
+      note: >-
+        O si alza il visibility timeout, o si prolunga periodicamente
+        (ChangeMessageVisibility) mentre si lavora. La seconda è più robusta.
+  trade_offs:
+    - option: Kafka
+      pros: Ritenzione e replay, throughput altissimo, più consumatori indipendenti
+      cons: Da operare (o gestito e costoso), ordine solo per partizione, modello più complesso
+      when: Event streaming, integrazione fra molti consumatori, ricostruzione di stato
+    - option: RabbitMQ
+      pros: Routing ricco, priorità, TTL per messaggio, maturo e semplice da capire
+      cons: Nessun replay dopo l'ack, scalare richiede attenzione
+      when: Task queue, instradamento complesso, lavori con priorità
+    - option: SQS
+      pros: Zero operatività, scalabilità automatica, integrazione AWS
+      cons: Nessun replay, FIFO limitato, lock-in
+      when: Su AWS, quando non si vuole gestire un broker
+    - option: Coda nel database (SKIP LOCKED)
+      pros: Transazionale con i dati, nessun componente in più, semplice
+      cons: Throughput limitato, niente fan-out o ritenzione
+      when: Volumi moderati, un solo consumatore logico
+  numbers:
+    - "Parallelismo massimo di un consumer group Kafka = numero di partizioni"
+    - "SQS FIFO: 300 messaggi/s per gruppo senza batching, 3.000 con batch da 10"
+    - "Ritenzione Kafka tipica: 7 giorni (configurabile per topic, anche illimitata con compaction)"
+    - "Tentativi prima della DLQ: 3-5 è l'intervallo comune"
+    - "Consumer lag: va allarmato in termini di tempo (es. 'più di 5 minuti indietro'), non di numero di messaggi"
   interview_answer: >-
     Scelgo in base a cosa voglio fare del messaggio dopo. Se è un lavoro da svolgere una
     volta sola e poi dimenticare, una task queue come RabbitMQ o SQS è la scelta naturale.
-    Se è un evento che più consumatori diversi devono poter leggere, magari anche
-    rileggere in futuro per ricostruire uno stato, allora Kafka, perché il log resta e
-    ogni consumer ha il suo offset. Il dettaglio su cui si sbaglia più spesso è l'ordine:
-    in Kafka è garantito solo all'interno di una partizione, quindi se mi serve l'ordine
-    per utente devo usare l'user id come chiave di partizionamento, altrimenti gli eventi
-    dello stesso utente finiscono su partizioni diverse e l'ordine si perde.
+    Se è un evento che più consumatori diversi devono poter leggere, magari anche rileggere
+    in futuro per ricostruire uno stato, allora Kafka, perché il log resta e ogni consumer
+    ha il suo offset. Il dettaglio su cui si sbaglia più spesso è l'ordine: in Kafka è
+    garantito solo all'interno di una partizione, quindi se mi serve l'ordine per utente
+    devo usare l'user id come chiave di partizionamento, altrimenti gli eventi dello stesso
+    utente finiscono su partizioni diverse e l'ordine si perde. E do per scontato
+    l'at-least-once: rendo il consumatore idempotente e committo l'offset solo dopo aver
+    committato l'effetto sul database.
+  senior_signals:
+    - "Distingue log (Kafka) da broker (RabbitMQ/SQS) partendo da cosa succede dopo il consumo"
+    - "Sa che l'exactly-once di Kafka non si estende a un database esterno"
+    - "Cita il rebalancing e la sua causa tipica, che si impara solo debuggandolo"
+    - "Monitora il consumer lag in termini di tempo e non di conteggio"
   pitfalls:
     - "Aspettarsi ordinamento globale in Kafka"
     - "Consumer non idempotente con consegna at-least-once"
     - "Più consumer delle partizioni disponibili: alcuni restano inattivi"
     - "Nessun monitoraggio del consumer lag"
-  follow_up_questions:
-    - "Come garantisci l'ordine degli eventi per un singolo utente in Kafka?"
-    - "Cosa metti in una dead letter queue e come la gestisci?"
+    - "Visibility timeout SQS più corto dell'elaborazione: duplicati sistematici"
+    - "Commit dell'offset prima di aver scritto l'effetto: messaggi persi al primo crash"
+  follow_ups:
+    - question: Come garantisci l'ordine degli eventi per un singolo utente in Kafka?
+      answer: >-
+        Usando l'id utente come chiave del messaggio: la chiave determina la partizione e
+        l'ordine è garantito dentro la partizione. Va poi evitato di rielaborare in
+        parallelo i messaggi della stessa partizione dentro il consumer, altrimenti
+        l'ordine si perde a valle. Se una chiave diventa troppo calda si può passare a
+        una chiave composita, accettando di perdere l'ordine globale per quell'utente e
+        mantenendolo solo per sotto-flussi.
+    - question: Cosa metti in una dead letter queue e come la gestisci?
+      answer: >-
+        I messaggi che hanno fallito più volte per una ragione non transitoria: formato
+        invalido, riferimento a un'entità che non esiste, bug. Vanno conservati con il
+        motivo dell'errore e il numero di tentativi, e serve una procedura per
+        esaminarli, correggerli e rimetterli in circolo (redrive). Una DLQ che cresce
+        senza che nessuno la guardi è solo un modo elegante di perdere dati: va
+        monitorata come una coda vera.
+    - question: Kafka promette exactly-once. Ci credi?
+      answer: >-
+        Ci credo per ciò che promette davvero: con produttore idempotente e transazioni,
+        la sequenza leggi-elabora-scrivi *dentro Kafka* è atomica, offset compreso. Non
+        vale verso l'esterno: se il consumatore scrive su Postgres o chiama un'API,
+        l'atomicità fra quel sistema e l'offset non esiste. Quindi la mia risposta
+        pratica resta: consumatore idempotente, registro dei messaggi visti nella stessa
+        transazione dell'effetto, offset committato dopo.
+  related: [dist-29-service-communication, rel-31-delivery-semantics, rel-35-event-driven, core-10-idempotency]
+  resources:
+    - title: "Kafka - Design e garanzie"
+      url: "https://kafka.apache.org/documentation/#design"
+      kind: doc
+    - title: "Confluent - Exactly-once semantics in Apache Kafka"
+      url: "https://www.confluent.io/blog/exactly-once-semantics-are-possible-heres-how-apache-kafka-does-it/"
+      kind: article
+    - title: "AWS - SQS FIFO queues e high throughput"
+      url: "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/high-throughput-fifo.html"
+      kind: doc
+    - title: "RabbitMQ - Consumer prefetch"
+      url: "https://www.rabbitmq.com/docs/consumer-prefetch"
+      kind: doc
