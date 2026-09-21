@@ -17,9 +17,10 @@ generato benissimo, ma se dietro non c'è materiale serio non serve a niente.
 | `system-design` | 2 | Metodo per il colloquio, design ricorrenti |
 | `behavioral` + `company` | 3 | Metodo STAR, ricerca sull'azienda, negoziazione |
 | `engineering` | 5 | Testing, git, cloud, sicurezza applicativa, qualità del codice |
-| `languages` | 17 | Due schede introduttive più i percorsi dedicati a Python (7) e a JavaScript/TypeScript (8) |
+| `languages` | 23 | Due schede introduttive, i percorsi dedicati a Python (7) e a JavaScript/TypeScript (8), più Java e Spring Boot (6) |
+| `frontend` | 6 | React (rendering e stato), Angular, CSS e layout, prestazioni percepite, testing dei componenti |
 
-Totale: **93 argomenti, 11 percorsi, 146 domande a risposta multipla, 14
+Totale: **105 argomenti, 13 percorsi, 146 domande a risposta multipla, 14
 problemi di coding**.
 
 Le prime cinque categorie ricalcano esattamente la checklist dei 40 concetti

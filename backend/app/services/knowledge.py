@@ -110,6 +110,12 @@ TERM_HINTS: dict[str, list[str]] = {
     "pytest": ["eng-01-testing", "eng-06-python"],
     "tdd": ["eng-01-testing"],
     "qualita": ["eng-05-code-quality", "eng-01-testing"],
+    "code review": ["eng-05-code-quality", "eng-02-git"],
+    "pull request": ["eng-02-git", "eng-05-code-quality"],
+    "branching": ["eng-02-git"],
+    "logging": ["rel-38-observability"],
+    "tracing": ["rel-38-observability"],
+    "metriche": ["rel-38-observability"],
     "design": ["eng-05-code-quality", "sd-01-interview-framework"],
     "refactoring": ["eng-05-code-quality"],
     "python": ["eng-06-python"],
@@ -120,10 +126,32 @@ TERM_HINTS: dict[str, list[str]] = {
     "typescript": ["eng-07-javascript"],
     "node": ["eng-07-javascript", "core-05-stateless-vs-stateful"],
     "nodejs": ["eng-07-javascript"],
-    "react": ["eng-07-javascript"],
-    "angular": ["eng-07-javascript"],
-    "vue": ["eng-07-javascript"],
-    "frontend": ["eng-07-javascript"],
+    "react": ["fe-01-react-rendering", "fe-02-react-stato-dati", "eng-07-javascript"],
+    "hooks": ["fe-01-react-rendering"],
+    "redux": ["fe-02-react-stato-dati"],
+    "angular": ["fe-03-angular", "eng-07-javascript"],
+    "rxjs": ["fe-03-angular", "js-05-async-patterns"],
+    "vue": ["fe-01-react-rendering", "eng-07-javascript"],
+    "frontend": ["fe-04-css-layout", "fe-01-react-rendering", "eng-07-javascript"],
+    "css": ["fe-04-css-layout", "fe-05-web-performance"],
+    "sass": ["fe-04-css-layout"],
+    "tailwind": ["fe-04-css-layout"],
+    "responsive": ["fe-04-css-layout"],
+    "html": ["fe-04-css-layout", "fe-05-web-performance"],
+    "accessibilita": ["fe-06-testing-componenti", "fe-04-css-layout"],
+    "accessibility": ["fe-06-testing-componenti", "fe-04-css-layout"],
+    "web vitals": ["fe-05-web-performance"],
+    "ux": ["fe-05-web-performance", "fe-04-css-layout"],
+    "java": ["java-01-linguaggio-jvm", "java-02-concorrenza", "java-03-spring-core"],
+    "jvm": ["java-01-linguaggio-jvm"],
+    "spring": ["java-03-spring-core", "java-04-spring-web"],
+    "springboot": ["java-03-spring-core", "java-04-spring-web"],
+    "hibernate": ["java-05-jpa-transazioni", "db-12-indexes"],
+    "jpa": ["java-05-jpa-transazioni"],
+    "maven": ["java-06-build-testing"],
+    "gradle": ["java-06-build-testing"],
+    "junit": ["java-06-build-testing", "eng-01-testing"],
+    "kotlin": ["java-01-linguaggio-jvm", "java-03-spring-core"],
     "algoritmi": ["dsa-01-complexity", "dsa-11-dynamic-programming"],
     "algorithms": ["dsa-01-complexity", "dsa-11-dynamic-programming"],
     "dsa": ["dsa-01-complexity", "dsa-03-hash-maps", "dsa-09-graphs"],
@@ -298,6 +326,15 @@ class KnowledgeBase:
                 continue
             # Peso: i termini brevi e specifici (una parola) sono i piu' affidabili.
             weight = 1.0 if len(tokens) == 1 else 0.7
+
+            # La frase intera prima dei singoli token: le chiavi a piu' parole di
+            # TERM_HINTS - "code review", "pull request" - altrimenti non scattano
+            # mai, perche' la ricerca avverrebbe solo token per token.
+            frase = " ".join(tokens)
+            if len(tokens) > 1:
+                for topic_id in TERM_HINTS.get(frase, []):
+                    if topic_id in self.topics:
+                        scores[topic_id] = scores.get(topic_id, 0.0) + 4.0
 
             for token in tokens:
                 for topic_id in TERM_HINTS.get(token, []):

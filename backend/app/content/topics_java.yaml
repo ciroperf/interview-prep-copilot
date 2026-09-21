@@ -1,0 +1,1153 @@
+# Java e l'ecosistema Spring: il catalogo copriva i pattern architetturali ma non
+# il linguaggio e il framework concreti che gli annunci chiedono.
+- id: java-01-linguaggio-jvm
+  title: Java e la JVM - memoria, garbage collection, equals e hashCode
+  category: languages
+  track: knowledge
+  level: medium
+  tags: [java, jvm, memoria, linguaggio]
+  estimated_minutes: 35
+  summary: >-
+    Le domande su Java a un colloquio si concentrano su tre cose: che cosa succede in
+    memoria, il contratto fra equals e hashCode, e perché la JVM diventa veloce solo
+    dopo un po' che sta girando.
+  deep_dive: |-
+    La JVM divide la memoria in due aree che vanno distinte nelle risposte. Lo stack è
+    per thread e contiene i frame delle chiamate con le variabili locali e i
+    riferimenti; l'heap è condiviso fra tutti i thread e contiene gli oggetti. Quando si
+    dice che Java passa sempre per valore si intende proprio questo: si copia il
+    riferimento, non l'oggetto — quindi riassegnare il parametro dentro il metodo non si
+    vede fuori, ma modificare l'oggetto puntato sì.
+
+    Il garbage collector libera ciò che non è più raggiungibile dalle radici. I
+    collettori generazionali sfruttano l'ipotesi che la maggior parte degli oggetti
+    muoia giovane: si alloca in una zona piccola e la si ripulisce spesso, promuovendo
+    in una zona più grande i sopravvissuti. I collettori moderni a bassa latenza — G1,
+    che è il predefinito, e ZGC per le pause molto brevi — spostano il compromesso verso
+    pause corte, pagandolo in throughput. La cosa da sapere per un colloquio è che una
+    perdita di memoria in Java esiste eccome: non è memoria non liberata ma memoria
+    ancora raggiungibile che nessuno userà più — cache senza scadenza, listener mai
+    rimossi, ThreadLocal non ripuliti su thread di un pool.
+
+    Il contratto fra equals e hashCode è la domanda più frequente in assoluto, e conta
+    perché lo violano in tanti: se due oggetti sono uguali secondo equals devono avere
+    lo stesso hashCode. Chi ridefinisce equals e dimentica hashCode ottiene oggetti che
+    spariscono dentro una HashMap — inseriti in un secchio e cercati in un altro.
+    L'altra metà è che la chiave di una mappa non va mutata dopo l'inserimento, per lo
+    stesso motivo. I record, immutabili e con equals e hashCode generati, tolgono di
+    mezzo l'intera categoria di bug ed è quello che si propone oggi per i portatori di
+    dati.
+
+    Sulla JVM come macchina: il bytecode all'inizio viene interpretato, poi il
+    compilatore just-in-time individua i punti caldi e li traduce in codice nativo,
+    inlining e ottimizzando sulla base di ciò che ha osservato. Da qui il riscaldamento:
+    un benchmark che misura i primi secondi misura l'interprete, non l'applicazione.
+    Ed è anche il motivo per cui su funzioni serverless con avvii frequenti si guarda a
+    compilazioni anticipate come GraalVM.
+
+    Infine le versioni, che agli annunci interessano: Java 21 e Java 25 sono le LTS
+    correnti, con la 25 uscita a settembre 2025. Fra le cose introdotte da citare: i
+    record, il pattern matching su switch, le sealed class e i virtual thread.
+  key_points:
+    - "Stack per thread con i frame, heap condiviso con gli oggetti"
+    - "Java passa sempre per valore: si copia il riferimento, quindi l'oggetto puntato resta modificabile"
+    - "Una perdita di memoria in Java e' memoria ancora raggiungibile che nessuno usera': cache, listener, ThreadLocal"
+    - "Contratto: se due oggetti sono equals devono avere lo stesso hashCode, o spariscono dalle HashMap"
+    - "Non mutare un oggetto dopo averlo usato come chiave di una mappa"
+    - "I record sono immutabili con equals e hashCode generati: tolgono un'intera classe di bug"
+    - "Il JIT compila i punti caldi dopo averli osservati: i primi secondi misurano l'interprete"
+    - "G1 e' il collettore predefinito, ZGC punta a pause molto brevi pagando in throughput"
+    - "Le LTS correnti sono Java 21 e Java 25 (settembre 2025)"
+  examples:
+    - title: equals senza hashCode, e l'oggetto che sparisce
+      language: java
+      code: |
+        class Utente {
+            final String email;
+            Utente(String email) { this.email = email; }
+
+            @Override public boolean equals(Object o) {
+                return o instanceof Utente u && email.equals(u.email);
+            }
+            // hashCode NON ridefinito: resta quello di Object, legato all'identita'.
+        }
+
+        var mappa = new HashMap<Utente, String>();
+        mappa.put(new Utente("a@b.it"), "valore");
+        mappa.get(new Utente("a@b.it"));   // null: hash diverso, secchio diverso
+
+        // Con un record il problema non esiste: equals e hashCode sono generati,
+        // coerenti fra loro, e l'oggetto e' immutabile.
+        record UtenteRec(String email) {}
+      note: >-
+        Il caso simmetrico è altrettanto insidioso: mutare un campo usato nell'hashCode
+        dopo aver inserito l'oggetto in una mappa lo rende irraggiungibile.
+    - title: La perdita di memoria che il garbage collector non puo' risolvere
+      language: java
+      code: |
+        // La cache cresce e non libera mai: gli oggetti restano raggiungibili,
+        // quindi il GC non li tocca. Non e' un bug del GC, e' un bug nostro.
+        static final Map<String, Documento> CACHE = new HashMap<>();
+
+        // Rimedi: una cache con scadenza e dimensione massima (Caffeine),
+        // oppure riferimenti deboli se la chiave puo' sparire.
+        Cache<String, Documento> cache = Caffeine.newBuilder()
+            .maximumSize(10_000)
+            .expireAfterWrite(Duration.ofMinutes(10))
+            .build();
+
+        // L'altro classico: ThreadLocal su un pool. Il thread non muore mai,
+        // quindi il valore resta appeso finche' non lo si rimuove esplicitamente.
+        try {
+            CONTESTO.set(datiRichiesta);
+            gestisci();
+        } finally {
+            CONTESTO.remove();     // senza questa riga, perdita garantita
+        }
+      note: >-
+        In un colloquio la frase che distingue è "in Java le perdite esistono, solo che
+        sono oggetti ancora raggiungibili": mostra di aver diagnosticato un heap vero.
+  trade_offs:
+    - option: Classe mutabile con setter
+      pros: Familiare, compatibile con framework che richiedono costruttore vuoto
+      cons: Stato che cambia sotto i piedi, pericolosa come chiave e fra thread
+      when: Entita' gestite da un ORM, dove il framework lo impone
+    - option: Record
+      pros: Immutabile, equals e hashCode coerenti generati, dichiarazione minima
+      cons: Nessuna ereditarieta', non adatto alle entita' JPA
+      when: DTO, oggetti valore, risposte di API
+    - option: G1
+      pros: Buon compromesso generale, predefinito, poco da configurare
+      cons: Pause piu' lunghe di ZGC su heap molto grandi
+      when: Default ragionevole per la maggior parte dei servizi
+    - option: ZGC
+      pros: Pause nell'ordine del millisecondo anche su heap enormi
+      cons: Throughput inferiore e piu' memoria
+      when: Requisiti stringenti sulla latenza di coda
+  numbers:
+    - "Java 25, LTS di settembre 2025, e' supportata fino al 2033; Java 21 resta lo standard di fatto in molte aziende"
+    - "Il riscaldamento della JVM va da qualche centinaio di millisecondi a diversi secondi: un benchmark che non lo esclude misura l'interprete"
+  interview_answer: >-
+    Le tre cose su cui vado sicuro sono la memoria, il contratto di equals e il JIT. In
+    memoria distinguo stack e heap e chiarisco che Java passa sempre per valore, copiando
+    il riferimento: riassegnare il parametro non si vede fuori, modificare l'oggetto sì. Sul
+    contratto, se ridefinisco equals devo ridefinire hashCode, altrimenti l'oggetto finisce
+    in un secchio della HashMap e lo cerco in un altro — e per i portatori di dati uso i
+    record, che me li generano coerenti e sono immutabili. E ricordo che le perdite di
+    memoria in Java esistono: sono oggetti ancora raggiungibili che nessuno userà più, tipo
+    una cache senza scadenza o un ThreadLocal non ripulito su un thread di pool.
+  senior_signals:
+    - "Definisce la perdita di memoria come raggiungibilita', non come mancata liberazione"
+    - "Cita i ThreadLocal sui pool come caso concreto"
+    - "Sa perche' un microbenchmark ingenuo sulla JVM misura la cosa sbagliata"
+    - "Propone i record per i portatori di dati invece di scrivere equals a mano"
+  pitfalls:
+    - "Ridefinire equals e dimenticare hashCode"
+    - "Mutare un oggetto usato come chiave di una mappa"
+    - "Dire che in Java non esistono perdite di memoria perche' c'e' il garbage collector"
+    - "Misurare le prestazioni senza escludere il riscaldamento della JVM"
+  follow_ups:
+    - question: Che rapporto c'e' fra equals e hashCode?
+      answer: >-
+        Il contratto dice che se due oggetti risultano uguali secondo equals devono avere
+        lo stesso hashCode; il contrario non è richiesto, due oggetti diversi possono
+        collidere. Serve perché le strutture basate su hash prima calcolano il secchio con
+        hashCode e solo dentro quel secchio confrontano con equals: se l'hash differisce,
+        l'oggetto viene cercato dove non è stato messo e la mappa si comporta come se non
+        esistesse. Per questo o si generano entrambi insieme, o si usa un record.
+    - question: Java passa i parametri per valore o per riferimento?
+      answer: >-
+        Sempre per valore, ma il valore di una variabile oggetto è un riferimento, e quel
+        riferimento viene copiato. La conseguenza pratica è duplice: se dentro il metodo
+        riassegno il parametro a un nuovo oggetto, fuori non cambia niente, perché ho
+        modificato solo la copia del riferimento; se invece chiamo un metodo che modifica
+        l'oggetto puntato, la modifica è visibile a tutti, perché l'oggetto è uno solo.
+        Confondere le due cose è l'origine di molti bug su liste passate in giro.
+    - question: Come diagnostichi una perdita di memoria in un'applicazione Java?
+      answer: >-
+        Prima confermo che sia una perdita e non solo un heap dimensionato male: guardo se
+        l'occupazione dopo ogni raccolta completa cresce in modo monotono invece di tornare
+        a un livello stabile. Poi prendo un'istantanea dell'heap e la analizzo cercando le
+        classi che dominano e, soprattutto, la catena di riferimenti che le tiene vive: è
+        quella che dice chi è il colpevole. I sospetti abituali sono cache senza scadenza,
+        listener registrati e mai rimossi, ThreadLocal su thread di pool e collezioni
+        statiche che crescono.
+    - question: Che cosa sono i virtual thread e a che cosa servono?
+      answer: >-
+        Sono thread leggeri gestiti dalla JVM invece che dal sistema operativo: se ne
+        possono avere milioni, perché costano poca memoria e il loro cambio di contesto non
+        passa dal kernel. Servono ai carichi con molta attesa di I/O, dove il modello
+        classico obbligava a scrivere codice asincrono per non sprecare thread di
+        piattaforma: con i virtual thread si torna a scrivere codice bloccante, leggibile,
+        senza pagarne il costo. Introdotti nella 21, con il problema del pinning risolto
+        nella 25. Non aiutano sul calcolo puro, dove il limite restano i core.
+  related: [java-02-concorrenza, java-03-spring-core, py-02-memoria-gc, dsa-03-hash-maps]
+  resources:
+    - title: "Effective Java, 3ª edizione (Joshua Bloch)"
+      url: https://www.pearson.com/en-us/subject-catalog/p/effective-java/P200000000138
+      kind: book
+    - title: "Documentazione ufficiale di Java"
+      url: https://docs.oracle.com/en/java/javase/25/
+      kind: doc
+
+- id: java-02-concorrenza
+  title: Concorrenza in Java - thread, pool e virtual thread
+  category: languages
+  track: knowledge
+  level: hard
+  tags: [java, concorrenza, thread, jvm]
+  estimated_minutes: 35
+  summary: >-
+    Java ha thread reali e memoria condivisa, quindi la concorrenza è potente e piena di
+    trappole. I virtual thread hanno cambiato il compromesso: il codice bloccante è
+    tornato accettabile.
+  deep_dive: |-
+    Il punto di partenza è che i thread condividono l'heap, quindi due thread possono
+    vedere lo stesso oggetto in stati incoerenti. I problemi sono due e vanno distinti:
+    la mutua esclusione, cioè evitare che due thread modifichino la stessa cosa insieme,
+    e la visibilità, cioè garantire che una modifica fatta da un thread sia vista dagli
+    altri. `synchronized` risolve entrambi; `volatile` risolve solo la visibilità e non
+    rende atomica un'operazione composta — `contatore++` resta una lettura, un incremento
+    e una scrittura, quindi si perdono aggiornamenti anche se il campo è volatile. Per
+    quel caso si usano le classi atomiche.
+
+    Le collezioni concorrenti vanno preferite alla sincronizzazione manuale:
+    ConcurrentHashMap permette letture senza lock e scritture su segmenti distinti,
+    mentre sincronizzare una HashMap serializza tutto. Attenzione però a un dettaglio
+    che si chiede spesso: anche su una mappa concorrente, la sequenza "controlla se
+    c'è, altrimenti inserisci" scritta in due istruzioni non è atomica. Servono i metodi
+    che lo fanno in un colpo solo, come computeIfAbsent o putIfAbsent.
+
+    I pool di thread esistono perché un thread di piattaforma è caro: qualche centinaio
+    di kilobyte di stack e un cambio di contesto che passa dal kernel. Da qui il limite
+    storico: con migliaia di connessioni in attesa di I/O si esauriscono i thread, e per
+    non sprecarli si è dovuto scrivere codice asincrono a callback o reattivo, molto meno
+    leggibile.
+
+    I virtual thread cambiano proprio questo. Sono gestiti dalla JVM, costano
+    pochissimo, e quando si bloccano su I/O la JVM li stacca dal thread portante e ne
+    monta un altro: se ne possono avere milioni. La conseguenza pratica è che si torna a
+    scrivere codice bloccante, lineare e leggibile, senza pagarne il prezzo. Introdotti
+    nella 21, con il problema del pinning — il virtual thread che resta incollato al
+    portante dentro un blocco synchronized — risolto nella 25. Non aiutano sul calcolo
+    puro: lì il limite restano i core, e serve un pool dimensionato sui processori.
+
+    Due trappole da nominare. Il deadlock, che si previene acquisendo i lock sempre nello
+    stesso ordine o usando tryLock con timeout. E il pool di dimensione fissa in cui un
+    compito aspetta il risultato di un altro compito dello stesso pool: se tutti i
+    thread sono occupati ad aspettare, nessuno può eseguire ciò che li sbloccherebbe.
+  key_points:
+    - "Due problemi distinti: mutua esclusione e visibilita'. synchronized copre entrambi, volatile solo la seconda"
+    - "volatile non rende atomico contatore++: e' lettura, incremento e scrittura. Servono le classi atomiche"
+    - "ConcurrentHashMap invece di sincronizzare una HashMap: letture senza lock"
+    - "Anche su una mappa concorrente, controlla-e-inserisci in due istruzioni non e' atomico: usa computeIfAbsent"
+    - "Un thread di piattaforma costa centinaia di KB di stack e un cambio di contesto dal kernel"
+    - "I virtual thread (21, pinning risolto nella 25) rendono di nuovo accettabile il codice bloccante"
+    - "Sul calcolo puro i virtual thread non aiutano: il limite restano i core"
+    - "Deadlock: acquisire i lock sempre nello stesso ordine, o tryLock con timeout"
+  examples:
+    - title: volatile non basta, e la mappa concorrente da sola nemmeno
+      language: java
+      code: |
+        // SBAGLIATO: volatile garantisce la visibilita', non l'atomicita'.
+        // L'incremento resta lettura + somma + scrittura: si perdono aggiornamenti.
+        private volatile int contatore = 0;
+        public void incrementa() { contatore++; }
+
+        // GIUSTO: l'operazione e' atomica.
+        private final AtomicInteger contatore = new AtomicInteger();
+        public void incrementa() { contatore.incrementAndGet(); }
+
+        // SBAGLIATO anche qui: due istruzioni, due thread possono entrare entrambi.
+        if (!cache.containsKey(chiave)) cache.put(chiave, calcolaCostoso(chiave));
+
+        // GIUSTO: una sola operazione atomica, e il calcolo avviene una volta sola.
+        cache.computeIfAbsent(chiave, this::calcolaCostoso);
+      note: >-
+        La regola generale: se una sequenza di controllo e azione deve essere indivisibile,
+        cercare il metodo che la esegue in un colpo solo invece di comporla a mano.
+    - title: Dal pool di piattaforma ai virtual thread
+      language: java
+      code: |
+        // PRIMA: il pool e' il collo di bottiglia. Diecimila richieste in attesa di
+        // I/O su duecento thread significano code lunghe, anche se nessuno calcola.
+        var pool = Executors.newFixedThreadPool(200);
+
+        // ORA: un virtual thread per compito. Quando si blocca su I/O la JVM lo
+        // stacca dal portante, quindi il codice bloccante non spreca niente.
+        try (var esecutore = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (var url : indirizzi) {
+                esecutore.submit(() -> client.send(richiesta(url), ofString()));
+            }
+        }   // la chiusura attende il completamento di tutti i compiti
+
+        // Per il calcolo puro NON si usano i virtual thread: il limite sono i core.
+        var calcolo = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+      note: >-
+        Il blocco try-with-resources sull'esecutore è il modo idiomatico introdotto con
+        la concorrenza strutturata: nessun compito resta orfano.
+  trade_offs:
+    - option: synchronized
+      pros: Semplice, copre esclusione e visibilita', nessuna dipendenza
+      cons: Serializza tutto il blocco, nessun timeout, rischio deadlock
+      when: Sezioni critiche brevi e contese basse
+    - option: Classi atomiche
+      pros: Senza lock, ottime su contese alte per singole variabili
+      cons: Coprono una variabile alla volta, non invarianti fra piu' campi
+      when: Contatori, flag, riferimenti aggiornati con compare-and-set
+    - option: Pool di thread di piattaforma
+      pros: Controllo esplicito sul parallelismo, giusto per il calcolo
+      cons: Thread cari, il pool diventa il limite sui carichi di I/O
+      when: Lavoro CPU-bound, dimensionato sui core
+    - option: Virtual thread
+      pros: Milioni di compiti concorrenti, codice bloccante leggibile
+      cons: Nessun vantaggio sul calcolo; le librerie vecchie possono bloccare il portante
+      when: Molto I/O concorrente - chiamate HTTP, query, attese
+  numbers:
+    - "Un thread di piattaforma costa tipicamente da qualche centinaio di KB a 1 MB di stack; un virtual thread poche centinaia di byte"
+    - "Il pinning dei virtual thread dentro i blocchi synchronized e' stato risolto in Java 25: sotto la 25 e' una trappola reale"
+  interview_answer: >-
+    Separo sempre i due problemi: mutua esclusione e visibilità. synchronized li copre
+    entrambi, volatile solo la visibilità — e infatti non rende atomico un incremento, che
+    è lettura, somma e scrittura: lì servono le classi atomiche. Sulle collezioni preferisco
+    quelle concorrenti alla sincronizzazione manuale, ricordando che anche su una
+    ConcurrentHashMap un controlla-e-inserisci scritto in due istruzioni non è atomico e va
+    fatto con computeIfAbsent. La novità che cambia il disegno sono i virtual thread: dalla
+    21, con il pinning risolto nella 25, il codice bloccante su I/O è tornato accettabile e
+    non serve più passare al reattivo solo per non sprecare thread.
+  senior_signals:
+    - "Distingue esclusione e visibilita' invece di trattare volatile come un lock leggero"
+    - "Sa che controlla-e-inserisci non e' atomico nemmeno su una collezione concorrente"
+    - "Indica il caso in cui i virtual thread non servono, non solo quelli in cui servono"
+    - "Nomina il pool che si blocca da solo quando i compiti si attendono a vicenda"
+  pitfalls:
+    - "Usare volatile per un contatore incrementato da piu' thread"
+    - "Sincronizzare una HashMap invece di usare ConcurrentHashMap"
+    - "Compiti di uno stesso pool fisso che attendono il risultato di altri compiti dello stesso pool"
+    - "Ordine di acquisizione dei lock diverso in due punti del codice"
+  follow_ups:
+    - question: Che differenza c'e' fra volatile e synchronized?
+      answer: >-
+        volatile garantisce che una scrittura sia immediatamente visibile agli altri thread
+        e impedisce certe riorganizzazioni, ma non crea nessuna sezione critica: due thread
+        possono entrare insieme e un'operazione composta come un incremento perde
+        aggiornamenti. synchronized garantisce sia la visibilità sia la mutua esclusione,
+        al costo di serializzare il blocco. La regola pratica è volatile per un flag letto
+        da molti e scritto da uno, synchronized o le classi atomiche quando l'operazione
+        legge e scrive lo stesso dato.
+    - question: Come dimensioneresti un pool di thread?
+      answer: >-
+        Dipende dal tipo di lavoro. Per il calcolo puro il numero utile è circa quello dei
+        core disponibili: aggiungerne altri produce solo cambi di contesto. Per l'I/O il
+        parallelismo utile è molto più alto, perché i thread stanno fermi ad aspettare, e
+        storicamente si stimava a partire dal rapporto fra tempo di attesa e tempo di
+        calcolo. Oggi per l'I/O la risposta migliore è non dimensionare affatto: un virtual
+        thread per compito, e lasciare che sia la JVM a gestirli.
+    - question: Che cos'e' un deadlock e come lo previeni?
+      answer: >-
+        È la situazione in cui due o più thread si aspettano a vicenda e nessuno può
+        procedere: il primo tiene il lock A e vuole B, il secondo tiene B e vuole A. Si
+        previene stabilendo un ordine globale di acquisizione dei lock e rispettandolo
+        ovunque, oppure usando tryLock con un timeout, così un thread rinuncia e riprova
+        invece di restare appeso. Aiuta anche ridurre l'ambito dei lock e non chiamare
+        codice altrui mentre se ne tiene uno, perché non si sa quali lock prenderà a sua
+        volta.
+    - question: Quando i virtual thread non sono la risposta?
+      answer: >-
+        Quando il lavoro è di calcolo: il collo di bottiglia sono i core, e avere un
+        milione di thread che si contendono otto processori non aiuta — lì serve un pool
+        dimensionato sui processori. Non aiutano nemmeno se il codice usa librerie che
+        bloccano in modo nativo o che tengono lock a lungo, perché possono incollare il
+        virtual thread al thread portante; il caso di synchronized è stato risolto nella
+        25, ma sotto quella versione è una trappola concreta da verificare.
+  related: [java-01-linguaggio-jvm, py-03-gil-concorrenza, rel-33-race-conditions, db-20-locking]
+  resources:
+    - title: "Java Concurrency in Practice (Brian Goetz)"
+      url: https://www.pearson.com/en-us/subject-catalog/p/java-concurrency-in-practice/P200000009208
+      kind: book
+    - title: "JEP 444 - Virtual Threads"
+      url: https://openjdk.org/jeps/444
+      kind: doc
+
+- id: java-03-spring-core
+  title: Spring - inversione del controllo, bean e configurazione
+  category: languages
+  track: knowledge
+  level: medium
+  tags: [java, spring, dependency-injection, backend]
+  estimated_minutes: 30
+  summary: >-
+    Spring è un contenitore che costruisce gli oggetti e li collega al posto tuo. Capito
+    questo, quasi tutte le domande - scope, configurazione, proxy - hanno la stessa
+    risposta di fondo.
+  deep_dive: |-
+    Il contenitore crea le istanze, risolve le dipendenze e gestisce il ciclo di vita
+    degli oggetti che gli sono stati dichiarati. Quegli oggetti si chiamano bean, e il
+    codice non li costruisce più con `new`: li chiede. È il principio di inversione del
+    controllo, e la dependency injection è il modo in cui si realizza.
+
+    Sull'iniezione, la raccomandazione è netta: dal costruttore. Rende le dipendenze
+    esplicite nella firma, permette di dichiararle `final` quindi immutabili, e
+    soprattutto consente di istanziare la classe nei test senza far partire nessun
+    contenitore. L'iniezione sul campo con `@Autowired` nasconde le dipendenze,
+    impedisce l'immutabilità e costringe i test a usare la riflessione o a caricare
+    tutto il contesto. Da Spring 4.3 il costruttore singolo non ha nemmeno bisogno
+    dell'annotazione.
+
+    Sugli scope: il default è singleton, cioè un'istanza sola condivisa da tutta
+    l'applicazione. Ne discende la regola più importante e più violata: **un bean
+    singleton non deve avere stato mutabile per richiesta**, perché è condiviso fra
+    tutti i thread che servono le richieste. Chi mette un campo con i dati dell'utente
+    corrente in un `@Service` ottiene un bug che in sviluppo non si vede e in produzione
+    mescola i dati fra utenti. Gli altri scope — prototype, request, session — esistono
+    ma la risposta giusta è quasi sempre tenere i servizi senza stato e far passare i
+    dati come parametri.
+
+    La configurazione segue un ordine di precedenza definito: argomenti da riga di
+    comando, poi variabili d'ambiente, poi i file di proprietà, con i profili che
+    sovrascrivono il file base. Il punto operativo è che i segreti arrivano
+    dall'ambiente e non dal file versionato, e che `@ConfigurationProperties` su una
+    classe tipizzata è preferibile a `@Value` sparso, perché valida all'avvio invece che
+    al primo uso.
+
+    Infine i proxy, che spiegano un'intera categoria di bug apparentemente magici.
+    Annotazioni come `@Transactional`, `@Cacheable` e `@Async` funzionano perché Spring
+    avvolge il bean in un proxy che intercetta le chiamate. Se un metodo del bean ne
+    chiama un altro dello stesso bean direttamente, la chiamata non passa dal proxy e
+    l'annotazione non ha alcun effetto: è l'autoinvocazione, e la si risolve spostando
+    il metodo in un altro bean.
+  key_points:
+    - "Il contenitore costruisce i bean e risolve le dipendenze: il codice li chiede, non li crea"
+    - "Iniezione dal costruttore: dipendenze esplicite, campi final, testabile senza contenitore"
+    - "Dal 4.3 il costruttore unico non ha bisogno di @Autowired"
+    - "Lo scope predefinito e' singleton: un bean condiviso da tutti i thread"
+    - "Un singleton non deve avere stato mutabile per richiesta: i dati si mescolano fra utenti"
+    - "Precedenza della configurazione: riga di comando, ambiente, file di proprieta', con i profili sopra il base"
+    - "@ConfigurationProperties valida all'avvio, @Value sparso fallisce al primo uso"
+    - "Autoinvocazione: una chiamata interna non passa dal proxy, quindi @Transactional e @Cacheable non scattano"
+  examples:
+    - title: Iniezione dal costruttore, e il singleton con stato
+      language: java
+      code: |
+        // BENE: dipendenze esplicite, immutabili, testabile con un semplice new.
+        @Service
+        class ServizioOrdini {
+            private final RepositoryOrdini repository;
+            private final ServizioPagamenti pagamenti;
+
+            ServizioOrdini(RepositoryOrdini repository, ServizioPagamenti pagamenti) {
+                this.repository = repository;
+                this.pagamenti = pagamenti;
+            }
+        }
+
+        // BUG: il bean e' un singleton, questo campo e' condiviso da TUTTI i thread.
+        // Due richieste in parallelo si sovrascrivono l'utente a vicenda.
+        @Service
+        class ServizioRotto {
+            private Utente utenteCorrente;              // mai fare cosi'
+            public void elabora(Utente u) {
+                this.utenteCorrente = u;                // race condition
+                salva();
+            }
+        }
+        // Rimedio: nessun campo mutabile, l'utente si passa come parametro.
+      note: >-
+        Il bug del singleton con stato non si manifesta con un utente solo: emerge sotto
+        carico, ed è per questo che arriva in produzione.
+    - title: Autoinvocazione - l'annotazione che non scatta
+      language: java
+      code: |
+        @Service
+        class ServizioFatture {
+
+            public void elaboraTutte(List<Fattura> fatture) {
+                for (var f : fatture) {
+                    elaboraUna(f);     // chiamata INTERNA: non passa dal proxy,
+                }                      // quindi @Transactional qui non ha effetto
+            }
+
+            @Transactional
+            public void elaboraUna(Fattura f) { /* ... */ }
+        }
+
+        // Rimedio: spostare il metodo annotato in un altro bean, cosi' la chiamata
+        // attraversa il proxy.
+        @Service
+        class ServizioFatture {
+            private final ElaboratoreFattura elaboratore;   // bean separato
+            public void elaboraTutte(List<Fattura> f) { f.forEach(elaboratore::elabora); }
+        }
+      note: >-
+        Vale per tutte le annotazioni basate su proxy: @Transactional, @Cacheable, @Async,
+        @Retryable. È una delle domande più frequenti ai colloqui su Spring.
+  trade_offs:
+    - option: Iniezione dal costruttore
+      pros: Esplicita, immutabile, testabile senza contenitore, rileva le dipendenze cicliche
+      cons: Costruttori lunghi quando le dipendenze sono molte - ma e' un segnale utile
+      when: Sempre
+    - option: Iniezione sul campo
+      pros: Meno righe
+      cons: Dipendenze nascoste, niente final, test che richiedono riflessione o contesto
+      when: Codice esistente che non si vuole toccare
+    - option: Bean singleton senza stato
+      pros: Nessun problema di concorrenza, riuso massimo
+      cons: I dati vanno passati come parametri
+      when: Praticamente sempre per servizi e repository
+    - option: Scope request o prototype
+      pros: Un'istanza per richiesta o per iniezione
+      cons: Complica il ciclo di vita, spesso nasconde un disegno sbagliato
+      when: Raro; prima chiedersi se il servizio puo' essere senza stato
+  numbers:
+    - "Un costruttore con piu' di cinque o sei dipendenze e' il segnale che la classe fa troppe cose: e' una diagnosi gratuita che l'iniezione sul campo nasconde"
+    - "Precedenza della configurazione in Spring Boot: riga di comando, poi variabili d'ambiente, poi application-{profilo}, poi application"
+  interview_answer: >-
+    Spring è un contenitore che costruisce gli oggetti e li collega: io dichiaro le
+    dipendenze e non le creo con new. Le inietto sempre dal costruttore, perché le rende
+    esplicite, mi permette di dichiararle final e soprattutto mi lascia istanziare la classe
+    nei test con un semplice new, senza far partire il contesto. La cosa su cui faccio più
+    attenzione è che i bean sono singleton per default: quindi niente stato mutabile per
+    richiesta dentro un service, altrimenti sotto carico i dati si mescolano fra utenti. E
+    ricordo l'autoinvocazione: se un metodo ne chiama un altro dello stesso bean, la
+    chiamata non passa dal proxy e @Transactional o @Cacheable non hanno alcun effetto.
+  senior_signals:
+    - "Motiva l'iniezione dal costruttore con la testabilita', non con lo stile"
+    - "Nomina il singleton con stato come bug che emerge solo sotto carico"
+    - "Conosce l'autoinvocazione e sa perche' succede, non solo che succede"
+    - "Legge il costruttore lungo come segnale di progettazione, non come fastidio"
+  pitfalls:
+    - "Stato mutabile per richiesta dentro un bean singleton"
+    - "@Autowired sul campo: dipendenze nascoste e test che richiedono il contesto"
+    - "Aspettarsi che @Transactional funzioni su una chiamata interna allo stesso bean"
+    - "Segreti dentro application.properties versionato invece che nell'ambiente"
+  follow_ups:
+    - question: Perche' preferire l'iniezione dal costruttore?
+      answer: >-
+        Perché rende le dipendenze parte del contratto della classe: si vedono nella firma,
+        si possono dichiarare final quindi l'oggetto è immutabile dopo la costruzione, e
+        nei test si istanzia con un new passando dei doppi, senza avviare il contenitore.
+        In più, se c'è una dipendenza ciclica il contenitore se ne accorge all'avvio invece
+        che a runtime. Con l'iniezione sul campo le dipendenze sono invisibili dall'esterno
+        e la classe non si può costruire senza riflessione.
+    - question: Che cosa succede se metti un campo mutabile in un @Service?
+      answer: >-
+        Il bean è un singleton, quindi quel campo è condiviso da tutti i thread che servono
+        le richieste: due richieste concorrenti se lo sovrascrivono a vicenda e si ottiene
+        un utente che vede i dati di un altro. È un bug particolarmente insidioso perché in
+        sviluppo, con una richiesta alla volta, non si manifesta mai: emerge sotto carico,
+        in produzione. La regola è che i servizi restano senza stato e i dati della
+        richiesta viaggiano come parametri.
+    - question: Perche' @Transactional a volte sembra non funzionare?
+      answer: >-
+        Quasi sempre per autoinvocazione: l'annotazione funziona perché Spring avvolge il
+        bean in un proxy che apre e chiude la transazione attorno alla chiamata, ma se un
+        metodo del bean ne chiama un altro dello stesso bean, la chiamata avviene
+        sull'oggetto vero e non passa dal proxy. Le altre cause comuni sono il metodo non
+        pubblico, che il proxy non può intercettare, e l'eccezione controllata, che per
+        impostazione predefinita non provoca il rollback. Il rimedio all'autoinvocazione è
+        spostare il metodo in un altro bean.
+    - question: Come gestisci la configurazione fra ambienti?
+      answer: >-
+        Con i profili e la precedenza delle sorgenti. Tengo un application.properties con i
+        valori comuni e i profili per ciò che cambia, e lascio che ambiente e riga di
+        comando sovrascrivano, perché hanno precedenza più alta. I segreti non stanno mai
+        nel file versionato: arrivano da variabili d'ambiente o da un gestore di segreti.
+        Per i valori strutturati preferisco @ConfigurationProperties su una classe
+        tipizzata con validazione, così un valore mancante fa fallire l'avvio invece di
+        esplodere alla prima richiesta che lo usa.
+  related: [java-04-spring-web, java-05-jpa-transazioni, pat-05-dependency-injection, java-01-linguaggio-jvm]
+  resources:
+    - title: "Spring Framework - Core Technologies"
+      url: https://docs.spring.io/spring-framework/reference/core.html
+      kind: doc
+    - title: "Spring Boot - documentazione di riferimento"
+      url: https://docs.spring.io/spring-boot/index.html
+      kind: doc
+
+- id: java-04-spring-web
+  title: Spring Web - controller, validazione e gestione degli errori
+  category: languages
+  track: technical
+  level: medium
+  tags: [java, spring, api, rest, backend]
+  estimated_minutes: 30
+  summary: >-
+    Un controller Spring deve essere sottile: traduce HTTP in chiamate al dominio e
+    ritraduce il risultato. Le domande da colloquio riguardano i confini - validazione,
+    DTO, errori - più che le annotazioni.
+  deep_dive: |-
+    La prima regola è che il controller non contiene logica di dominio. Riceve la
+    richiesta, la valida, chiama un servizio, traduce il risultato in una risposta. Se
+    dentro un controller compaiono regole di business o query, il codice diventa
+    impossibile da testare senza far partire il livello web, e la stessa regola viene
+    riscritta quando arriva un secondo punto d'ingresso — una coda, un comando a riga di
+    comando.
+
+    Il secondo punto è la separazione fra DTO ed entità. Esporre direttamente le entità
+    JPA nelle risposte è una scorciatoia che si paga tre volte: trascina fuori campi che
+    non dovevano uscire, lega il contratto pubblico dell'API allo schema del database, e
+    in serializzazione innesca il caricamento pigro delle relazioni, producendo query a
+    sorpresa o eccezioni di sessione chiusa. Il DTO è un contratto esplicito che si fa
+    evolvere per conto suo, e i record sono la forma naturale per scriverlo.
+
+    Sulla validazione: si dichiara sul DTO con le annotazioni standard e si attiva con
+    `@Valid` sul parametro. Quello che conta a un colloquio è saper dire che questa è la
+    validazione **sintattica** — campo obbligatorio, formato, intervallo — e che le
+    regole di dominio, come "non si può annullare un ordine già spedito", stanno nel
+    dominio e non nelle annotazioni. Confondere i due livelli porta a regole di business
+    sparse fra i DTO.
+
+    La gestione degli errori è la parte che distingue. La risposta d'errore va
+    centralizzata in un `@RestControllerAdvice`, perché altrimenti ogni controller
+    inventa il suo formato; e il formato giusto esiste ed è standard, `application/
+    problem+json` della RFC 9457, che Spring supporta di serie con ProblemDetail. Le
+    eccezioni di dominio si mappano sui codici di stato in un punto solo. E nel corpo
+    dell'errore non finiscono mai stack trace o messaggi interni: si restituisce un
+    identificativo di correlazione, e il dettaglio resta nei log.
+
+    Infine i codici: 400 per una richiesta malformata, 422 quando è sintatticamente
+    valida ma semanticamente no, 401 quando non so chi sei, 403 quando lo so e non
+    basta, 404 anche per nascondere l'esistenza di una risorsa altrui, 409 per un
+    conflitto di stato.
+  key_points:
+    - "Il controller traduce HTTP e chiama il dominio: nessuna regola di business dentro"
+    - "Mai esporre le entita' JPA: fuoriuscita di campi, contratto legato allo schema, caricamento pigro in serializzazione"
+    - "I record sono la forma naturale per i DTO di richiesta e risposta"
+    - "@Valid sul parametro attiva le annotazioni dichiarate sul DTO"
+    - "Validazione sintattica sul DTO, regole di dominio nel dominio"
+    - "Errori centralizzati in @RestControllerAdvice, con ProblemDetail della RFC 9457"
+    - "Mai stack trace nel corpo dell'errore: un identificativo di correlazione, il resto nei log"
+    - "400 malformata, 422 semanticamente invalida, 401 non so chi sei, 403 lo so e non basta, 409 conflitto"
+  examples:
+    - title: Controller sottile con DTO e validazione
+      language: java
+      code: |
+        // DTO di ingresso: contratto esplicito, non l'entita'.
+        record CreaOrdine(
+            @NotBlank String codiceCliente,
+            @NotEmpty List<@Valid RigaOrdine> righe,
+            @Email String emailConferma
+        ) {}
+
+        record RigaOrdine(@NotBlank String sku, @Positive int quantita) {}
+
+        @RestController
+        @RequestMapping("/api/ordini")
+        class ControllerOrdini {
+            private final ServizioOrdini servizio;
+
+            ControllerOrdini(ServizioOrdini servizio) { this.servizio = servizio; }
+
+            @PostMapping
+            ResponseEntity<OrdineCreato> crea(@Valid @RequestBody CreaOrdine richiesta) {
+                var ordine = servizio.crea(richiesta.toComando());   // il dominio decide
+                return ResponseEntity
+                    .created(URI.create("/api/ordini/" + ordine.id()))
+                    .body(OrdineCreato.da(ordine));                  // DTO in uscita
+            }
+        }
+      note: >-
+        Il controller non sa nulla di persistenza né di regole: se domani lo stesso caso
+        d'uso arriva da una coda, il servizio si riusa senza toccare niente.
+    - title: Errori centralizzati nel formato standard
+      language: java
+      code: |
+        @RestControllerAdvice
+        class GestoreErrori {
+
+            @ExceptionHandler(OrdineNonTrovato.class)
+            ProblemDetail nonTrovato(OrdineNonTrovato e) {
+                var p = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+                p.setTitle("Ordine inesistente");
+                p.setType(URI.create("https://esempio.it/errori/ordine-non-trovato"));
+                return p;   // application/problem+json, RFC 9457
+            }
+
+            @ExceptionHandler(Exception.class)
+            ProblemDetail imprevisto(Exception e) {
+                var correlazione = UUID.randomUUID().toString();
+                log.error("Errore imprevisto [{}]", correlazione, e);   // dettaglio nei log
+                var p = ProblemDetail.forStatusAndDetail(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Errore imprevisto. Cita il codice " + correlazione + " al supporto.");
+                p.setProperty("correlationId", correlazione);
+                return p;   // niente stack trace al chiamante
+            }
+        }
+      note: >-
+        L'identificativo di correlazione è ciò che rende diagnosticabile un errore senza
+        rivelare nulla: l'utente lo cita, lo si cerca nei log.
+  trade_offs:
+    - option: DTO separati
+      pros: Contratto stabile, nessuna fuoriuscita di campi, evoluzione indipendente
+      cons: Codice di conversione da scrivere e mantenere
+      when: Sempre su API pubbliche o con piu' di un consumatore
+    - option: Esporre le entita'
+      pros: Meno codice all'inizio
+      cons: Schema legato al contratto, campi di troppo, caricamento pigro in serializzazione
+      when: Prototipi usa e getta
+    - option: Errori con ProblemDetail
+      pros: Formato standard, campi estendibili, gia' supportato dal framework
+      cons: Piu' verboso di un messaggio libero
+      when: Qualunque API destinata a qualcuno che non sei tu
+    - option: Controller reattivi (WebFlux)
+      pros: Ottimo su carichi con moltissime connessioni contemporanee
+      cons: Modello di programmazione piu' difficile, diagnosi complicata
+      when: Sempre meno giustificato dopo i virtual thread, salvo flussi reattivi veri
+  numbers:
+    - "Spring Boot 4.1 richiede almeno Java 17; non esistono release LTS, ogni minore ha 12 mesi di supporto e ne esce una ogni sei"
+    - "La RFC 9457 definisce problem+json e ha sostituito la RFC 7807: e' il formato che Spring produce con ProblemDetail"
+  interview_answer: >-
+    Tengo il controller sottile: valida l'ingresso, chiama il servizio, traduce il
+    risultato. Non ci metto regole di business, perché altrimenti non riesco a testarle
+    senza far partire il livello web e le riscrivo il giorno in cui lo stesso caso d'uso
+    arriva da una coda. Non espongo mai le entità JPA: uso record come DTO, così il
+    contratto non è legato allo schema e non mi ritrovo relazioni caricate pigramente
+    durante la serializzazione. Gli errori li centralizzo in un RestControllerAdvice e li
+    restituisco come ProblemDetail, che è il formato standard, con un identificativo di
+    correlazione al posto dello stack trace: il dettaglio resta nei log.
+  senior_signals:
+    - "Distingue la validazione sintattica dalle regole di dominio"
+    - "Motiva i DTO anche con il caricamento pigro in serializzazione, non solo con la pulizia"
+    - "Usa un formato d'errore standard invece di inventarne uno"
+    - "Mette un identificativo di correlazione nella risposta e il dettaglio nei log"
+  pitfalls:
+    - "Logica di dominio dentro il controller"
+    - "Entita' JPA restituite direttamente dalle API"
+    - "Stack trace o messaggi interni nel corpo della risposta d'errore"
+    - "Ogni controller con il suo formato d'errore, perche' manca un advice centrale"
+  follow_ups:
+    - question: Perche' non restituire direttamente le entita' JPA?
+      answer: >-
+        Per tre motivi che si sommano. Espone campi che non dovevano uscire, e basta
+        aggiungere una colonna perché finisca nella risposta senza che nessuno l'abbia
+        deciso. Lega il contratto pubblico allo schema del database, quindi una
+        rinominazione di colonna diventa un cambiamento che rompe i client. E in
+        serializzazione il serializzatore attraversa le relazioni pigre, provocando query
+        impreviste o, se la sessione è già chiusa, un'eccezione. Un DTO — tipicamente un
+        record — risolve tutti e tre.
+    - question: Come struttureresti la gestione degli errori di una API Spring?
+      answer: >-
+        Un @RestControllerAdvice centrale che mappa le eccezioni di dominio sui codici di
+        stato, così il formato è uno solo e i controller non se ne occupano. Come corpo
+        uso ProblemDetail, che implementa la RFC 9457 e dà campi standard — type, title,
+        status, detail — più proprietà personalizzate dove servono. Per gli errori di
+        validazione restituisco 400 o 422 con l'elenco dei campi non validi. E per
+        l'imprevisto un 500 con un identificativo di correlazione, mai lo stack trace: il
+        dettaglio va nei log, dove lo cerco a partire da quell'identificativo.
+    - question: Quando useresti 400 e quando 422?
+      answer: >-
+        400 quando la richiesta è malformata e il server non riesce nemmeno a
+        interpretarla: JSON non valido, tipo sbagliato, parametro obbligatorio assente.
+        422 quando la sintassi è corretta e il server ha capito benissimo, ma il contenuto
+        viola una regola semantica — una data di fine precedente alla data di inizio, una
+        quantità superiore alla disponibilità. La distinzione aiuta il client a capire se
+        deve correggere la forma o il merito. Detto questo, molte API usano 400 per
+        entrambi e va bene, purché il corpo dell'errore sia chiaro e la scelta sia
+        coerente.
+    - question: WebFlux o Spring MVC?
+      answer: >-
+        Oggi MVC nella grande maggioranza dei casi. WebFlux nasceva per reggere moltissime
+        connessioni contemporanee senza bloccare un thread per ciascuna, ma quel problema
+        i virtual thread lo risolvono mantenendo il codice bloccante, che è molto più
+        semplice da scrivere, leggere e diagnosticare — con il reattivo si perde lo stack
+        trace utile e la diagnosi diventa faticosa. WebFlux resta giustificato quando il
+        dominio è davvero un flusso, per esempio streaming di eventi con contropressione.
+  related: [java-03-spring-core, java-05-jpa-transazioni, core-04-http-status-codes, pat-12-error-handling]
+  resources:
+    - title: "Spring Boot - sviluppare applicazioni web"
+      url: https://docs.spring.io/spring-boot/reference/web/servlet.html
+      kind: doc
+    - title: "RFC 9457 - Problem Details for HTTP APIs"
+      url: https://www.rfc-editor.org/rfc/rfc9457.html
+      kind: doc
+
+- id: java-05-jpa-transazioni
+  title: JPA e transazioni - N+1, propagazione, lock
+  category: languages
+  track: technical
+  level: hard
+  tags: [java, spring, jpa, database, transazioni]
+  estimated_minutes: 35
+  summary: >-
+    JPA nasconde il database, e il prezzo è che le query partono quando non te lo
+    aspetti. Le domande da colloquio sono sempre le stesse: il problema N+1, i confini
+    della transazione e cosa succede in concorrenza.
+  deep_dive: |-
+    Il concetto centrale è il contesto di persistenza: una cache di primo livello che
+    vive quanto la transazione e in cui ogni entità è presente una volta sola. Le entità
+    che ci stanno dentro sono *gestite*, e qui viene il comportamento che sorprende —
+    modificare il campo di un'entità gestita è sufficiente perché la modifica finisca
+    nel database al momento dello scarico, senza che nessuno abbia chiamato `save`. È il
+    dirty checking, e spiega sia salvataggi inattesi sia update che non partono perché
+    l'entità nel frattempo è diventata distaccata.
+
+    Il problema N+1 è la domanda più frequente. Si carica una lista di N entità con una
+    query, poi per ciascuna si accede a una relazione pigra e parte una query: N+1 query
+    per un'operazione che ne richiedeva una o due. Le soluzioni sono `JOIN FETCH` in una
+    query esplicita, un entity graph, oppure `@BatchSize` che raggruppa i caricamenti.
+    Quello che **non** è una soluzione è mettere `FetchType.EAGER` sulle relazioni: non
+    risolve l'N+1 — lo sposta e lo rende permanente — e carica dati che nella maggior
+    parte dei casi non servono. La regola è pigro per default, e caricamento esplicito
+    dove serve. Attenzione a un dettaglio noto: `JOIN FETCH` con la paginazione su una
+    collezione fa paginare in memoria, ed è una trappola da nominare.
+
+    Sui confini della transazione: `@Transactional` sul servizio, non sul repository,
+    perché è il caso d'uso a definire l'unità di lavoro. Due cose da sapere sul
+    comportamento predefinito. La propagazione REQUIRED riusa la transazione in corso, e
+    REQUIRES_NEW ne apre una indipendente che committa a parte — utile per scrivere un
+    log di audit che deve sopravvivere al rollback dell'operazione principale. E il
+    rollback avviene di default solo sulle eccezioni non controllate: se si dichiara una
+    eccezione controllata bisogna chiederlo esplicitamente con `rollbackFor`, altrimenti
+    la transazione committa nonostante l'errore.
+
+    La regola operativa che si porta a un colloquio è tenere le transazioni corte e non
+    metterci dentro chiamate di rete: una richiesta HTTP dentro una transazione tiene
+    occupata una connessione del pool per tutta la durata della chiamata, e un rallentamento
+    del servizio remoto esaurisce il pool e blocca l'intera applicazione.
+
+    Sulla concorrenza, JPA offre il lock ottimistico con `@Version`: al commit verifica
+    che nessun altro abbia modificato la riga, e se è successo solleva un'eccezione che
+    l'applicazione gestisce riprovando. È la scelta giusta quando i conflitti sono rari.
+    Il lock pessimistico serializza e va usato solo quando i conflitti sono frequenti e
+    il costo di rifare il lavoro è alto.
+  key_points:
+    - "Il contesto di persistenza e' una cache che vive quanto la transazione: un'entita' e' presente una volta sola"
+    - "Dirty checking: modificare un'entita' gestita basta perche' l'update parta, senza chiamare save"
+    - "N+1: una query per la lista piu' una per ogni elemento. Si risolve con JOIN FETCH, entity graph o @BatchSize"
+    - "EAGER non risolve l'N+1: lo rende permanente e carica dati che non servono"
+    - "JOIN FETCH con paginazione su una collezione pagina in memoria: trappola nota"
+    - "@Transactional sul servizio, non sul repository: e' il caso d'uso a definire l'unita' di lavoro"
+    - "Il rollback predefinito scatta solo sulle eccezioni non controllate: per le altre serve rollbackFor"
+    - "REQUIRES_NEW apre una transazione indipendente che committa a parte"
+    - "Mai chiamate di rete dentro una transazione: si esaurisce il pool di connessioni"
+    - "@Version per il lock ottimistico quando i conflitti sono rari"
+  examples:
+    - title: N+1, e come si vede nei log prima ancora che in produzione
+      language: java
+      code: |
+        // N+1: una query per gli ordini, poi una per le righe di OGNI ordine.
+        List<Ordine> ordini = repository.findByCliente(clienteId);   // 1 query
+        for (var o : ordini) {
+            totale += o.getRighe().size();                            // N query
+        }
+
+        // Una query sola, con la relazione caricata esplicitamente.
+        @Query("select distinct o from Ordine o join fetch o.righe where o.cliente.id = :id")
+        List<Ordine> findConRighe(@Param("id") Long id);
+
+        // Alternativa dichiarativa, utile quando la stessa entita' serve
+        // con profili di caricamento diversi:
+        @EntityGraph(attributePaths = "righe")
+        List<Ordine> findByClienteId(Long clienteId);
+
+        // In sviluppo, per accorgersene subito:
+        // spring.jpa.show-sql=true  +  un contatore di query nei test
+      note: >-
+        Il modo affidabile per non scoprirlo in produzione è un test che asserisce il
+        numero di query eseguite: con i dati di sviluppo l'N+1 non si sente.
+    - title: Transazione corta, e la chiamata remota tenuta fuori
+      language: java
+      code: |
+        // SBAGLIATO: la connessione al database resta occupata per tutta la durata
+        // della chiamata HTTP. Se il fornitore rallenta, il pool si esaurisce
+        // e si ferma tutta l'applicazione, non solo questa funzione.
+        @Transactional
+        public void confermaRotto(Long id) {
+            var ordine = repository.findById(id).orElseThrow();
+            pagamenti.addebita(ordine.getTotale());      // rete DENTRO la transazione
+            ordine.conferma();
+        }
+
+        // GIUSTO: si chiama fuori, e si scrive nel database in una transazione breve.
+        public void conferma(Long id) {
+            var esito = pagamenti.addebita(leggiTotale(id));   // fuori
+            registraEsito(id, esito);                          // @Transactional, corta
+        }
+
+        @Transactional
+        void registraEsito(Long id, EsitoPagamento esito) {
+            var ordine = repository.findById(id).orElseThrow();
+            ordine.applica(esito);      // dirty checking: nessun save necessario
+        }
+      note: >-
+        Se l'operazione deve essere atomica rispetto al pagamento, la risposta non è
+        allungare la transazione ma l'outbox transazionale o una saga.
+  trade_offs:
+    - option: Caricamento pigro con fetch esplicito
+      pros: Si carica solo cio' che serve, controllo per caso d'uso
+      cons: "Va ricordato: dimenticarlo produce N+1 o eccezioni di sessione chiusa"
+      when: Default corretto
+    - option: EAGER sulle relazioni
+      pros: Nessuna eccezione di caricamento pigro
+      cons: Carica sempre tutto, anche dove non serve, e non elimina l'N+1
+      when: Quasi mai; solo relazioni piccolissime e sempre necessarie
+    - option: Lock ottimistico con @Version
+      pros: Nessun blocco, ottimo quando i conflitti sono rari
+      cons: Il conflitto emerge al commit e va gestito riprovando
+      when: La maggior parte dei casi applicativi
+    - option: Lock pessimistico
+      pros: Il conflitto non puo' avvenire, nessun lavoro da rifare
+      cons: Serializza, riduce la concorrenza, rischio di deadlock
+      when: Conflitti frequenti e lavoro costoso da ripetere
+  numbers:
+    - "Con 100 ordini, un N+1 produce 101 query: su una rete da 1 ms di andata e ritorno sono 100 ms buttati per richiesta"
+    - "Un pool di connessioni tipico ha 10-20 connessioni: bastano poche transazioni lunghe in attesa di rete per esaurirlo"
+  interview_answer: >-
+    Le tre cose che guardo sono N+1, i confini della transazione e la concorrenza. L'N+1
+    nasce dal caricamento pigro dentro un ciclo: lo risolvo con un JOIN FETCH o un entity
+    graph, non mettendo EAGER, che non lo elimina e carica sempre dati che non servono. La
+    transazione la apro sul servizio, non sul repository, perché è il caso d'uso a definire
+    l'unità di lavoro, e la tengo corta: dentro una transazione non ci metto mai chiamate di
+    rete, altrimenti una lentezza del fornitore esaurisce il pool di connessioni e blocca
+    tutta l'applicazione. Per la concorrenza uso @Version, che è lock ottimistico, e gestisco
+    il conflitto riprovando.
+  senior_signals:
+    - "Dice esplicitamente che EAGER non risolve l'N+1"
+    - "Collega la transazione lunga all'esaurimento del pool, non solo alla lentezza"
+    - "Conosce il rollback che non scatta sulle eccezioni controllate"
+    - "Propone un test sul numero di query invece di fidarsi dell'occhio"
+  pitfalls:
+    - "Mettere EAGER per far sparire le eccezioni di caricamento pigro"
+    - "Chiamate HTTP dentro una transazione"
+    - "@Transactional su un metodo chiamato dall'interno dello stesso bean: non passa dal proxy"
+    - "Aspettarsi il rollback su un'eccezione controllata senza dichiarare rollbackFor"
+  follow_ups:
+    - question: Che cos'e' il problema N+1 e come si risolve?
+      answer: >-
+        Si carica una lista di N entità con una query e poi, accedendo a una relazione
+        pigra dentro un ciclo, ne parte una per ciascuna: N+1 query invece di una o due.
+        Si risolve caricando esplicitamente ciò che servirà, con JOIN FETCH nella query,
+        con un entity graph se la stessa entità serve con profili diversi, o con @BatchSize
+        che raggruppa i caricamenti in blocchi. Mettere EAGER non è una soluzione: sposta
+        il problema e carica sempre tutto. Un dettaglio da citare è che JOIN FETCH insieme
+        alla paginazione su una collezione fa paginare in memoria.
+    - question: Dove metti @Transactional e perche'?
+      answer: >-
+        Sul servizio, al livello del caso d'uso, perché è lì che si decide che cosa deve
+        riuscire o fallire insieme. Sul repository sarebbe troppo in basso: ogni metodo
+        avrebbe la sua transazione e un'operazione composta da tre scritture non sarebbe
+        più atomica. Sul controller sarebbe troppo in alto, perché la transazione
+        resterebbe aperta durante la serializzazione della risposta. E la tengo corta,
+        tenendo fuori tutto ciò che è rete.
+    - question: Che differenza c'e' fra lock ottimistico e pessimistico?
+      answer: >-
+        L'ottimistico non blocca niente: si aggiunge una colonna di versione, e al momento
+        dell'aggiornamento si verifica che la versione sia ancora quella letta. Se qualcun
+        altro ha scritto nel frattempo, l'aggiornamento fallisce e l'applicazione decide se
+        riprovare. Il pessimistico blocca la riga al momento della lettura, così nessun
+        altro può modificarla fino al commit. Si sceglie in base alla probabilità di
+        conflitto: se è bassa, l'ottimistico evita il costo del blocco; se è alta, il
+        pessimistico evita di rifare continuamente il lavoro.
+    - question: Perche' a volte il rollback non avviene?
+      answer: >-
+        Perché il comportamento predefinito di Spring è fare rollback solo sulle eccezioni
+        non controllate e sugli Error: se il metodo dichiara e solleva un'eccezione
+        controllata, la transazione committa comunque. Si corregge con
+        rollbackFor sull'annotazione. L'altra causa frequente è l'autoinvocazione: se
+        il metodo annotato viene chiamato dall'interno dello stesso bean, la chiamata non
+        passa dal proxy e non c'è nessuna transazione da annullare.
+  related: [java-03-spring-core, db-14-transactions-isolation, db-20-locking, db-12-indexes]
+  resources:
+    - title: "Spring Data JPA - documentazione di riferimento"
+      url: https://docs.spring.io/spring-data/jpa/reference/
+      kind: doc
+    - title: "Vlad Mihalcea - prestazioni con Hibernate"
+      url: https://vladmihalcea.com/tutorials/hibernate/
+      kind: article
+
+- id: java-06-build-testing
+  title: Build e testing in Java - Maven, Gradle, JUnit 5, Testcontainers
+  category: languages
+  track: technical
+  level: medium
+  tags: [java, maven, gradle, junit, testing]
+  estimated_minutes: 30
+  summary: >-
+    Un progetto Java si giudica anche da come si compila e si prova. Le domande
+    riguardano la gestione delle dipendenze, la differenza fra Maven e Gradle e come si
+    testa qualcosa che parla con un database vero.
+  deep_dive: |-
+    Maven e Gradle risolvono lo stesso problema con filosofie opposte. Maven è
+    dichiarativo e prevedibile: un POM XML, un ciclo di vita fisso, una struttura di
+    cartelle convenzionale. Chi apre un progetto Maven sconosciuto sa già dove sono le
+    cose. Gradle è programmabile, con build più veloci grazie alla cache e alla
+    compilazione incrementale, al prezzo che una build complicata diventa codice da
+    mantenere. La risposta onesta a un colloquio è che per un servizio standard Maven
+    basta e costa meno, mentre Gradle ripaga su progetti multi-modulo grandi dove i
+    tempi di build contano.
+
+    Sulle dipendenze, il concetto che viene chiesto è la risoluzione dei conflitti
+    quando due librerie tirano versioni diverse della stessa terza. Maven applica la
+    dichiarazione più vicina nell'albero, che è una regola sorprendente: non vince la
+    versione più alta ma quella dichiarata alla profondità minore. Gradle prende la più
+    alta. In entrambi i casi il modo per non subirlo è fissare le versioni in un punto
+    solo — in Spring Boot lo fa il BOM del parent — e ispezionare l'albero delle
+    dipendenze quando qualcosa non torna.
+
+    Sui test, JUnit 5 è lo standard. Le cose che vale la pena saper nominare sono i test
+    parametrici, che sostituiscono cinque metodi quasi identici con uno e una tabella di
+    casi; le asserzioni raggruppate, che riportano tutti i fallimenti invece di fermarsi
+    al primo; e AssertJ per asserzioni leggibili. Mockito serve per i doppi, con
+    l'avvertenza già vista: i mock verificano interazioni e legano il test
+    all'implementazione, quindi vanno usati sui confini e non ovunque.
+
+    Il punto che distingue davvero è come si testa il livello dati. Un database in
+    memoria come H2 al posto di PostgreSQL è una scorciatoia che mente: dialetto
+    diverso, tipi diversi, comportamento diverso su vincoli e transazioni, quindi i test
+    passano e la produzione no. Testcontainers avvia il database vero in un container
+    per la durata dei test, e con i container riutilizzabili il costo di avvio si paga
+    una volta sola. È la risposta attesa oggi, ed è anche ciò che rende praticabile
+    testare le migrazioni.
+
+    Su Spring, infine, va distinto `@SpringBootTest`, che carica l'intero contesto ed è
+    lento, dalle fette come `@DataJpaTest` o `@WebMvcTest`, che caricano solo il livello
+    interessato e girano in una frazione del tempo. Usare il contesto completo per
+    testare un controller è lo spreco più comune in una suite Java.
+  key_points:
+    - "Maven e' dichiarativo e prevedibile, Gradle programmabile e piu' veloce sui progetti grandi"
+    - "Conflitti di dipendenze: Maven prende la dichiarazione piu' vicina, Gradle la versione piu' alta"
+    - "Fissare le versioni in un punto solo: in Spring Boot lo fa il BOM del parent"
+    - "JUnit 5: test parametrici per le tabelle di casi, asserzioni raggruppate per non fermarsi al primo errore"
+    - "I mock verificano interazioni e legano all'implementazione: usarli sui confini, non ovunque"
+    - "H2 al posto del database vero mente: dialetto, tipi e vincoli si comportano diversamente"
+    - "Testcontainers avvia il database reale per i test; i container riutilizzabili ammortizzano l'avvio"
+    - "@SpringBootTest carica tutto ed e' lento: per un controller basta @WebMvcTest, per il livello dati @DataJpaTest"
+  examples:
+    - title: Test parametrico invece di cinque metodi uguali
+      language: java
+      code: |
+        @ParameterizedTest(name = "{0} -> {1}")
+        @CsvSource({
+            "0,      GRATUITO",
+            "0.01,   STANDARD",
+            "99.99,  STANDARD",
+            "100,    PREMIUM",
+            "1000,   PREMIUM",
+        })
+        void assegnaLaFasciaGiusta(BigDecimal totale, Fascia attesa) {
+            assertThat(Fascia.perTotale(totale)).isEqualTo(attesa);
+        }
+
+        // Le asserzioni raggruppate riportano TUTTI i fallimenti in un colpo,
+        // invece di fermarsi al primo e nascondere gli altri.
+        @Test
+        void ordineCompleto() {
+            var o = servizio.crea(comando);
+            assertAll(
+                () -> assertThat(o.stato()).isEqualTo(Stato.CREATO),
+                () -> assertThat(o.righe()).hasSize(3),
+                () -> assertThat(o.totale()).isEqualByComparingTo("150.00")
+            );
+        }
+      note: >-
+        I valori di confine — qui 0, 0.01 e 100 — sono la parte che conta: una tabella
+        rende evidente quali casi limite sono coperti e quali no.
+    - title: Il database vero nei test, non un surrogato
+      language: java
+      code: |
+        @DataJpaTest       // solo il livello dati: niente contesto completo, molto piu' veloce
+        @AutoConfigureTestDatabase(replace = NONE)   // non sostituire con H2
+        @Testcontainers
+        class RepositoryOrdiniTest {
+
+            @Container
+            @ServiceConnection      // Spring Boot configura da solo la connessione
+            static PostgreSQLContainer<?> db = new PostgreSQLContainer<>("postgres:17-alpine");
+
+            @Autowired RepositoryOrdini repository;
+
+            @Test
+            void ilVincoloDiUnicitaVale() {
+                repository.save(new Ordine("ORD-1"));
+                assertThatThrownBy(() -> repository.saveAndFlush(new Ordine("ORD-1")))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+                // Su H2 questo test potrebbe passare o fallire per ragioni diverse:
+                // il vincolo lo verifica il database, quindi serve quello vero.
+            }
+        }
+      note: >-
+        `@ServiceConnection` toglie la configurazione manuale di URL, utente e password:
+        è il motivo per cui oggi Testcontainers costa poche righe.
+  trade_offs:
+    - option: Maven
+      pros: Convenzioni forti, prevedibile, ogni progetto si assomiglia
+      cons: Build complesse diventano XML verboso; piu' lento
+      when: Servizi standard, team che cambiano progetto spesso
+    - option: Gradle
+      pros: Piu' veloce con cache e incrementale, build programmabile
+      cons: La build diventa codice da mantenere e debuggare
+      when: Multi-modulo grandi dove i tempi di build pesano
+    - option: Testcontainers
+      pros: Stesso database della produzione, si testano vincoli e migrazioni
+      cons: Serve un runtime di container; avvio piu' lento senza riuso
+      when: Test del livello dati, sempre che sia possibile
+    - option: Database in memoria (H2)
+      pros: Avvio istantaneo, nessuna dipendenza esterna
+      cons: "Dialetto e comportamento diversi: i test mentono"
+      when: Solo se il runtime di container non e' disponibile
+  numbers:
+    - "Un @SpringBootTest costa secondi per classe, una fetta come @WebMvcTest o @DataJpaTest frazioni di secondo: su cento classi e' la differenza fra una suite usabile e una ignorata"
+    - "Con i container riutilizzabili l'avvio del database si paga una volta per sessione invece che a ogni classe di test"
+  interview_answer: >-
+    Su build uso Maven per i servizi standard, perché la prevedibilità vale più della
+    velocità e chiunque apra il progetto sa dove sono le cose; Gradle lo giustifico sui
+    multi-modulo grandi dove i tempi di build pesano davvero. Sui test la scelta che difendo
+    di più è usare il database vero con Testcontainers invece di H2: dialetto, tipi e
+    vincoli si comportano diversamente, quindi con un database in memoria i test passano e
+    la produzione no. E uso le fette di contesto — @WebMvcTest, @DataJpaTest — invece di
+    @SpringBootTest ovunque, perché caricare tutto il contesto per provare un controller è
+    lo spreco più comune in una suite Java.
+  senior_signals:
+    - "Sa che Maven risolve i conflitti con la dichiarazione piu' vicina, non con la versione piu' alta"
+    - "Rifiuta H2 come sostituto del database di produzione, con la motivazione"
+    - "Usa le fette di contesto invece di @SpringBootTest per abitudine"
+    - "Usa i test parametrici per rendere espliciti i casi limite"
+  pitfalls:
+    - "Testare con H2 un'applicazione che in produzione usa PostgreSQL"
+    - "@SpringBootTest su ogni classe di test: suite lenta che nessuno lancia piu'"
+    - "Versioni delle dipendenze sparse invece che governate da un BOM"
+    - "Mockare tutto e ottenere test verdi su codice che non funziona"
+  follow_ups:
+    - question: Maven o Gradle?
+      answer: >-
+        Per un servizio standard Maven, perché le convenzioni forti rendono il progetto
+        immediatamente leggibile a chiunque e la build non diventa software da mantenere.
+        Gradle lo scelgo quando il progetto è multi-modulo e grande, perché la cache e la
+        compilazione incrementale fanno una differenza concreta sui tempi, e quando la
+        build ha davvero bisogno di logica. Il rischio di Gradle è che quella libertà
+        produca build che solo chi le ha scritte sa mantenere.
+    - question: Perche' non usare H2 per i test?
+      answer: >-
+        Perché non è il database che si usa in produzione, e le differenze contano proprio
+        dove i bug si annidano: dialetto SQL, tipi, comportamento dei vincoli, gestione
+        delle transazioni e dell'isolamento. Un test su H2 può passare mentre la stessa
+        query su PostgreSQL fallisce, o viceversa, e questo rende la suite una falsa
+        garanzia. Con Testcontainers si avvia il database reale in un container per la
+        durata dei test, e si verificano anche le migrazioni. L'unico motivo per restare
+        su H2 è non avere un runtime di container disponibile.
+    - question: Come risolve Maven un conflitto di versioni fra dipendenze?
+      answer: >-
+        Con la regola della dichiarazione più vicina: fra due percorsi che portano alla
+        stessa libreria in versioni diverse, vince quello a profondità minore nell'albero,
+        e a parità vince quello dichiarato per primo. È una regola che sorprende, perché
+        non vince la versione più alta — Gradle invece fa proprio quello. Il modo di non
+        subirla è governare le versioni in un punto solo, con dependencyManagement o un
+        BOM, e ispezionare l'albero delle dipendenze quando compare un errore di metodo
+        non trovato.
+    - question: Che differenza c'e' fra @SpringBootTest e le fette come @WebMvcTest?
+      answer: >-
+        @SpringBootTest avvia l'intero contesto dell'applicazione: tutti i bean, la
+        configurazione, eventualmente il server. È fedele ma lento, e va riservato a pochi
+        test di integrazione veri. Le fette caricano solo ciò che serve a quel livello:
+        @WebMvcTest istanzia il livello web con i controller e sostituisce i servizi con
+        doppi, @DataJpaTest configura solo la persistenza. Girano in una frazione del tempo
+        e isolano meglio il difetto, e sono la scelta giusta per la maggior parte dei test.
+  related: [java-03-spring-core, java-05-jpa-transazioni, eng-01-testing, py-07-testing-packaging]
+  resources:
+    - title: "JUnit 5 - guida utente"
+      url: https://docs.junit.org/current/user-guide/
+      kind: doc
+    - title: "Testcontainers per Java"
+      url: https://java.testcontainers.org/
+      kind: doc

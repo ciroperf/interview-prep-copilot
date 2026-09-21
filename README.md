@@ -39,15 +39,16 @@ hai davvero a disposizione.
 
 ## Contenuti
 
-**93 argomenti, 11 percorsi di studio, 146 domande, 14 problemi di coding.**
+**105 argomenti, 13 percorsi di studio, 146 domande, 14 problemi di coding.**
 
 I 40 concetti backend fondamentali (API e HTTP, database, caching, sistemi
 distribuiti, affidabilità), 12 argomenti sui **pattern di strutturazione del
 codice** (layered, repository, service layer, DTO, dependency injection,
 esagonale, DDD, unit of work, GoF, organizzazione del progetto, CQRS, gestione
 degli errori), 14 di algoritmi e strutture dati, 15 dedicati ai **linguaggi**
-(Python e JavaScript/TypeScript, uno per macroargomento), più system design,
-comportamentale e pratiche di ingegneria.
+(Python e JavaScript/TypeScript), 6 al **frontend** (React, Angular, CSS,
+prestazioni percepite, testing dei componenti) e 6 a **Java e Spring Boot**,
+più system design, comportamentale e pratiche di ingegneria.
 
 Ogni argomento ha una sintesi, la spiegazione lunga, i punti chiave, esempi
 commentati, una tabella di trade-off, numeri da citare, gli errori tipici, i
@@ -57,8 +58,8 @@ dare a voce, in prima persona, con i compromessi espliciti.
 
 ### Percorsi
 
-Un linguaggio, i dati o l'affidabilità non stanno in una scheda sola. Gli
-**11 percorsi** (`backend/app/content/packs.yaml`) mettono gli argomenti in
+Un linguaggio, i dati o l'affidabilità non stanno in una scheda sola. I
+**13 percorsi** (`backend/app/content/packs.yaml`) mettono gli argomenti in
 ordine di studio e aggiungono le fonti da cui approfondire — documentazione
 ufficiale, libri di riferimento e repository di studio noti — ognuna con il
 motivo per cui vale il tempo che costa.
@@ -75,6 +76,8 @@ motivo per cui vale il tempo che costa.
 | Python da colloquio | 8 | media |
 | JavaScript e TypeScript da colloquio | 9 | media |
 | Pratica dell'ingegneria | 5 | media |
+| Frontend - React, Angular e CSS | 6 | media |
+| Java e Spring Boot | 6 | media |
 | Colloquio, azienda e offerta | 3 | facile |
 
 ## Funziona anche senza AI
@@ -203,7 +206,7 @@ Il ragionamento dietro le scelte, e il funzionamento del generatore di piani:
 ## Test
 
 ```bash
-cd backend && pytest        # 207 test
+cd backend && pytest        # 209 test
 ```
 
 Girano senza AI e senza rete: le fixture forzano il client non configurato, il

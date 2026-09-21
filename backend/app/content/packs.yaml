@@ -785,3 +785,146 @@
         Dati di retribuzione per livello e azienda. Serve per entrare nella
         conversazione sull'offerta con un intervallo motivato invece che con una
         sensazione.
+
+- id: pack-frontend
+  title: Frontend - React, Angular e CSS
+  subtitle: Rendering, stato, layout e prestazioni percepite
+  summary: >-
+    Il percorso per i ruoli che toccano l'interfaccia. Parte dal modello di rendering di
+    React - il componente come funzione dallo stato alla vista, e gli hook come modo per
+    ottenere stato ed effetti - e prosegue con la domanda che pesa di piu' nei progetti
+    veri, cioe' quale stato si possiede davvero e quale e' solo una copia di dati che
+    vivono sul server. Poi Angular, con la traiettoria da zone.js ai signal che spiega
+    tutto il resto del framework. La seconda meta' e' CSS, che gli annunci chiedono e
+    che quasi nessuno prepara: il modello della cascata, Flexbox contro Grid, il
+    responsive senza breakpoint fissi, e infine le prestazioni percepite con il percorso
+    di rendering critico e le Core Web Vitals.
+  for_whom: >-
+    Per ruoli frontend e full stack. Chi lavora su un solo framework puo' saltare
+    l'altro, ma le schede su CSS e prestazioni valgono per tutti.
+  level: medium
+  tags: [frontend, react, angular, css, performance]
+  prerequisites:
+    - JavaScript e TypeScript da colloquio, almeno event loop e closure
+  topic_ids:
+    - fe-01-react-rendering
+    - fe-02-react-stato-dati
+    - fe-03-angular
+    - fe-04-css-layout
+    - fe-05-web-performance
+    - fe-06-testing-componenti
+  sources:
+    - title: Documentazione ufficiale di React
+      url: https://react.dev/learn
+      kind: doc
+      note: >-
+        Riscritta da zero attorno agli hook, e con una sezione - "You Might Not Need an
+        Effect" - che da sola corregge l'errore piu' diffuso nel codice React reale.
+        Le pagine su rendering e stato sono quelle da leggere prima di un colloquio.
+    - title: Documentazione ufficiale di Angular
+      url: https://angular.dev/overview
+      kind: doc
+      note: >-
+        Il sito nuovo segue il framework mentre cambia: le guide su signal e su zoneless
+        sono aggiornate, e sapere raccontare quella traiettoria a un colloquio vale piu'
+        di conoscere le API di una versione sola.
+    - title: "MDN Web Docs - CSS"
+      url: https://developer.mozilla.org/en-US/docs/Web/CSS
+      kind: doc
+      note: >-
+        Il riferimento su cascata, specificita' e contesti di impilamento. Le pagine sui
+        contesti di formattazione sono quelle che spiegano i comportamenti che sembrano
+        inspiegabili, tipo lo z-index che non funziona.
+    - title: "web.dev - Core Web Vitals"
+      url: https://web.dev/articles/vitals
+      kind: doc
+      note: >-
+        La fonte di prima mano su LCP, INP e CLS, con le soglie e i metodi di misura.
+        Serve per parlare di prestazioni con i numeri giusti invece che per sensazioni,
+        e per non confondere i dati di laboratorio con quelli sugli utenti reali.
+    - title: "Testing Library"
+      url: https://testing-library.com/docs/guiding-principles/
+      kind: doc
+      note: >-
+        I principi guida in mezza pagina spiegano perche' si seleziona per ruolo
+        accessibile invece che per classe CSS. E' il modo piu' rapido per capire come
+        scrivere test di componente che non si rompono a ogni refactor.
+    - title: "javascript-questions (Lydia Hallie)"
+      url: https://github.com/lydiahallie/javascript-questions
+      kind: repo
+      note: >-
+        Non e' specifico dei framework, ma la meta' delle domande frontend a un colloquio
+        riguarda il linguaggio sotto: coercizione, closure, ordine di esecuzione. Qui si
+        allenano nel formato in cui vengono poste davvero.
+
+- id: pack-java
+  title: Java e Spring Boot
+  subtitle: Dalla JVM alle transazioni, passando per il contenitore
+  summary: >-
+    Il percorso per gli annunci che chiedono Java. Comincia dal linguaggio e dalla
+    macchina - memoria, garbage collection, il contratto fra equals e hashCode, il
+    compilatore che entra in gioco solo dopo il riscaldamento - e poi dalla concorrenza,
+    dove i virtual thread hanno cambiato il compromesso e reso di nuovo accettabile il
+    codice bloccante. La seconda parte e' Spring: il contenitore e l'inversione del
+    controllo, che spiegano da soli scope, configurazione e i proxy dietro le
+    annotazioni; i controller e i confini con il mondo HTTP; e infine JPA, dove si
+    concentrano le domande che distinguono - il problema N+1, i confini della
+    transazione e il lock ottimistico.
+  for_whom: >-
+    Per annunci backend con Java o Kotlin nello stack. Chi viene da un altro linguaggio
+    puo' iniziare dalla scheda su Spring, ma le due sul linguaggio servono comunque.
+  level: medium
+  tags: [java, spring, jvm, backend, jpa]
+  prerequisites:
+    - Fondamenti di API e backend
+    - Nozioni di transazioni e indici
+  topic_ids:
+    - java-01-linguaggio-jvm
+    - java-02-concorrenza
+    - java-03-spring-core
+    - java-04-spring-web
+    - java-05-jpa-transazioni
+    - java-06-build-testing
+  sources:
+    - title: "Effective Java, 3ª edizione (Joshua Bloch)"
+      url: https://www.pearson.com/en-us/subject-catalog/p/effective-java/P200000000138
+      kind: book
+      note: >-
+        Il libro di riferimento sul linguaggio, scritto da chi ne ha progettato parti.
+        Gli elementi su equals e hashCode, sugli oggetti immutabili e sui costruttori
+        rispondono direttamente alle domande piu' frequenti a un colloquio Java.
+    - title: "Java Concurrency in Practice (Brian Goetz)"
+      url: https://www.pearson.com/en-us/subject-catalog/p/java-concurrency-in-practice/P200000009208
+      kind: book
+      note: >-
+        Datato sulle API ma insuperato sui concetti: visibilita', pubblicazione sicura,
+        composizione di operazioni atomiche. Va letto sapendo che i virtual thread hanno
+        spostato il compromesso pratico, non i fondamenti.
+    - title: "Spring Boot - documentazione di riferimento"
+      url: https://docs.spring.io/spring-boot/index.html
+      kind: doc
+      note: >-
+        Da consultare, non da leggere tutta. Le sezioni su configurazione esterna e su
+        testing sono quelle che servono davvero, e chiariscono la precedenza fra riga di
+        comando, ambiente e profili - una domanda ricorrente.
+    - title: "Vlad Mihalcea - prestazioni con Hibernate"
+      url: https://vladmihalcea.com/tutorials/hibernate/
+      kind: article
+      note: >-
+        La fonte piu' precisa in circolazione su N+1, strategie di caricamento,
+        paginazione e lock. Se l'annuncio nomina JPA o Hibernate, questi articoli sono
+        la differenza fra saper usare l'ORM e saper spiegare cosa fa.
+    - title: "Testcontainers per Java"
+      url: https://java.testcontainers.org/
+      kind: doc
+      note: >-
+        Rende praticabile testare contro il database vero invece che contro H2, e alla
+        domanda "come testi il livello dati" e' la risposta che ci si aspetta oggi. La
+        guida introduttiva basta per iniziare.
+    - title: "JEP 444 - Virtual Threads"
+      url: https://openjdk.org/jeps/444
+      kind: doc
+      note: >-
+        La proposta originale spiega il problema che i virtual thread risolvono e i loro
+        limiti meglio di qualsiasi articolo divulgativo. Utile per rispondere anche alla
+        domanda su quando non servono.

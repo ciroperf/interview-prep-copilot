@@ -96,7 +96,12 @@ class StudyPlanBuilder:
                     prompts.PLAN_SYSTEM,
                     prompts.plan_user(
                         self._job_summary(posting),
-                        self.kb.catalog_for_prompt(candidates),
+                        # Il catalogo INTERO, non i soli candidati: passandogli solo i
+                        # piu' affini, il modello non vedeva git, observability, caching
+                        # o Docker su un annuncio frontend e li dichiarava "non coperti
+                        # dal catalogo". Sono ~3k token, e la lista dei candidati resta
+                        # come suggerimento di priorita'.
+                        self.kb.catalog_for_prompt(None, max_items=400),
                         request.days,
                         request.daily_minutes,
                         request.known_strengths,

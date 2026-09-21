@@ -1,0 +1,1107 @@
+# Framework frontend e CSS: la parte che il catalogo dei linguaggi non copre,
+# perche' React, Angular e il layout non stanno dentro "JavaScript".
+- id: fe-01-react-rendering
+  title: React - componenti, rendering e hook
+  category: frontend
+  track: knowledge
+  level: medium
+  tags: [react, frontend, hook, rendering]
+  estimated_minutes: 35
+  summary: >-
+    React ridisegna l'interfaccia in funzione dello stato: non si manipola il DOM, si
+    dichiara cosa mostrare per un certo stato e la libreria calcola la differenza. Gli
+    hook sono il modo in cui una funzione ottiene stato ed effetti.
+  deep_dive: |-
+    Il modello mentale è una funzione: dato uno stato, il componente restituisce la
+    descrizione dell'interfaccia. Quando lo stato cambia React richiama la funzione,
+    confronta il risultato con il precedente e applica al DOM solo le differenze.
+    Da qui discende la regola che spiega quasi tutti i comportamenti sorprendenti: il
+    render deve essere puro. Nessun effetto collaterale, nessuna mutazione dello stato
+    esistente, nessuna lettura del DOM. Gli effetti vanno in useEffect, che gira dopo
+    che il DOM è stato aggiornato.
+
+    Un render non è un aggiornamento del DOM. React può eseguire la funzione del
+    componente senza toccare nulla, e in modalità strict in sviluppo la esegue
+    deliberatamente due volte per far emergere gli effetti collaterali nascosti. Chi
+    non ha chiara questa distinzione legge "renderizza troppo" dove non c'è nessun
+    costo reale.
+
+    Sugli hook, le due regole - si chiamano sempre allo stesso livello, mai dentro
+    condizioni o cicli, e solo da componenti o da altri hook - non sono stilistiche:
+    React associa gli hook alla loro posizione ordinale nella chiamata, quindi un hook
+    condizionale sposta tutti gli altri e lo stato finisce sul pezzo sbagliato.
+
+    useEffect è quello su cui si sbaglia di più, e il punto è che non è un "callback
+    dopo il render" ma un meccanismo di sincronizzazione con un sistema esterno:
+    abbonamenti, timer, connessioni. Se un valore si può calcolare durante il render,
+    non serve un effetto; se deriva da un evento, va nel gestore dell'evento. Ogni
+    effetto che apre qualcosa deve restituire la funzione che la chiude, perché in
+    sviluppo React monta, smonta e rimonta apposta per verificare che la pulizia
+    esista.
+
+    Sulla memoizzazione la posizione è cambiata. useMemo e useCallback servono a
+    stabilizzare i riferimenti, non a "rendere veloce": aggiungerli ovunque costa
+    memoria e leggibilità senza guadagni misurabili. Dal React Compiler, stabile dalla
+    1.0 nell'ottobre 2025, la memoizzazione viene inserita automaticamente dal
+    compilatore, e scriverla a mano diventa l'eccezione. A un colloquio la risposta
+    giusta è: prima misuro con il profiler, poi intervengo.
+
+    Infine i Server Components, stabili dalla 19: componenti che girano solo sul
+    server, non finiscono nel bundle e possono leggere dati direttamente, mentre
+    l'interattività resta ai componenti client marcati con "use client". La
+    distinzione non è "vecchio contro nuovo" ma dove viene eseguito il codice.
+  key_points:
+    - "Il render deve essere puro: niente effetti collaterali, niente mutazioni, niente DOM"
+    - "Un render non e' un aggiornamento del DOM: React puo' eseguire il componente senza toccare nulla"
+    - "Regole degli hook: sempre allo stesso livello, mai in condizioni o cicli. React li identifica per posizione"
+    - "useEffect serve a sincronizzare con sistemi esterni, non a reagire a ogni cosa"
+    - "Se un valore si calcola durante il render non serve un effetto; se nasce da un evento va nel gestore"
+    - "Ogni effetto che apre qualcosa deve chiuderla nella funzione di pulizia"
+    - "useMemo e useCallback stabilizzano i riferimenti; dal React Compiler 1.0 la memoizzazione e' automatica"
+    - "Server Components (stabili dalla 19) girano solo sul server e non pesano sul bundle"
+    - "In sviluppo la modalita' strict monta due volte apposta, per far emergere effetti senza pulizia"
+  examples:
+    - title: L'effetto che non serviva
+      language: javascript
+      code: |
+        // SBAGLIATO: due render invece di uno, e uno stato che puo' andare fuori sincrono.
+        function Lista({ elementi, filtro }) {
+          const [visibili, setVisibili] = useState([])
+          useEffect(() => {
+            setVisibili(elementi.filter((e) => e.nome.includes(filtro)))
+          }, [elementi, filtro])
+          return <ul>{visibili.map((e) => <li key={e.id}>{e.nome}</li>)}</ul>
+        }
+
+        // GIUSTO: e' un valore derivato, si calcola durante il render.
+        function Lista({ elementi, filtro }) {
+          const visibili = elementi.filter((e) => e.nome.includes(filtro))
+          return <ul>{visibili.map((e) => <li key={e.id}>{e.nome}</li>)}</ul>
+        }
+      note: >-
+        La domanda da farsi prima di scrivere un useEffect: questo valore lo posso
+        calcolare adesso? Se sì, non è un effetto. Gli effetti servono per il mondo esterno.
+    - title: Pulizia e race condition su una fetch
+      language: javascript
+      code: |
+        useEffect(() => {
+          let annullato = false
+          const controller = new AbortController()
+
+          fetch(`/api/utenti/${id}`, { signal: controller.signal })
+            .then((r) => r.json())
+            // Senza la guardia, una risposta lenta per un id vecchio
+            // sovrascrive quella di un id nuovo: l'utente vede i dati sbagliati.
+            .then((dati) => { if (!annullato) setUtente(dati) })
+            .catch((e) => { if (e.name !== 'AbortError') setErrore(e) })
+
+          return () => { annullato = true; controller.abort() }
+        }, [id])
+      note: >-
+        È il motivo per cui in sviluppo React monta due volte: senza la funzione di
+        pulizia si vedono due richieste e uno stato incoerente, e il bug emerge subito.
+  trade_offs:
+    - option: Stato locale con useState
+      pros: Semplice, vicino a dove si usa, nessuna dipendenza
+      cons: Va sollevato quando serve a piu' componenti, e il "prop drilling" cresce
+      when: Lo stato riguarda un solo componente o il suo sottoalbero vicino
+    - option: Context
+      pros: Elimina il passaggio manuale attraverso molti livelli
+      cons: Ogni cambiamento fa rirenderizzare tutti i consumatori; non e' uno store
+      when: Valori che cambiano di rado - tema, utente, lingua
+    - option: Memoizzazione manuale
+      pros: Stabilizza i riferimenti, evita render di sottoalberi costosi
+      cons: Rumore nel codice e memoria, spesso senza guadagno misurabile
+      when: Il profiler indica quel componente; altrimenti lascia fare al compilatore
+  numbers:
+    - "Il React Compiler e' stabile dalla 1.0 (ottobre 2025): inserisce la memoizzazione automaticamente e rende manuali useMemo e useCallback l'eccezione"
+    - "In modalita' strict React esegue il render e monta gli effetti due volte in sviluppo, mai in produzione"
+  interview_answer: >-
+    Il modello che tengo in testa è che il componente è una funzione pura dallo stato
+    all'interfaccia: React la richiama quando lo stato cambia e applica al DOM solo le
+    differenze. Da lì derivano le regole pratiche. Gli effetti servono a sincronizzare con
+    il mondo esterno, non a reagire a ogni cambiamento: se un valore lo posso calcolare
+    durante il render non scrivo un useEffect, e se nasce da un'interazione lo metto nel
+    gestore dell'evento. Ogni effetto che apre qualcosa restituisce la pulizia, ed è
+    anche il motivo per cui in sviluppo React monta due volte. Sulla memoizzazione non
+    sono dogmatico: misuro con il profiler, e col React Compiler ormai stabile quella
+    manuale è l'eccezione.
+  senior_signals:
+    - "Distingue un render dall'aggiornamento del DOM"
+    - "Riconosce gli useEffect che non dovrebbero esistere, invece di ottimizzarli"
+    - "Gestisce la race condition sulle fetch dentro l'effetto, non solo la pulizia"
+    - "Parla di memoizzazione partendo dalla misura, e sa che il compilatore la automatizza"
+  pitfalls:
+    - "useEffect per calcolare valori derivati: due render e stato che va fuori sincrono"
+    - "Effetti senza funzione di pulizia: abbonamenti e timer che si accumulano"
+    - "Usare l'indice dell'array come key su una lista che si riordina o filtra"
+    - "Mutare lo stato invece di sostituirlo: React confronta i riferimenti e non vede il cambiamento"
+  follow_ups:
+    - question: Perche' non si usa l'indice dell'array come key?
+      answer: >-
+        Perché la key dice a React quale elemento della lista corrisponde a quale
+        componente fra un render e l'altro. Con l'indice, se un elemento viene inserito,
+        rimosso o la lista viene riordinata, le posizioni slittano: React riusa lo stato
+        del componente sbagliato, e si vedono campi di input che mantengono il valore di
+        un'altra riga o animazioni che partono sull'elemento sbagliato. Serve un
+        identificativo stabile che appartenga al dato. Con una lista puramente statica
+        l'indice è innocuo, ma non costa niente usare l'id.
+    - question: Qual e' la differenza fra useMemo e useCallback?
+      answer: >-
+        useMemo memorizza il risultato di un calcolo, useCallback memorizza la funzione
+        stessa: useCallback(fn, deps) è equivalente a useMemo(() => fn, deps). Servono
+        entrambi a mantenere stabile un riferimento fra un render e l'altro, tipicamente
+        perché quel riferimento è una dipendenza di un effetto o una prop di un componente
+        memoizzato. Non servono a "velocizzare": hanno un costo in memoria e leggibilità,
+        e col React Compiler la memoizzazione viene inserita automaticamente.
+    - question: Perche' in sviluppo gli effetti girano due volte?
+      answer: >-
+        Perché la modalità strict monta il componente, lo smonta e lo rimonta
+        deliberatamente, per verificare che ogni effetto sappia ripulire ciò che ha
+        aperto. Se si vedono due richieste di rete o due abbonamenti accumulati, non è un
+        bug di React: è React che sta mostrando un bug nel codice. In produzione succede
+        una volta sola. La reazione giusta è aggiungere la funzione di pulizia, non
+        disattivare la modalità strict.
+    - question: Che cosa sono i Server Components e quando li useresti?
+      answer: >-
+        Sono componenti eseguiti solo sul server: non finiscono nel bundle inviato al
+        browser e possono leggere dati direttamente, senza passare da una API. Sono
+        stabili dalla 19. Li uso per tutto ciò che è presentazione di dati senza
+        interattività, perché tolgono peso al client, e marco con "use client" solo i
+        componenti che hanno bisogno di stato o di gestori di eventi. La distinzione non
+        è fra vecchio e nuovo modo ma fra dove viene eseguito il codice, e richiede un
+        framework che li supporti.
+  related: [fe-02-react-stato-dati, fe-03-angular, js-04-event-loop, js-08-performance-memoria]
+  resources:
+    - title: "Documentazione ufficiale di React"
+      url: https://react.dev/learn
+      kind: doc
+    - title: "You Might Not Need an Effect"
+      url: https://react.dev/learn/you-might-not-need-an-effect
+      kind: doc
+
+- id: fe-02-react-stato-dati
+  title: React - stato, dati remoti e state management
+  category: frontend
+  track: knowledge
+  level: medium
+  tags: [react, stato, frontend, dati]
+  estimated_minutes: 30
+  summary: >-
+    La domanda vera non è quale libreria di state management usare, ma quale stato si
+    possiede davvero. Lo stato del server non è stato dell'applicazione: è una copia
+    locale di qualcosa che vive altrove, e va trattato come una cache.
+  deep_dive: |-
+    Il modo più utile di ragionare è dividere lo stato in tre categorie. Lo stato
+    dell'interfaccia - un accordion aperto, il testo in un campo, la scheda attiva -
+    appartiene al componente e sta bene in useState. Lo stato dell'applicazione -
+    l'utente autenticato, il tema, il carrello - è condiviso e persiste attraverso le
+    pagine. Lo stato del server - la lista degli ordini, il profilo - non è stato:
+    è una copia locale di dati che vivono altrove e possono cambiare senza che noi lo
+    sappiamo.
+
+    Confondere la terza categoria con le prime due è l'errore che genera metà del
+    codice inutile in un frontend. Trattata come stato applicativo, una risposta HTTP
+    richiede di scrivere a mano il caricamento, l'errore, la rivalidazione, la
+    deduplicazione delle richieste concorrenti, l'invalidazione dopo una scrittura e la
+    gestione dei dati stantii. Trattata come cache, tutto questo lo fa una libreria
+    dedicata - TanStack Query, SWR, o il caricamento dati del framework - e restano da
+    scrivere solo le regole di invalidazione.
+
+    Sullo stato davvero condiviso, la scala parte dal basso. Prima si solleva lo stato
+    al più vicino antenato comune. Se il passaggio attraverso molti livelli diventa
+    fastidioso, Context risolve il trasporto - ma Context non è uno store: ogni
+    cambiamento del valore fa rirenderizzare tutti i consumatori, quindi va bene per
+    valori che cambiano di rado e male per dati che cambiano a ogni tasto premuto. Solo
+    quando lo stato condiviso è grande, cambia spesso e ha logica di aggiornamento
+    complessa conviene uno store esterno - Zustand, Redux Toolkit, Jotai - che offre
+    aggiornamenti selettivi.
+
+    Per la logica di aggiornamento, useReducer è il passo intermedio che si trascura:
+    quando gli stati possibili sono pochi e le transizioni sono definite, un reducer
+    rende impossibili le combinazioni incoerenti che con tre useState separati arrivano
+    puntualmente - il classico caricamento a true e errore valorizzato insieme.
+
+    Sull'immutabilità: React confronta i riferimenti, non il contenuto. Mutare un
+    oggetto o un array e reimpostarlo non produce alcun render, perché il riferimento è
+    lo stesso. Si sostituisce, non si modifica.
+  key_points:
+    - "Tre categorie di stato: interfaccia, applicazione, server. La terza non e' stato ma una cache"
+    - "Lo stato del server va a una libreria di data fetching: caricamento, errori, rivalidazione e deduplica sono risolti"
+    - "Scala dal basso: stato locale, poi sollevamento, poi Context, e solo alla fine uno store"
+    - "Context non e' uno store: ogni cambiamento rirenderizza tutti i consumatori"
+    - "useReducer rende impossibili gli stati incoerenti che nascono da piu' useState separati"
+    - "React confronta i riferimenti: mutare invece di sostituire non produce nessun render"
+    - "Aggiornamenti funzionali (setX(prec => ...)) quando il nuovo valore dipende dal precedente"
+  examples:
+    - title: Lo stato del server trattato come cache
+      language: javascript
+      code: |
+        // A MANO: quattro stati da tenere coerenti, nessuna deduplica, nessuna
+        // rivalidazione, e la race condition va gestita a parte.
+        const [dati, setDati] = useState(null)
+        const [caricando, setCaricando] = useState(true)
+        const [errore, setErrore] = useState(null)
+        useEffect(() => { /* fetch, setState, cleanup... */ }, [id])
+
+        // COME CACHE: la libreria si occupa di stato, deduplica e rivalidazione.
+        const { data, isPending, error } = useQuery({
+          queryKey: ['ordine', id],
+          queryFn: () => fetch(`/api/ordini/${id}`).then((r) => r.json()),
+          staleTime: 30_000,          // per 30s non richiede di nuovo
+        })
+        // Dopo una scrittura si invalida la chiave, non si aggiorna a mano lo stato.
+        queryClient.invalidateQueries({ queryKey: ['ordine', id] })
+      note: >-
+        Il valore non è scrivere meno righe: è che deduplica, rivalidazione al focus e
+        gestione dei dati stantii sono problemi già risolti e difficili da rifare bene.
+    - title: Stati incoerenti, e il reducer che li rende impossibili
+      language: javascript
+      code: |
+        // Con tre stati separati, questa combinazione e' rappresentabile:
+        // caricando = true, errore = "boom", dati = {...}  -> che cosa mostro?
+        const [dati, setDati] = useState(null)
+        const [caricando, setCaricando] = useState(false)
+        const [errore, setErrore] = useState(null)
+
+        // Con un reducer gli stati possibili sono quelli che scrivo io.
+        function riduttore(stato, azione) {
+          switch (azione.tipo) {
+            case 'carica':  return { fase: 'in_corso' }
+            case 'riuscito': return { fase: 'pronto', dati: azione.dati }
+            case 'fallito':  return { fase: 'errore', messaggio: azione.messaggio }
+            default: return stato
+          }
+        }
+        // Ora "in_corso con un errore" non esiste: non e' rappresentabile.
+      note: >-
+        È lo stesso principio del "rendere illegale lo stato non rappresentabile": vale
+        in React come nel dominio di un backend.
+  trade_offs:
+    - option: useState sollevato
+      pros: Zero dipendenze, esplicito, facile da seguire
+      cons: Il passaggio attraverso molti livelli diventa rumoroso
+      when: Lo stato serve a un sottoalbero ristretto
+    - option: Context
+      pros: Elimina il passaggio manuale, nessuna libreria
+      cons: Rirenderizza tutti i consumatori a ogni cambiamento
+      when: "Valori che cambiano di rado: tema, utente, lingua"
+    - option: Store esterno (Zustand, Redux Toolkit)
+      pros: Aggiornamenti selettivi, logica centralizzata, strumenti di debug
+      cons: Una dipendenza e un concetto in piu' da imparare
+      when: Stato condiviso ampio, che cambia spesso, con logica complessa
+    - option: Libreria di data fetching
+      pros: Cache, deduplica, rivalidazione e stati di caricamento gia' risolti
+      cons: Va capito il modello di invalidazione
+      when: Praticamente sempre, per i dati che arrivano da una API
+  numbers:
+    - "Con quattro variabili booleane indipendenti gli stati rappresentabili sono 16, quelli validi spesso tre o quattro: la differenza e' la superficie dei bug"
+    - "staleTime a zero significa richiedere di nuovo a ogni montaggio: su una lista visitata spesso e' la differenza fra una richiesta e decine"
+  interview_answer: >-
+    La prima domanda che mi faccio non è quale libreria usare ma di che tipo è lo stato.
+    Se è roba dell'interfaccia sta nel componente; se è condiviso e cambia di rado lo metto
+    in Context; e se è stato del server lo tratto per quello che è, cioè una cache locale di
+    dati che vivono altrove, e uso una libreria di data fetching. Quella distinzione toglie
+    la maggior parte del codice inutile, perché caricamento, errori, deduplica e
+    rivalidazione non li riscrivo. Uno store esterno lo introduco solo quando lo stato
+    condiviso è grande e cambia spesso, perché Context a quel punto rirenderizza troppo.
+  senior_signals:
+    - "Classifica lo stato prima di scegliere lo strumento"
+    - "Sa che Context risolve il trasporto e non le prestazioni"
+    - "Usa un reducer per rendere non rappresentabili gli stati incoerenti"
+    - "Ragiona di invalidazione della cache invece che di aggiornamento manuale dopo una scrittura"
+  pitfalls:
+    - "Mettere le risposte HTTP nello store globale e sincronizzarle a mano"
+    - "Context con valori che cambiano di continuo: tutto il sottoalbero rirenderizza"
+    - "Mutare un array nello stato e reimpostarlo: il riferimento non cambia, niente render"
+    - "Dimenticare l'aggiornamento funzionale quando il nuovo valore dipende dal precedente"
+  follow_ups:
+    - question: Quando introdurresti Redux o uno store esterno?
+      answer: >-
+        Quando lo stato condiviso è ampio, cambia spesso e ha logica di aggiornamento non
+        banale — tipicamente un editor, un carrello complesso, una dashboard con filtri
+        incrociati. Prima provo lo stato locale sollevato, poi Context; se Context comincia
+        a causare render inutili perché il valore cambia di continuo, allora lo store è
+        giustificato, perché permette a ogni componente di sottoscrivere solo la fetta che
+        gli serve. Quello che non metto in uno store sono le risposte delle API: quelle
+        vanno a una libreria di data fetching.
+    - question: Perche' mutare lo stato non provoca un render?
+      answer: >-
+        Perché React decide se rirenderizzare confrontando il riferimento precedente con
+        quello nuovo, non il contenuto. Se faccio push su un array e poi lo reimposto,
+        il riferimento è identico e React conclude che non è cambiato niente. Bisogna
+        creare un nuovo array o un nuovo oggetto — con lo spread o con una libreria di
+        aggiornamenti immutabili. È lo stesso motivo per cui un confronto superficiale
+        basta a React per essere veloce.
+    - question: Che differenza c'e' fra useState e useReducer?
+      answer: >-
+        useState è comodo per un valore indipendente; useReducer centralizza le
+        transizioni in una funzione pura, e diventa preferibile quando gli aggiornamenti
+        dipendono l'uno dall'altro o quando più valori cambiano insieme. Il vantaggio
+        principale non è la sintassi ma il fatto che gli stati possibili sono solo quelli
+        che il reducer produce: combinazioni incoerenti come "sto caricando e ho anche un
+        errore" smettono di essere rappresentabili. In più la logica si testa da sola,
+        senza montare il componente.
+    - question: Come eviti che un Context rirenderizzi mezza applicazione?
+      answer: >-
+        Prima di tutto separando i context per frequenza di cambiamento: il tema e
+        l'utente in uno, i dati volatili altrove. Poi tenendo stabile il valore passato,
+        perché un oggetto letterale creato nel render è un riferimento nuovo a ogni giro e
+        fa rirenderizzare tutti i consumatori anche se il contenuto è identico. Se
+        nonostante questo i render restano troppi, il problema è che Context non è la
+        struttura giusta per quel dato e serve uno store con sottoscrizioni selettive.
+  related: [fe-01-react-rendering, fe-06-testing-componenti, cache-23-consistency, core-01-what-is-an-api]
+  resources:
+    - title: "React - gestione dello stato"
+      url: https://react.dev/learn/managing-state
+      kind: doc
+    - title: "TanStack Query"
+      url: https://tanstack.com/query/latest
+      kind: doc
+
+- id: fe-03-angular
+  title: Angular - change detection, signal e dependency injection
+  category: frontend
+  track: knowledge
+  level: medium
+  tags: [angular, frontend, signal, rxjs]
+  estimated_minutes: 35
+  summary: >-
+    Angular è un framework completo con opinioni forti: dependency injection di serie,
+    RxJS per i flussi asincroni e un meccanismo di change detection che negli ultimi
+    anni è cambiato radicalmente, passando da zone.js ai signal.
+  deep_dive: |-
+    Storicamente Angular capiva che qualcosa era cambiato grazie a zone.js, che
+    intercetta ogni operazione asincrona del browser - timer, eventi, richieste HTTP -
+    e al termine avvisa il framework. Il costo è che dopo qualunque evento Angular
+    ricontrolla l'intero albero dei componenti, senza sapere che cosa sia cambiato
+    davvero. La strategia OnPush limitava il danno dicendo al framework di ricontrollare
+    un componente solo quando cambiano i riferimenti dei suoi input o scatta un evento
+    al suo interno.
+
+    Il cambiamento è profondo e recente. I signal - signal, computed, effect - sono
+    stabili dalla 19: un signal è un valore che sa chi lo sta leggendo, quindi quando
+    cambia il framework sa esattamente quali parti della vista aggiornare, senza
+    ricontrollare niente. Da lì la change detection zoneless, stabile dalla 20.2 e
+    predefinita per le applicazioni nuove dalla 21, che fa a meno di zone.js: si
+    aggiorna ciò che dipende dal signal cambiato, e basta. Dalla 22 OnPush è la
+    strategia predefinita, e Signal Forms e la Resource API sono stabili. A un colloquio
+    conviene saper raccontare questa traiettoria, perché mostra di seguire il framework
+    e non di averlo imparato una volta.
+
+    La dependency injection è l'altro tratto caratteristico. Angular ha un iniettore
+    gerarchico: un servizio fornito in radice è un singleton per tutta l'applicazione,
+    uno fornito a livello di componente vive quanto il componente e ha un'istanza per
+    ogni occorrenza. Capire la gerarchia serve a rispondere alla domanda ricorrente sul
+    perché due componenti vedano lo stesso stato o stati diversi.
+
+    RxJS resta centrale per i flussi di eventi, e le domande si concentrano sugli
+    operatori di appiattimento, dove la scelta sbagliata è un bug vero: switchMap
+    annulla la richiesta precedente ed è quello giusto per una ricerca mentre si
+    digita; concatMap le mette in coda preservando l'ordine; mergeMap le lascia andare
+    in parallelo senza garanzie; exhaustMap ignora le nuove finché la corrente non
+    finisce, ed è quello giusto per il pulsante di invio premuto due volte. L'altra
+    metà della domanda è la disiscrizione: un Observable sottoscritto a mano e mai
+    chiuso è una perdita di memoria, e le vie d'uscita sono il pipe async nel template,
+    takeUntilDestroyed, o toSignal.
+
+    Rispetto a React la differenza di impostazione è chiara: React è una libreria di
+    vista che lascia scegliere il resto, Angular porta routing, HTTP, form e DI dentro
+    la scatola. Costa di più all'inizio e dà più uniformità su progetti grandi e team
+    numerosi.
+  key_points:
+    - "zone.js intercetta l'asincronia e fa ricontrollare l'albero; OnPush limita il controllo ai cambi di riferimento"
+    - "I signal sono stabili dalla 19: il framework sa chi legge un valore, quindi aggiorna solo quello"
+    - "Zoneless stabile dalla 20.2 e predefinito per le app nuove dalla 21; dalla 22 OnPush e' il default"
+    - "Iniettore gerarchico: fornito in radice e' un singleton, fornito nel componente ha un'istanza per occorrenza"
+    - "switchMap annulla, concatMap accoda, mergeMap parallelizza, exhaustMap ignora le nuove"
+    - "Un Observable sottoscritto a mano e mai chiuso e' una perdita di memoria: pipe async, takeUntilDestroyed o toSignal"
+    - "Angular porta routing, HTTP, form e DI di serie; React lascia scegliere"
+  examples:
+    - title: L'operatore di appiattimento sbagliato e' un bug, non uno stile
+      language: typescript
+      code: |
+        // RICERCA MENTRE SI DIGITA: serve switchMap.
+        // Con mergeMap le risposte lente arrivano dopo quelle veloci e l'utente
+        // vede i risultati di una query che ha gia' finito di scrivere.
+        this.risultati$ = this.testo$.pipe(
+          debounceTime(300),
+          distinctUntilChanged(),
+          switchMap((q) => this.api.cerca(q)),   // annulla la richiesta precedente
+        )
+
+        // INVIO DI UN ORDINE: serve exhaustMap.
+        // Con switchMap il doppio clic annullerebbe il primo invio; con mergeMap
+        // ne partirebbero due. exhaustMap ignora i clic finche' il primo non finisce.
+        this.inviato$ = this.clic$.pipe(
+          exhaustMap(() => this.api.creaOrdine(this.form.value)),
+        )
+      note: >-
+        La domanda "quale operatore useresti" è in realtà "che cosa deve succedere se
+        arriva un secondo evento mentre il primo è in volo". Si risponde da lì.
+    - title: Dal componente con zone al componente con signal
+      language: typescript
+      code: |
+        // PRIMA: stato normale, il framework ricontrolla dopo ogni evento.
+        @Component({ selector: 'app-carrello', template: `<p>{{ totale }}</p>` })
+        export class Carrello {
+          articoli: Articolo[] = []
+          get totale() { return this.articoli.reduce((s, a) => s + a.prezzo, 0) }
+          // 'totale' viene ricalcolato a ogni ciclo di controllo, anche se nulla e' cambiato.
+        }
+
+        // ORA: i signal dichiarano la dipendenza, computed si ricalcola solo se serve.
+        @Component({ selector: 'app-carrello', template: `<p>{{ totale() }}</p>` })
+        export class Carrello {
+          articoli = signal<Articolo[]>([])
+          totale = computed(() => this.articoli().reduce((s, a) => s + a.prezzo, 0))
+          aggiungi(a: Articolo) { this.articoli.update((prec) => [...prec, a]) }
+        }
+      note: >-
+        Un getter nel template è il classico problema di prestazioni in Angular con le
+        zone: viene invocato a ogni ciclo di controllo. computed risolve alla radice.
+  trade_offs:
+    - option: Zone.js
+      pros: Funziona senza che lo sviluppatore dichiari niente, retrocompatibile
+      cons: Ricontrolla l'albero dopo ogni evento asincrono, costo che cresce con l'app
+      when: Applicazioni esistenti non ancora migrate
+    - option: Zoneless con signal
+      pros: Aggiorna solo cio' che dipende dal valore cambiato, bundle piu' leggero
+      cons: Richiede di usare i signal in modo coerente; librerie vecchie possono non seguire
+      when: Applicazioni nuove; dalla 21 e' il comportamento predefinito
+    - option: RxJS
+      pros: Insuperabile su flussi di eventi, annullamento e composizione temporale
+      cons: Curva di apprendimento ripida, facile sottoscrivere e dimenticare
+      when: Eventi nel tempo, ricerche, polling, websocket
+    - option: Signal
+      pros: Modello mentale semplice per lo stato sincrono, nessuna disiscrizione
+      cons: Non sostituisce RxJS sulla composizione temporale
+      when: Stato del componente e valori derivati
+  numbers:
+    - "Angular 22 (giugno 2026) ha reso stabili Signal Forms e la Resource API e OnPush il default; zoneless e' predefinito dalla 21"
+    - "Con zone.js ogni evento fa ricontrollare l'intero albero dei componenti: su alberi profondi e' il costo che i signal eliminano"
+  interview_answer: >-
+    La cosa che racconterei è come è cambiata la change detection, perché spiega tutto il
+    resto. Prima zone.js intercettava ogni operazione asincrona e Angular ricontrollava
+    l'albero; OnPush limitava il controllo ai cambi di riferimento. Con i signal, stabili
+    dalla 19, il framework sa chi legge un valore, quindi quando cambia aggiorna solo quella
+    parte: da lì la modalità zoneless, predefinita per le app nuove dalla 21. Sull'altra
+    domanda che arriva sempre, gli operatori RxJS, la scelgo chiedendomi cosa deve succedere
+    se arriva un secondo evento mentre il primo è in volo: switchMap annulla ed è giusto per
+    la ricerca mentre si digita, exhaustMap ignora ed è giusto per il pulsante di invio.
+  senior_signals:
+    - "Racconta la traiettoria da zone.js ai signal, non solo lo stato attuale"
+    - "Sceglie l'operatore di appiattimento partendo dal comportamento voluto"
+    - "Sa che un getter nel template viene invocato a ogni ciclo di controllo"
+    - "Collega la gerarchia degli iniettori al ciclo di vita dello stato condiviso"
+  pitfalls:
+    - "Chiamate a funzione o getter nel template: ricalcolati a ogni ciclo di controllo"
+    - "Sottoscrizioni mai chiuse: perdita di memoria a ogni distruzione del componente"
+    - "mergeMap dove serviva switchMap: risposte fuori ordine sulla ricerca"
+    - "Fornire un servizio a livello di componente aspettandosi un singleton"
+  follow_ups:
+    - question: Che differenza c'e' fra switchMap, mergeMap, concatMap e exhaustMap?
+      answer: >-
+        Decidono cosa fare quando arriva un valore nuovo mentre l'operazione precedente è
+        ancora in corso. switchMap annulla la precedente e passa alla nuova, ed è quello
+        giusto per la ricerca mentre si digita. concatMap le mette in coda e le esegue in
+        ordine, utile quando la sequenza conta. mergeMap le lascia correre tutte in
+        parallelo, senza garanzie sull'ordine di arrivo. exhaustMap ignora le nuove finché
+        la corrente non è finita, ed è quello giusto per il pulsante di invio premuto due
+        volte. Sbagliare operatore qui non è una questione di stile, è un bug.
+    - question: Come si evitano le perdite di memoria con RxJS?
+      answer: >-
+        La via più semplice è non sottoscrivere a mano: il pipe async nel template
+        sottoscrive e disiscrive da solo seguendo il ciclo di vita del componente. Quando
+        serve sottoscrivere nel codice si usa takeUntilDestroyed, che chiude il flusso
+        quando il componente viene distrutto, oppure si converte in signal con toSignal.
+        Il pattern manuale con un Subject e ngOnDestroy funziona ancora ma è più verboso e
+        si dimentica facilmente — ed è esattamente l'origine della perdita.
+    - question: Che cosa cambia con la change detection zoneless?
+      answer: >-
+        Sparisce zone.js, quindi il framework non viene più avvisato genericamente che
+        "qualcosa di asincrono è successo" e non ricontrolla più l'albero. L'aggiornamento
+        è guidato dai signal: chi legge un valore viene registrato, e quando il valore
+        cambia si aggiorna solo quella parte della vista. In pratica significa prestazioni
+        migliori senza dover cospargere l'applicazione di OnPush, un bundle più leggero e
+        un modello mentale più semplice. Il prezzo è usare i signal in modo coerente e
+        verificare che le librerie di terze parti non dipendano da zone.js.
+    - question: Quando sceglieresti Angular invece di React?
+      answer: >-
+        Quando il progetto è grande, il team numeroso e il tempo lungo: Angular porta
+        routing, HTTP, form, DI e struttura dentro la scatola, quindi le scelte sono già
+        fatte e il codice di due team diversi si assomiglia. React è una libreria di vista
+        e lascia comporre il resto: più libertà e più leggerezza, al prezzo che ogni
+        progetto finisce per avere il suo insieme di librerie. Non c'è una risposta
+        migliore in assoluto, c'è quella coerente con la dimensione del gruppo.
+  related: [fe-01-react-rendering, fe-02-react-stato-dati, pat-05-dependency-injection, js-07-typescript]
+  resources:
+    - title: "Documentazione ufficiale di Angular"
+      url: https://angular.dev/overview
+      kind: doc
+    - title: "Angular - signal"
+      url: https://angular.dev/guide/signals
+      kind: doc
+    - title: "Learn RxJS - operatori a confronto"
+      url: https://www.learnrxjs.io/
+      kind: article
+
+- id: fe-04-css-layout
+  title: CSS - layout, Flexbox, Grid e responsive
+  category: frontend
+  track: knowledge
+  level: medium
+  tags: [css, layout, responsive, frontend]
+  estimated_minutes: 30
+  summary: >-
+    Le domande su CSS a un colloquio non riguardano la sintassi ma il modello: come si
+    risolvono le specificità, come si calcola la dimensione di una scatola e quando
+    conviene Flexbox invece di Grid.
+  deep_dive: |-
+    Il primo blocco è la cascata, e la parte che confonde è che sono tre meccanismi
+    distinti sovrapposti. L'ereditarietà fa scendere alcune proprietà - tipografia,
+    colore - ai discendenti, altre no. La specificità decide fra regole che colpiscono
+    lo stesso elemento, contando nell'ordine identificatori, classi e attributi,
+    elementi: mille classi non battono un identificatore, perché non è un numero in
+    base dieci ma un confronto per gruppi. A parità di specificità vince l'ultima
+    dichiarata. `!important` scavalca tutto ed è quasi sempre il segnale che la
+    specificità è andata fuori controllo. I layer di cascata e `:where()`, che ha
+    specificità zero, sono i due strumenti moderni per tenerla bassa di proposito.
+
+    Il secondo è il box model. La larghezza di default si applica al contenuto, quindi
+    padding e bordo si sommano: `box-sizing: border-box` fa sì che la larghezza
+    dichiarata includa tutto, ed è il motivo per cui praticamente ogni progetto lo
+    imposta su tutti gli elementi come prima riga.
+
+    Poi i contesti di layout. Flexbox è monodimensionale: si distribuisce lungo un
+    asse, e l'altro si adatta. Grid è bidimensionale: si definiscono righe e colonne
+    insieme, ed è lo strumento giusto quando l'allineamento deve valere in entrambe le
+    direzioni. La regola pratica è che Flexbox va scelto quando il contenuto decide la
+    disposizione, Grid quando la decide il contenitore. I due si compongono: una griglia
+    di pagina, e flex dentro le singole celle.
+
+    Sul responsive, il cambiamento di mentalità è passare dai breakpoint fissi alle
+    regole intrinseche. `clamp()` esprime una dimensione che cresce fra un minimo e un
+    massimo senza soglie; `minmax()` con `auto-fit` costruisce griglie che cambiano
+    numero di colonne da sole; le container query permettono a un componente di
+    adattarsi alla larghezza del *contenitore* invece che a quella della finestra, che è
+    la cosa giusta quando lo stesso componente compare in una barra laterale e a pagina
+    intera.
+
+    Infine due meccanismi che spiegano molti comportamenti inattesi. Il contesto di
+    impilamento: `z-index` funziona solo fra fratelli dentro lo stesso contesto, e
+    proprietà come `transform`, `opacity` minore di uno o `filter` ne creano uno nuovo -
+    da qui il classico "ho messo z-index 9999 e resta sotto". E il collasso dei margini
+    verticali fra elementi adiacenti, che sparisce dentro un contenitore flex o grid.
+  key_points:
+    - "Specificita': identificatori, poi classi e attributi, poi elementi. Non e' un numero in base dieci"
+    - "A parita' di specificita' vince l'ultima regola dichiarata; !important segnala specificita' fuori controllo"
+    - "box-sizing: border-box fa includere padding e bordo nella larghezza dichiarata"
+    - "Flexbox e' monodimensionale, Grid bidimensionale: flex quando decide il contenuto, grid quando decide il contenitore"
+    - "clamp() e minmax() con auto-fit danno responsive senza breakpoint fissi"
+    - "Le container query adattano il componente al contenitore, non alla finestra"
+    - "z-index vale solo dentro lo stesso contesto di impilamento; transform, opacity e filter ne creano uno nuovo"
+    - "I margini verticali adiacenti collassano, ma non dentro flex o grid"
+  examples:
+    - title: Una griglia responsive senza nessun breakpoint
+      language: css
+      code: |
+        .catalogo {
+          display: grid;
+          /* auto-fit: quante colonne ci stanno, con minimo 16rem ciascuna.
+             Nessuna media query: il numero di colonne cambia da solo. */
+          grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+          gap: 1.5rem;
+        }
+
+        .titolo {
+          /* minimo, valore preferito che scala con la finestra, massimo */
+          font-size: clamp(1.5rem, 1rem + 2vw, 3rem);
+        }
+
+        /* Il componente si adatta al CONTENITORE, non alla finestra: la stessa
+           scheda in una barra laterale stretta e a pagina intera si comporta bene. */
+        .scheda { container-type: inline-size; }
+        @container (min-width: 30rem) {
+          .scheda__corpo { display: flex; gap: 1rem; }
+        }
+      note: >-
+        `auto-fit` collassa le tracce vuote, `auto-fill` le mantiene: con pochi elementi
+        la differenza si vede subito, ed è una domanda da colloquio ricorrente.
+    - title: Perche' z-index 9999 non basta
+      language: css
+      code: |
+        .intestazione {
+          position: sticky;
+          z-index: 10;
+        }
+
+        .contenuto {
+          /* Questa riga crea un NUOVO contesto di impilamento: tutto cio' che
+             sta dentro viene confrontato solo con i propri fratelli, e da fuori
+             l'intero blocco vale 1. */
+          transform: translateZ(0);
+          z-index: 1;
+        }
+
+        .contenuto .tendina {
+          z-index: 9999;   /* inutile: non esce dal contesto creato dal padre */
+        }
+        /* Rimedio: togliere il transform dal padre, oppure portare la tendina
+           fuori dall'albero con un portal. */
+      note: >-
+        Creano un contesto anche `opacity` minore di 1, `filter`, `will-change`,
+        `contain` e gli elementi posizionati con z-index diverso da auto.
+  trade_offs:
+    - option: Flexbox
+      pros: Perfetto per distribuire lungo un asse, si adatta al contenuto
+      cons: L'allineamento fra righe diverse va costruito a mano
+      when: Barre di navigazione, gruppi di pulsanti, contenuto di una cella
+    - option: Grid
+      pros: Controllo su righe e colonne insieme, aree nominate, allineamento reale
+      cons: Piu' concetti da imparare, sovradimensionato per una fila di elementi
+      when: Struttura della pagina, cataloghi, tabelle di schede
+    - option: Breakpoint con media query
+      pros: Controllo esplicito, facile da ragionare
+      cons: Soglie arbitrarie, si moltiplicano, guardano la finestra e non il componente
+      when: Cambi di struttura netti fra mobile e desktop
+    - option: Regole intrinseche (clamp, auto-fit, container query)
+      pros: Meno codice, si adatta a contesti non previsti
+      cons: Meno controllo puntuale, richiede di fidarsi del calcolo
+      when: Tipografia, griglie, componenti riusati in contenitori diversi
+  numbers:
+    - "La specificita' si confronta per gruppi: un solo identificatore batte un numero qualsiasi di classi"
+    - "clamp(min, preferito, max) sostituisce tipicamente tre o quattro media query sulla stessa proprieta'"
+  interview_answer: >-
+    Su CSS parto sempre dal modello invece che dalle proprietà. La cascata sono tre cose
+    diverse sovrapposte - ereditarietà, specificità e ordine - e la specificità si confronta
+    per gruppi, quindi un identificatore batte qualunque numero di classi: per questo tengo
+    i selettori bassi e uso i layer o :where() invece di rincorrere con !important. Sul
+    layout la regola che seguo è Flexbox quando la disposizione la decide il contenuto e
+    Grid quando la decide il contenitore, e i due si compongono. Per il responsive oggi
+    preferisco le regole intrinseche - clamp, auto-fit con minmax, le container query - ai
+    breakpoint fissi, perché il componente si adatta anche a contesti che non avevo previsto.
+  senior_signals:
+    - "Spiega la specificita' come confronto per gruppi, non come punteggio"
+    - "Riconosce i contesti di impilamento dietro un z-index che non funziona"
+    - "Usa le container query dove il componente e' riusato in contenitori diversi"
+    - "Tiene bassa la specificita' di proposito invece di rincorrerla"
+  pitfalls:
+    - "Rincorrere la specificita' con !important invece di abbassare i selettori"
+    - "Dimenticare box-sizing: border-box e combattere con le larghezze"
+    - "Alzare z-index senza accorgersi del contesto di impilamento creato dal padre"
+    - "Breakpoint basati sui modelli di telefono invece che sul punto in cui il layout si rompe"
+  follow_ups:
+    - question: Quando usi Flexbox e quando Grid?
+      answer: >-
+        Flexbox quando la disposizione la decide il contenuto e si sviluppa lungo un asse:
+        una barra di navigazione, un gruppo di pulsanti, elementi che si distribuiscono e
+        vanno a capo. Grid quando la decide il contenitore e servono righe e colonne
+        insieme, con allineamento reale fra le une e le altre: la struttura della pagina,
+        un catalogo di schede. Non è una scelta esclusiva: uso una griglia per la pagina e
+        flex dentro le singole celle, che è la combinazione più comune.
+    - question: Come funziona la specificita' in CSS?
+      answer: >-
+        Si contano tre gruppi nell'ordine: identificatori, poi classi, attributi e
+        pseudo-classi, poi elementi e pseudo-elementi. Si confrontano gruppo per gruppo, e
+        il primo che differisce decide: per questo un identificatore batte qualunque numero
+        di classi, non è un numero in base dieci. A parità vince l'ultima regola dichiarata.
+        Gli stili inline stanno sopra, e !important sopra ancora. Gli strumenti moderni per
+        non finire nella rincorsa sono i layer di cascata, che stabiliscono la precedenza
+        fra blocchi di regole, e :where(), che ha specificità zero.
+    - question: Che cos'e' un contesto di impilamento?
+      answer: >-
+        È un gruppo di elementi che vengono ordinati in profondità solo fra loro. z-index
+        confronta elementi dentro lo stesso contesto: se il padre ne crea uno nuovo, tutto
+        ciò che sta dentro viene trattato dall'esterno come un blocco unico, e alzare
+        z-index su un figlio non lo fa uscire. Creano un contesto gli elementi posizionati
+        con z-index diverso da auto, ma anche transform, opacity minore di uno, filter,
+        will-change e contain. È la spiegazione del classico z-index 9999 che resta sotto.
+    - question: Che differenza c'e' fra auto-fit e auto-fill?
+      answer: >-
+        Entrambi decidono quante tracce creare in base allo spazio disponibile. auto-fill
+        crea tutte le tracce che ci stanno, anche se restano vuote, quindi con pochi
+        elementi si vede uno spazio vuoto a destra. auto-fit crea le stesse tracce ma
+        collassa quelle vuote, così gli elementi presenti si distribuiscono occupando tutta
+        la larghezza. Con abbastanza elementi da riempire la riga il risultato è identico:
+        la differenza si vede solo quando gli elementi sono pochi.
+  related: [fe-05-web-performance, fe-01-react-rendering, fe-03-angular, js-08-performance-memoria]
+  resources:
+    - title: "MDN - CSS layout"
+      url: https://developer.mozilla.org/en-US/docs/Learn_web_development/Core/CSS_layout
+      kind: doc
+    - title: "A Complete Guide to Flexbox (CSS-Tricks)"
+      url: https://css-tricks.com/snippets/css/a-guide-to-flexbox/
+      kind: article
+    - title: "A Complete Guide to CSS Grid (CSS-Tricks)"
+      url: https://css-tricks.com/snippets/css/complete-guide-grid/
+      kind: article
+
+- id: fe-05-web-performance
+  title: Prestazioni web - percorso di rendering critico e Core Web Vitals
+  category: frontend
+  track: technical
+  level: medium
+  tags: [performance, css, core-web-vitals, frontend]
+  estimated_minutes: 30
+  summary: >-
+    Le prestazioni percepite si misurano con tre metriche di campo - LCP, INP e CLS - e
+    si migliorano capendo che cosa blocca il primo disegno e che cosa occupa il thread
+    principale quando l'utente tocca qualcosa.
+  deep_dive: |-
+    Il percorso di rendering critico è la sequenza che porta dai byte al primo pixel:
+    HTML in DOM, CSS in CSSOM, i due combinati in albero di rendering, poi layout,
+    disegno e composizione. Il punto che conta è che il CSS **blocca il rendering**: il
+    browser non disegna finché non ha il CSS, perché disegnare senza stili produrrebbe
+    un lampo di pagina non formattata. Gli script nel head bloccano anche il parsing,
+    a meno di `defer` - esegue dopo il parsing, nell'ordine - o `async` - esegue appena
+    pronto, senza ordine garantito.
+
+    Da qui le leve reali. Ridurre il CSS che blocca, mettendo in linea quello necessario
+    alla prima schermata e caricando il resto in modo non bloccante. Dichiarare i font
+    con `font-display: swap` così il testo è leggibile subito, e precaricarli perché il
+    browser li scopre tardi, essendo referenziati dentro il CSS. Precaricare
+    esplicitamente l'immagine che sarà l'elemento più grande, invece di lasciare che il
+    browser la trovi alla fine della catena.
+
+    Le tre Core Web Vitals sono metriche di campo, cioè misurate su utenti reali, e una
+    pagina passa quando almeno il 75% delle visite sta nella fascia buona per tutte e
+    tre. **LCP** misura quando compare l'elemento di contenuto più grande, e la soglia
+    buona è 2,5 secondi: il colpevole è quasi sempre un'immagine scoperta tardi o un
+    font che ritarda il testo. **INP** ha sostituito FID nel marzo 2024 e misura la
+    reattività di *ogni* interazione, non solo della prima, con soglia buona a 200
+    millisecondi: si peggiora tenendo occupato il thread principale con compiti lunghi.
+    **CLS** misura quanto la pagina si sposta sotto gli occhi, con soglia buona a 0,1:
+    si evita riservando lo spazio in anticipo - dimensioni esplicite su immagini e
+    iframe, `aspect-ratio`, spazio prenotato per banner e pubblicità.
+
+    Su INP vale la pena sapere che è la metrica più fallita del web, e che il rimedio non
+    è "meno JavaScript" in astratto ma spezzare i compiti lunghi: cedere il controllo al
+    browser fra un pezzo e l'altro, spostare il calcolo pesante in un web worker,
+    rimandare l'idratazione di ciò che non è visibile. Un compito sincrono oltre i
+    cinquanta millisecondi è già classificato come lungo.
+
+    Infine la distinzione fra dati di laboratorio e di campo: Lighthouse misura in
+    condizioni simulate ed è ottimo per il confronto prima e dopo una modifica, ma il
+    verdetto lo danno gli utenti reali, che hanno reti e dispositivi peggiori di quelli
+    di chi sviluppa.
+  key_points:
+    - "Il CSS blocca il rendering; gli script nel head bloccano anche il parsing, salvo defer o async"
+    - "defer esegue dopo il parsing mantenendo l'ordine, async appena pronto senza ordine garantito"
+    - "LCP misura quando compare l'elemento piu' grande: soglia buona 2,5 secondi"
+    - "INP ha sostituito FID nel marzo 2024 e misura ogni interazione: soglia buona 200 millisecondi"
+    - "CLS misura gli spostamenti del layout: soglia buona 0,1. Si previene riservando lo spazio"
+    - "Una pagina passa se almeno il 75% delle visite reali sta nella fascia buona per tutte e tre"
+    - "Un compito sincrono oltre i 50 millisecondi e' un long task e si vede su INP"
+    - "Lighthouse e' laboratorio, le Core Web Vitals sono campo: servono a cose diverse"
+  examples:
+    - title: Le righe che spostano LCP e CLS
+      language: html
+      code: |
+        <head>
+          <!-- Il font e' referenziato dentro il CSS: senza preload il browser lo
+               scopre tardi e il testo resta invisibile. -->
+          <link rel="preload" href="/font/inter.woff2" as="font" type="font/woff2" crossorigin>
+
+          <!-- L'immagine che sara' l'elemento LCP: dichiararla subito. -->
+          <link rel="preload" as="image" href="/hero.avif" fetchpriority="high">
+
+          <style>/* solo il CSS della prima schermata, in linea */</style>
+          <link rel="stylesheet" href="/resto.css" media="print" onload="this.media='all'">
+          <script src="/app.js" defer></script>
+        </head>
+
+        <body>
+          <!-- width e height riservano lo spazio: senza, il testo salta quando
+               l'immagine arriva, e il salto finisce dentro il CLS. -->
+          <img src="/hero.avif" width="1200" height="630" alt="" fetchpriority="high">
+        </body>
+      note: >-
+        `loading="lazy"` sull'immagine LCP è un errore frequente: ritarda proprio
+        l'elemento che la metrica misura. Va usato sulle immagini sotto la piega.
+    - title: Spezzare un compito lungo per non affondare INP
+      language: javascript
+      code: |
+        // MALE: mille elementi elaborati in un colpo. Il thread principale resta
+        // occupato, e ogni clic dell'utente aspetta la fine: INP alle stelle.
+        function elabora(elementi) {
+          for (const e of elementi) calcoloPesante(e)
+        }
+
+        // MEGLIO: si cede il controllo al browser fra un blocco e l'altro, cosi'
+        // gli eventi in attesa vengono serviti.
+        async function elabora(elementi) {
+          for (let i = 0; i < elementi.length; i++) {
+            calcoloPesante(elementi[i])
+            if (i % 50 === 49) await cedi()
+          }
+        }
+        const cedi = () =>
+          'scheduler' in window && 'yield' in scheduler
+            ? scheduler.yield()
+            : new Promise((r) => setTimeout(r, 0))
+      note: >-
+        Se il calcolo non tocca il DOM, la soluzione migliore è spostarlo in un web
+        worker: il thread principale resta libero per intero.
+  trade_offs:
+    - option: CSS critico in linea
+      pros: Elimina un giro di rete prima del primo disegno, migliora LCP
+      cons: Va estratto e tenuto aggiornato, e non si mette in cache
+      when: Prima schermata con requisiti stringenti sul tempo di comparsa
+    - option: defer
+      pros: Non blocca il parsing, mantiene l'ordine di esecuzione
+      cons: Esegue comunque prima di DOMContentLoaded
+      when: Default per gli script dell'applicazione
+    - option: async
+      pros: Esegue appena pronto, utile per script indipendenti
+      cons: Nessuna garanzia di ordine; puo' interrompere il parsing quando arriva
+      when: Analitiche e script che non dipendono da altro
+    - option: Rendering lato server o generazione statica
+      pros: Contenuto visibile subito, LCP molto migliore
+      cons: Infrastruttura piu' complessa, idratazione da gestire
+      when: Pagine pubbliche dove conta il primo accesso
+  numbers:
+    - "Soglie della fascia buona: LCP <= 2,5 s, INP <= 200 ms, CLS <= 0,1, su almeno il 75% delle visite"
+    - "INP e' la Core Web Vital piu' fallita del web: circa il 43% dei siti non rientra nei 200 ms"
+  interview_answer: >-
+    Parto sempre dal percorso di rendering critico, perché spiega le leve. Il CSS blocca il
+    rendering e gli script nel head bloccano anche il parsing, quindi metto in linea il CSS
+    della prima schermata, uso defer sugli script e precarico il font e l'immagine che sarà
+    l'elemento LCP, che altrimenti il browser scopre tardi. Sulle metriche ragiono così: LCP
+    è un problema di scoperta e di rete, CLS si previene riservando lo spazio con dimensioni
+    esplicite e aspect-ratio, e INP è il thread principale occupato — lì la cura è spezzare i
+    compiti lunghi cedendo il controllo, o spostarli in un worker. E distinguo Lighthouse,
+    che è laboratorio, dalle Core Web Vitals, che sono misurate sugli utenti veri.
+  senior_signals:
+    - "Distingue i dati di laboratorio da quelli di campo e sa a cosa servono"
+    - "Sa che INP misura ogni interazione e non solo la prima, e da quando"
+    - "Previene il CLS riservando lo spazio invece di inseguire gli spostamenti"
+    - "Non mette lazy loading sull'immagine LCP"
+  pitfalls:
+    - "loading=lazy sull'immagine piu' grande della prima schermata: ritarda proprio LCP"
+    - "Font caricati senza preload e senza font-display: testo invisibile per centinaia di millisecondi"
+    - "Immagini senza width e height: il contenuto salta e il CLS peggiora"
+    - "Ottimizzare il punteggio Lighthouse invece delle metriche sugli utenti reali"
+  follow_ups:
+    - question: Che cos'e' il percorso di rendering critico?
+      answer: >-
+        È la sequenza minima che il browser deve completare per disegnare il primo pixel:
+        scarica e analizza l'HTML costruendo il DOM, fa lo stesso col CSS costruendo il
+        CSSOM, combina i due nell'albero di rendering, calcola il layout, disegna e
+        compone. Il CSS blocca il rendering perché disegnare senza stili darebbe un lampo
+        di pagina non formattata, e gli script non differiti bloccano anche il parsing.
+        Ottimizzarlo significa ridurre le risorse bloccanti, metterle in linea quando sono
+        piccole e far scoprire prima al browser ciò che gli servirà.
+    - question: Come si migliora INP?
+      answer: >-
+        INP misura il tempo fra un'interazione e il disegno successivo, quindi si migliora
+        liberando il thread principale. In pratica: spezzare i compiti lunghi cedendo il
+        controllo al browser ogni tanto, così gli eventi in coda vengono serviti; spostare
+        il calcolo che non tocca il DOM in un web worker; rimandare l'idratazione dei
+        componenti non visibili; e ridurre il lavoro fatto dentro i gestori di eventi,
+        aggiornando subito l'interfaccia e facendo il resto dopo. Il riferimento è che un
+        compito sincrono oltre i cinquanta millisecondi è già considerato lungo.
+    - question: Come eviti il layout shift?
+      answer: >-
+        Riservando lo spazio prima che il contenuto arrivi. Dimensioni esplicite su
+        immagini e iframe, o aspect-ratio, così il browser sa quanto spazio tenere;
+        altezza minima per i banner e i blocchi pubblicitari, che altrimenti spingono giù
+        il contenuto quando compaiono; `font-display: swap` con un fallback di metriche
+        simili per limitare lo spostamento al cambio di font; e nessun inserimento di
+        contenuto sopra a quello già visibile, a meno che non sia in risposta a
+        un'interazione dell'utente, che CLS non conta.
+    - question: Qual e' la differenza fra defer e async?
+      answer: >-
+        Entrambi permettono al browser di continuare ad analizzare l'HTML mentre scarica lo
+        script. Con defer l'esecuzione avviene alla fine del parsing e gli script mantengono
+        l'ordine di dichiarazione, quindi è il default giusto per il codice
+        dell'applicazione, che ha dipendenze. Con async lo script viene eseguito appena
+        pronto, interrompendo il parsing in quel momento e senza garanzie di ordine: va
+        bene solo per script davvero indipendenti, tipicamente le analitiche.
+  related: [fe-04-css-layout, js-08-performance-memoria, cache-24-cdn, js-06-moduli-bundling]
+  resources:
+    - title: "web.dev - Core Web Vitals"
+      url: https://web.dev/articles/vitals
+      kind: doc
+    - title: "MDN - percorso di rendering critico"
+      url: https://developer.mozilla.org/en-US/docs/Web/Performance/Guides/Critical_rendering_path
+      kind: doc
+
+- id: fe-06-testing-componenti
+  title: Testare i componenti e l'accessibilità
+  category: frontend
+  track: technical
+  level: medium
+  tags: [testing, react, angular, accessibilita, frontend]
+  estimated_minutes: 30
+  summary: >-
+    Un test di componente serve a dire che l'utente può fare quello che deve fare. Si
+    interroga l'interfaccia come la userebbe una persona - per ruolo e per etichetta -
+    non per classi CSS o per stato interno.
+  deep_dive: |-
+    Il principio che guida le librerie moderne è che più un test assomiglia al modo in
+    cui il software viene usato, più dà fiducia. Da lì la scelta dei selettori: si
+    cerca per ruolo accessibile e nome - il pulsante "Salva", il campo etichettato
+    "Email" - e non per classe o per identificatore di test. Il vantaggio è doppio: il
+    test non si rompe quando cambia il CSS, e se non si riesce a selezionare un elemento
+    per ruolo è probabile che quell'elemento non sia accessibile nemmeno a uno screen
+    reader. Il test diventa una verifica di accessibilità gratuita.
+
+    Sul cosa testare, il criterio è il comportamento osservabile: dato uno stato
+    iniziale, l'utente compie un'azione e l'interfaccia cambia in un certo modo.
+    Asserire sullo stato interno di un componente, sulle sue proprietà private o sul
+    fatto che una certa funzione sia stata chiamata lega il test all'implementazione, e
+    ogni refactor lo rompe senza che nulla sia effettivamente rotto.
+
+    Le chiamate di rete vanno intercettate al livello della rete, non sostituendo il
+    modulo che le effettua. Un intercettatore come Mock Service Worker fa sì che il
+    componente esegua davvero il suo codice di fetch e che il test possa simulare non
+    solo il caso felice ma anche il 500, il timeout e la risposta malformata - che sono
+    poi i casi in cui il frontend si comporta peggio e che nessuno prova a mano.
+
+    L'asincronia è la fonte principale di test intermittenti. Le asserzioni vanno fatte
+    con le utilità che riprovano finché la condizione non si avvera, invece che con
+    attese a tempo fisso: un `setTimeout` di cinquanta millisecondi passa sul portatile
+    dello sviluppatore e fallisce a caso sulla macchina di build più carica. Allo stesso
+    modo, le interazioni vanno simulate con la libreria che riproduce la sequenza reale
+    di eventi - focus, tasto premuto, tasto rilasciato, input - invece di impostare
+    direttamente il valore, che salta metà dei gestori.
+
+    Sulla piramide, la stessa logica del backend: molti test di componente, che girano in
+    memoria in millisecondi, e pochi end-to-end con un browser vero sui percorsi
+    critici. Gli end-to-end trovano cose che nessun altro trova - il routing, il
+    caricamento reale, l'integrazione col backend - ma costano minuti e si rompono per
+    ragioni che non sono bug.
+  key_points:
+    - "Seleziona per ruolo accessibile ed etichetta, non per classe o identificatore di test"
+    - "Se non riesci a selezionare per ruolo, probabilmente il componente non e' accessibile"
+    - "Testa il comportamento osservabile, non lo stato interno o le chiamate a funzioni private"
+    - "Intercetta la rete, non il modulo: cosi' provi anche 500, timeout e risposte malformate"
+    - "Asserzioni che riprovano, mai attese a tempo fisso: le seconde diventano test intermittenti"
+    - "Simula le interazioni con la sequenza reale di eventi, non impostando il valore"
+    - "Molti test di componente in memoria, pochi end-to-end sui percorsi critici"
+  examples:
+    - title: Lo stesso test, legato all'implementazione e legato al comportamento
+      language: javascript
+      code: |
+        // FRAGILE: selettori CSS e stato interno. Un rinominamento di classe lo rompe.
+        test('fragile', () => {
+          const { container } = render(<ModuloLogin />)
+          container.querySelector('.btn-primary').click()
+          expect(container.querySelector('.error-msg').textContent).toBe('Email obbligatoria')
+        })
+
+        // ROBUSTO: si interroga come farebbe una persona.
+        test('segnala l\'email mancante', async () => {
+          const utente = userEvent.setup()
+          render(<ModuloLogin />)
+          await utente.click(screen.getByRole('button', { name: /accedi/i }))
+          // findBy* riprova finche' l'elemento non compare: niente attese a tempo.
+          expect(await screen.findByText(/email obbligatoria/i)).toBeVisible()
+        })
+      note: >-
+        Il secondo test continua a passare dopo un refactor del CSS o della struttura
+        interna, e fallisce solo se l'utente smette davvero di vedere il messaggio.
+    - title: Intercettare la rete per provare i casi brutti
+      language: javascript
+      code: |
+        import { http, HttpResponse } from 'msw'
+        import { setupServer } from 'msw/node'
+
+        const server = setupServer(
+          http.get('/api/ordini', () => HttpResponse.json([{ id: 1, totale: 42 }])),
+        )
+        beforeAll(() => server.listen())
+        afterEach(() => server.resetHandlers())
+        afterAll(() => server.close())
+
+        test('mostra un messaggio quando il server fallisce', async () => {
+          // Il caso che in produzione capita e che a mano nessuno prova.
+          server.use(http.get('/api/ordini', () => new HttpResponse(null, { status: 500 })))
+          render(<ListaOrdini />)
+          expect(await screen.findByRole('alert')).toHaveTextContent(/non.*caricare/i)
+        })
+      note: >-
+        Il componente esegue davvero il suo codice di fetch: si verifica la gestione
+        dell'errore, non il fatto che un finto modulo abbia restituito un errore.
+  trade_offs:
+    - option: Test di componente in memoria
+      pros: Millisecondi, isolano il difetto, si lanciano a ogni salvataggio
+      cons: "Il DOM simulato non e' un browser: layout e stili non si verificano davvero"
+      when: Comportamento, stati, gestione degli errori, accessibilita'
+    - option: End-to-end con browser vero
+      pros: Verificano routing, caricamento e integrazione reali
+      cons: Minuti invece di millisecondi, fragili, diagnosi difficile
+      when: Pochi percorsi critici - registrazione, pagamento, checkout
+    - option: Test di regressione visiva
+      pros: Intercettano rotture di layout che nessun altro test vede
+      cons: Falsi positivi per differenze di rendering; istantanee da aggiornare
+      when: Sistemi di design e componenti condivisi
+  numbers:
+    - "Un test di componente in memoria costa millisecondi, uno end-to-end decine di secondi: e' il motivo della forma della piramide"
+    - "Selezionare per ruolo accessibile trasforma ogni test in un controllo di accessibilita': se non lo trovi tu, non lo trova lo screen reader"
+  interview_answer: >-
+    Il criterio che uso è che il test debba assomigliare al modo in cui il software viene
+    usato davvero. Quindi seleziono per ruolo accessibile ed etichetta, non per classe CSS:
+    così il test non si rompe a ogni refactor, e in più se non riesco a trovare un elemento
+    per ruolo è il segnale che non è accessibile nemmeno a uno screen reader. Le chiamate di
+    rete le intercetto a livello di rete invece di sostituire il modulo, perché così posso
+    provare il 500 e il timeout, che sono i casi in cui il frontend si comporta peggio. E
+    non uso mai attese a tempo fisso: uso le asserzioni che riprovano, altrimenti ottengo
+    test intermittenti che erodono la fiducia in tutta la suite.
+  senior_signals:
+    - "Collega la scelta dei selettori all'accessibilita', non solo alla robustezza"
+    - "Prova i percorsi di errore, non solo il caso felice"
+    - "Riconosce le attese a tempo fisso come origine dei test intermittenti"
+    - "Simula le interazioni con la sequenza reale di eventi"
+  pitfalls:
+    - "Selettori basati su classi CSS: si rompono a ogni ritocco di stile"
+    - "Attese a tempo fisso invece di asserzioni che riprovano"
+    - "Sostituire il modulo di fetch invece di intercettare la rete: non si prova il codice vero"
+    - "Testare solo il caso felice e scoprire in produzione come si comporta il 500"
+  follow_ups:
+    - question: Che cosa testeresti di un componente di form?
+      answer: >-
+        Che i campi siano raggiungibili ed etichettati, quindi selezionabili per ruolo e
+        nome; che la validazione mostri i messaggi giusti sui valori sbagliati e li tolga
+        quando l'utente corregge; che l'invio chiami il backend con i dati attesi e che
+        durante l'invio il pulsante sia disabilitato, così il doppio clic non crea due
+        richieste; e che l'errore del server produca un messaggio visibile e annunciato.
+        Quello che non testo è lo stato interno della libreria di form: è
+        implementazione.
+    - question: Perche' selezionare per ruolo invece che per data-testid?
+      answer: >-
+        Perché il ruolo è ciò che vede anche la tecnologia assistiva, quindi il test
+        verifica due cose insieme: che il comportamento funzioni e che l'elemento sia
+        esposto correttamente. Un data-testid è invisibile all'utente e a uno screen
+        reader, quindi un test che lo usa può passare su un'interfaccia inaccessibile. Il
+        testid resta la via d'uscita legittima quando non c'è un ruolo o un testo
+        sensato da cui partire, per esempio un contenitore puramente grafico.
+    - question: Quanti test end-to-end servono?
+      answer: >-
+        Pochi e scelti: i percorsi che se si rompono fanno perdere soldi o utenti —
+        registrazione, accesso, checkout, la funzione principale del prodotto. Costano
+        minuti invece di millisecondi, si rompono per ragioni che non sono bug — un ritardo
+        di rete, un'animazione — e quando falliscono dicono che qualcosa non va senza dire
+        dove. Tutto il resto sta meglio nei test di componente, che sono veloci e puntano
+        al difetto.
+    - question: Come verifichi l'accessibilita' in modo automatico?
+      answer: >-
+        Con un controllo automatico basato su regole — per esempio axe, integrabile sia nei
+        test di componente sia negli end-to-end — che intercetta contrasto insufficiente,
+        etichette mancanti, ruoli incoerenti e ordine dei titoli sbagliato. Va detto però
+        che gli strumenti automatici coprono solo una parte dei problemi reali: l'ordine di
+        tabulazione, il focus dopo l'apertura di una finestra modale e la sensatezza dei
+        testi alternativi restano da verificare a mano, con la tastiera e con uno screen
+        reader.
+  related: [eng-01-testing, fe-01-react-rendering, fe-03-angular, fe-04-css-layout]
+  resources:
+    - title: "Testing Library - principi guida"
+      url: https://testing-library.com/docs/guiding-principles/
+      kind: doc
+    - title: "Mock Service Worker"
+      url: https://mswjs.io/
+      kind: doc
+    - title: "WAI-ARIA Authoring Practices"
+      url: https://www.w3.org/WAI/ARIA/apg/
+      kind: doc

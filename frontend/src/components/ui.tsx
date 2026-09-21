@@ -146,6 +146,8 @@ export const CATEGORY_LABEL: Record<string, string> = {
   company: 'Azienda e carriera',
   engineering: 'Pratiche di ingegneria',
   languages: 'Linguaggi',
+  patterns: 'Architettura del codice',
+  frontend: 'Frontend e interfacce',
 }
 
 export function categoryLabel(id: string): string {
