@@ -259,6 +259,27 @@ cancellarli.
 
 Per attivarli servono alcuni secret nell'ambiente `production` del repository.
 
+### In un comando
+
+```powershell
+az login
+gh auth login
+.\scripts\setup-actions.ps1      # su macOS/Linux: ./scripts/setup-actions.sh
+```
+
+Lo script fa tutto quello che le due sezioni qui sotto descrivono a mano: crea
+l'app registration, le assegna il ruolo sul **solo** resource group del
+progetto, crea la credenziale federata con il subject giusto per questo
+repository e scrive i segreti leggendoli dagli output di Terraform. Se il login
+Microsoft è attivo aggiunge anche i tre `ENTRA_*`.
+
+È idempotente — rilanciarlo non duplica niente e riallinea i segreti ai valori
+correnti, utile dopo un `terraform apply` che cambia il token della Static Web
+App. Nessun valore segreto viene stampato.
+
+Le due sezioni seguenti restano come riferimento, per capire cosa fa lo script
+o per rifarlo a mano.
+
 ### Login federato ad Azure (senza password)
 
 ```bash

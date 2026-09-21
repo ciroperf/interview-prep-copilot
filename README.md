@@ -118,6 +118,18 @@ successiva puoi anche lasciar fare alle GitHub Actions.
 Procedura passo per passo, login federato OIDC e secret da configurare:
 [docs/deploy.md](docs/deploy.md).
 
+Per far pubblicare il push al posto tuo, una volta sola:
+
+```powershell
+az login; gh auth login
+.\scripts\setup-actions.ps1   # su macOS/Linux: ./scripts/setup-actions.sh
+```
+
+Crea il login federato, limita il ruolo al resource group del progetto e scrive
+i secret nell'ambiente `production` leggendoli da Terraform. Da lì in avanti un
+push su `main` che tocca `backend/` rilascia l'API e uno che tocca `frontend/`
+ripubblica il sito.
+
 ### Cambiare modello
 
 Il default è `gpt-4o-mini`. Per salire basta cambiare due righe in
