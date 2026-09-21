@@ -28,10 +28,15 @@ def utcnow() -> datetime:
 # ---------------------------------------------------------------------------
 
 
+# Un repository di studio è una fonte come le altre: molti dei materiali migliori
+# per i colloqui vivono su GitHub, non in un libro o in una pagina di manuale.
+SourceKind = Literal["article", "video", "book", "doc", "practice", "repo", "course"]
+
+
 class Resource(BaseModel):
     title: str
     url: str = ""
-    kind: Literal["article", "video", "book", "doc", "practice"] = "article"
+    kind: SourceKind = "article"
 
 
 class Example(BaseModel):
@@ -65,6 +70,42 @@ class FollowUp(BaseModel):
 
     question: str
     answer: str = ""
+
+
+class PackSource(BaseModel):
+    """Una fonte di studio esterna, scelta e commentata.
+
+    Il commento conta quanto il link: dire *perché* leggere un repository o un
+    capitolo evita di scaricare l'ennesima lista di segnalibri mai aperta.
+    """
+
+    title: str
+    url: str = ""
+    kind: SourceKind = "doc"
+    note: str = ""
+
+
+class KnowledgePack(BaseModel):
+    """Un percorso su un macroargomento: argomenti in ordine, più fonti curate.
+
+    Serve ai temi troppo grandi per una scheda sola - un linguaggio, il cloud,
+    la sicurezza - dove il valore non è un riassunto ma una sequenza di studio
+    con dentro le cose che si chiedono davvero a un colloquio.
+    """
+
+    id: str
+    title: str
+    subtitle: str = ""
+    summary: str = ""
+    # A chi serve e a chi no: evita di far studiare il percorso sbagliato.
+    for_whom: str = ""
+    level: Difficulty = "medium"
+    tags: list[str] = Field(default_factory=list)
+    # Gli argomenti nell'ordine in cui conviene affrontarli.
+    topic_ids: list[str] = Field(default_factory=list)
+    sources: list[PackSource] = Field(default_factory=list)
+    # Cosa saper già fare prima di cominciare.
+    prerequisites: list[str] = Field(default_factory=list)
 
 
 class Topic(BaseModel):

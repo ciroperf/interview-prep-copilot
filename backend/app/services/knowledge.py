@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from ..domain.models import CodingProblem, QuizQuestion, Topic
+from ..domain.models import CodingProblem, KnowledgePack, QuizQuestion, Topic
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +194,9 @@ class KnowledgeBase:
         self.problems: dict[str, CodingProblem] = {}
         self.questions_by_topic: dict[str, list[str]] = {}
         self.problems_by_topic: dict[str, list[str]] = {}
+        # I percorsi sui macroargomenti: un linguaggio o il cloud non stanno in
+        # una scheda sola, e un elenco ordinato vale più di un riassunto lungo.
+        self.packs: dict[str, KnowledgePack] = {}
         self._topic_tokens: dict[str, set[str]] = {}
         # TERM_HINTS è scritto a mano per i contenuti del repository; qui si
         # accumulano i collegamenti degli argomenti aggiunti a partire dagli annunci.
@@ -233,14 +236,22 @@ class KnowledgeBase:
                     raise ValueError(f"{problem.id}: topic_id sconosciuto {topic_id}")
                 self.problems_by_topic.setdefault(topic_id, []).append(problem.id)
 
+        for row in self._read_all("packs.yaml"):
+            pack = KnowledgePack(**row)
+            sconosciuti = [t for t in pack.topic_ids if t not in self.topics]
+            if sconosciuti:
+                raise ValueError(f"{pack.id}: argomenti sconosciuti {sconosciuti}")
+            self.packs[pack.id] = pack
+
         for topic in self.topics.values():
             self._index_topic(topic)
 
         logger.info(
-            "Knowledge base: %d argomenti, %d domande, %d problemi",
+            "Knowledge base: %d argomenti, %d domande, %d problemi, %d percorsi",
             len(self.topics),
             len(self.questions),
             len(self.problems),
+            len(self.packs),
         )
 
     def _index_topic(self, topic: Topic) -> None:

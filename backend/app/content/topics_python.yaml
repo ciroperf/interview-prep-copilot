@@ -1,0 +1,1389 @@
+# KB dedicata a Python. Fa parte del percorso "python" (vedi packs.yaml).
+#
+# Taglio: quello che un colloquio tecnico chiede davvero a chi dice di conoscere
+# Python - modello a oggetti, memoria, concorrenza, tipi, prestazioni - senza
+# scendere nei dettagli dell'implementazione che non cambiano nessuna decisione.
+
+- id: py-01-modello-oggetti
+  title: Il modello a oggetti di Python
+  category: languages
+  track: knowledge
+  level: medium
+  tags: [python, oggetti, dunder, mutabilita]
+  estimated_minutes: 30
+  summary: >-
+    In Python ogni cosa è un oggetto con identità, tipo e valore, e le variabili sono
+    nomi legati a oggetti, non contenitori. Da questa differenza discendono i
+    comportamenti che sorprendono di più: mutabilità condivisa, uguaglianza contro
+    identità, argomenti di default che si ricordano il passato.
+  deep_dive: |-
+    Un'assegnazione in Python non copia: lega un nome a un oggetto. `b = a` fa sì che
+    due nomi indichino lo stesso oggetto, e se quell'oggetto è mutabile ogni modifica è
+    visibile da entrambi. Questa è la radice di quasi tutte le sorprese: liste passate
+    a funzioni che tornano modificate, default condivisi fra chiamate, copie
+    superficiali che copiano solo il primo livello.
+
+    Da qui la distinzione fra `==` e `is`. `==` chiama `__eq__` e confronta i *valori*;
+    `is` confronta l'*identità*, cioè se i due nomi indicano lo stesso oggetto. La
+    regola pratica: `is` si usa solo con i singleton - `None`, `True`, `False` - e mai
+    per confrontare numeri o stringhe. Il fatto che `a is b` sia vero per piccoli interi
+    o per certe stringhe dipende dalla cache interna di CPython, non dal linguaggio, e
+    contarci è un bug che si manifesta solo con valori grandi.
+
+    La mutabilità decide anche cosa può stare in un `set` o fare da chiave in un `dict`:
+    serve che l'oggetto sia *hashable*, cioè che abbia un `__hash__` stabile nel tempo.
+    Liste e dizionari non lo sono proprio perché cambiano; le tuple lo sono, ma solo se
+    lo sono i loro elementi. La regola da conoscere: se ridefinisci `__eq__` in una
+    classe, Python annulla l'`__hash__` ereditato - due oggetti uguali devono avere lo
+    stesso hash, e il linguaggio preferisce renderti l'oggetto non hashable piuttosto
+    che lasciarti un invariante rotto.
+
+    Il trabocchetto più chiesto ai colloqui è il *default mutabile*: `def f(x, lista=[])`
+    valuta la lista *una volta sola*, alla definizione della funzione, e quella stessa
+    lista viene riusata a ogni chiamata. La forma corretta usa `None` come sentinella.
+
+    Sulle copie: `copy.copy` è superficiale (gli oggetti interni restano condivisi),
+    `copy.deepcopy` ricorre in profondità ed è costoso. Il `slicing` di una lista
+    (`nuova = vecchia[:]`) è una copia superficiale, quindi una lista di liste copiata
+    così condivide comunque le sotto-liste.
+
+    Per le classi, i mattoni moderni sono `dataclass` (genera `__init__`, `__repr__`,
+    `__eq__`; con `frozen=True` diventa immutabile e hashable) e `__slots__`, che evita
+    il dizionario per istanza risparmiando memoria e vietando attributi non dichiarati.
+    Dal 3.10 `dataclass(slots=True)` li combina.
+  key_points:
+    - "Le variabili sono nomi legati a oggetti: l'assegnazione non copia mai"
+    - "== confronta i valori (chiama __eq__), is confronta l'identità. `is` solo con None, True, False"
+    - "La cache dei piccoli interi e l'interning delle stringhe sono dettagli di CPython: non farci affidamento"
+    - "Hashable = hash stabile nel tempo. Liste e dict non lo sono; le tuple sì, se lo sono i loro elementi"
+    - "Se ridefinisci __eq__, Python azzera __hash__: due oggetti uguali devono avere lo stesso hash"
+    - "Default mutabili: valutati una volta sola alla definizione. Usa None come sentinella"
+    - "copy.copy è superficiale, copy.deepcopy ricorre; anche lista[:] è una copia superficiale"
+    - "dataclass genera init/repr/eq; frozen=True la rende immutabile e hashable"
+    - "__slots__ toglie il __dict__ per istanza: meno memoria, nessun attributo a sorpresa"
+    - "Il protocollo dei dunder è il vero meccanismo di estensione: len(), in, [], with, iterazione passano da lì"
+  examples:
+    - title: I tre classici che si chiedono al colloquio
+      language: python
+      code: |-
+        # 1) Default mutabile: valutato UNA volta, alla definizione
+        def aggiungi(x, lista=[]):        # sbagliato
+            lista.append(x); return lista
+        aggiungi(1); aggiungi(2)          # -> [1, 2]  (la stessa lista!)
+
+        def aggiungi(x, lista=None):      # corretto
+            lista = [] if lista is None else lista
+            lista.append(x); return lista
+
+        # 2) Copia superficiale su strutture annidate
+        import copy
+        griglia = [[0] * 3] * 3           # tre riferimenti alla STESSA riga
+        griglia[0][0] = 9                 # -> [[9,0,0], [9,0,0], [9,0,0]]
+        griglia = [[0] * 3 for _ in range(3)]      # righe distinte
+
+        # 3) is contro ==
+        a, b = 1000, 1000
+        a == b     # True  (stesso valore)
+        a is b     # dipende da come CPython ha caricato i letterali: non usarlo mai
+      note: >-
+        Il terzo esempio è la ragione per cui `x is 1000` produce un SyntaxWarning nelle
+        versioni recenti: il linguaggio stesso scoraggia quell'uso.
+    - title: Uguaglianza, hash e immutabilità con dataclass
+      language: python
+      code: |-
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True, slots=True)     # immutabile, hashable, senza __dict__
+        class Punto:
+            x: int
+            y: int
+
+        p = Punto(1, 2)
+        {p: "origine spostata"}        # funziona: frozen -> __hash__ generato
+        # p.x = 5                      # FrozenInstanceError
+
+        @dataclass                      # mutabile -> __hash__ = None
+        class Mutabile:
+            x: int
+        # {Mutabile(1): "..."}         # TypeError: unhashable type
+      note: >-
+        `slots=True` riduce l'occupazione per istanza in modo sensibile quando gli
+        oggetti sono milioni; su poche migliaia la differenza è irrilevante.
+  trade_offs:
+    - option: dataclass
+      pros: Poco codice, init/repr/eq generati, si integra con typing
+      cons: Nessuna validazione, comportamento da conoscere su default mutabili (field(default_factory=...))
+      when: Strutture di dati interne
+    - option: NamedTuple
+      pros: Immutabile, leggerissima, si comporta anche come tupla
+      cons: Eredita il comportamento della tupla (indicizzabile, iterabile), meno estendibile
+      when: Valori di ritorno multipli, record leggeri
+    - option: Pydantic BaseModel
+      pros: Validazione e conversione dei tipi, serializzazione, ottimo ai confini
+      cons: Dipendenza esterna, overhead rispetto a una dataclass
+      when: DTO in ingresso e in uscita, configurazione
+    - option: Classe normale
+      pros: Controllo totale su costruzione e invarianti
+      cons: Più codice a mano (init, eq, repr)
+      when: Entità di dominio con regole e invarianti da proteggere
+  numbers:
+    - "__slots__ risparmia tipicamente qualche decina di byte per istanza: conta con milioni di oggetti, non con migliaia"
+    - "CPython mantiene in cache i piccoli interi (circa da -5 a 256): è un dettaglio implementativo, non una garanzia"
+  interview_answer: >-
+    La cosa da tenere a mente è che in Python le variabili sono nomi legati a oggetti, non
+    contenitori: l'assegnazione non copia mai. Da lì derivano i comportamenti che
+    sorprendono, come una lista passata a una funzione che torna modificata, o il default
+    mutabile che viene valutato una volta sola alla definizione e si porta dietro lo stato
+    fra le chiamate - per quello uso None come sentinella. Uso `is` solo per None e i
+    booleani, perché confronta l'identità: con numeri e stringhe funziona a volte per via
+    delle cache interne di CPython, ed è esattamente il tipo di bug che appare con i valori
+    grandi. E se ridefinisco `__eq__` mi ricordo che Python azzera `__hash__`, perché due
+    oggetti uguali devono avere lo stesso hash.
+  senior_signals:
+    - "Spiega l'assegnazione come legame nome-oggetto e ne trae le conseguenze"
+    - "Sa che l'interning è un dettaglio di CPython e non una regola del linguaggio"
+    - "Collega __eq__ e __hash__ e sa perché ridefinirne uno tocca l'altro"
+    - "Conosce dataclass(frozen, slots) e sa quando servono davvero"
+  pitfalls:
+    - "Default mutabili nelle firme delle funzioni"
+    - "Usare `is` per confrontare numeri o stringhe"
+    - "Copia superficiale su strutture annidate (lista[:] o copy.copy)"
+    - "[[0]*3]*3 per creare una matrice: tre riferimenti alla stessa riga"
+    - "Ridefinire __eq__ e stupirsi che l'oggetto non sia più utilizzabile come chiave"
+  follow_ups:
+    - question: Perché `[[0] * 3] * 3` non crea una matrice?
+      answer: >-
+        Perché `* 3` sulla lista esterna replica il *riferimento* alla stessa lista
+        interna tre volte, non il suo contenuto: modificare `griglia[0][0]` cambia anche
+        le altre due righe, che sono lo stesso oggetto. La forma corretta è una
+        comprehension, `[[0] * 3 for _ in range(3)]`, che valuta la lista interna a ogni
+        iterazione creandone una nuova.
+    - question: Quando useresti __slots__?
+      answer: >-
+        Quando ho moltissime istanze della stessa classe e la memoria conta - milioni di
+        oggetti in un'elaborazione - perché elimina il dizionario per istanza. Un effetto
+        collaterale utile è che vieta di aggiungere attributi non dichiarati, quindi
+        intercetta i refusi. Da non usare quando servono attributi dinamici, weakref
+        senza dichiararlo, o ereditarietà multipla complicata: lì crea più problemi di
+        quanti ne risolva.
+    - question: Che differenza c'è fra `__str__` e `__repr__`?
+      answer: >-
+        `__repr__` è per chi sviluppa: deve essere non ambiguo e, idealmente,
+        ricostruibile (`Punto(x=1, y=2)`); è quello che si vede nella console e nel
+        debugger. `__str__` è per l'utente finale ed è più leggibile. Se ne definisco uno
+        solo definisco `__repr__`, perché Python lo usa come ripiego quando `__str__`
+        manca, mentre non vale il contrario.
+  related: [py-02-memoria-gc, py-05-tipi-e-typing, py-06-idiomi-performance, pat-04-dto-entity-model]
+  resources:
+    - title: "Python docs - Data model"
+      url: "https://docs.python.org/3/reference/datamodel.html"
+      kind: doc
+    - title: "Luciano Ramalho - Fluent Python (2ª ed.)"
+      url: "https://www.oreilly.com/library/view/fluent-python-2nd/9781492056348/"
+      kind: book
+    - title: "Real Python - Python's data model"
+      url: "https://realpython.com/python-classes/"
+      kind: article
+
+- id: py-02-memoria-gc
+  title: Memoria e garbage collection in CPython
+  category: languages
+  track: knowledge
+  level: hard
+  tags: [python, memoria, gc, performance]
+  estimated_minutes: 30
+  summary: >-
+    CPython libera la memoria con il conteggio dei riferimenti, immediato ma incapace di
+    gestire i cicli; per quelli esiste un garbage collector generazionale che gira ogni
+    tanto. Conoscere i due meccanismi spiega perdite di memoria, distruttori che non
+    partono e picchi di RSS che non scendono.
+  deep_dive: |-
+    Il meccanismo principale è il *reference counting*: ogni oggetto sa quanti
+    riferimenti lo puntano e viene liberato nell'istante in cui il contatore arriva a
+    zero. Il vantaggio è la prevedibilità - la memoria torna subito, e i distruttori si
+    eseguono in modo deterministico. Lo svantaggio è che non vede i *cicli*: due oggetti
+    che si puntano a vicenda hanno contatore uno anche quando nessuno li usa più.
+
+    Per questo esiste un secondo meccanismo, il *garbage collector generazionale*, che
+    periodicamente cerca gruppi di oggetti raggiungibili solo fra loro e li libera. È
+    organizzato in tre generazioni: gli oggetti nuovi stanno nella generazione 0, che
+    viene ispezionata spesso, e chi sopravvive viene promosso a generazioni ispezionate
+    più di rado - il principio è che *la maggior parte degli oggetti muore giovane*. Il
+    GC si può disattivare (`gc.disable()`) quando si è sicuri di non creare cicli, ed è
+    una tecnica usata in alcuni servizi ad alto throughput; il conteggio dei riferimenti
+    resta comunque attivo.
+
+    Il modo più comune di creare cicli senza accorgersene è il riferimento reciproco fra
+    padre e figlio, o le cache che tengono vivi oggetti a tempo indeterminato. Lo
+    strumento per spezzarli è `weakref`: un riferimento debole non incrementa il
+    contatore, quindi non impedisce la liberazione. Le cache dovrebbero quasi sempre
+    usare `WeakValueDictionary` o avere un limite esplicito.
+
+    Il dettaglio che spiega molti fraintendimenti è che *la memoria liberata non torna
+    necessariamente al sistema operativo*. CPython gestisce piccoli oggetti con un
+    allocatore proprio (pymalloc) che lavora su arene; se in un'arena resta vivo anche un
+    solo oggetto, quell'arena non viene restituita. Da qui il comportamento classico: si
+    elabora una lista enorme, la si cancella, e l'RSS del processo resta alto. Non è una
+    perdita, è frammentazione - e la soluzione pratica, quando serve davvero, è isolare
+    il lavoro pesante in un processo separato che alla fine termina.
+
+    Per indagare ci sono strumenti standard: `tracemalloc` (nella libreria standard)
+    confronta due istantanee e mostra dove è cresciuta la memoria; `gc.get_objects()` e
+    `gc.get_referrers()` dicono chi tiene vivo cosa; `objgraph` e `memray` (di
+    Bloomberg) danno una vista più comoda. Le tre cause più frequenti di crescita
+    continua in un servizio sono: una cache senza limite, una lista globale che accumula
+    (spesso i log o le metriche), e un `lru_cache` su un metodo di istanza - che mantiene
+    vivo `self` per sempre.
+  key_points:
+    - "Reference counting: memoria liberata nell'istante in cui l'ultimo riferimento sparisce, in modo deterministico"
+    - "Non vede i cicli: due oggetti che si puntano a vicenda non arrivano mai a zero"
+    - "Il GC generazionale (3 generazioni) trova e libera i cicli: gli oggetti giovani si ispezionano più spesso"
+    - "gc.disable() è praticabile in servizi che non creano cicli: il reference counting resta comunque attivo"
+    - "weakref non incrementa il contatore: serve per cache, osservatori e riferimenti padre-figlio"
+    - "La memoria liberata può non tornare al sistema operativo: pymalloc lavora per arene e la frammentazione trattiene RSS"
+    - "tracemalloc confronta due istantanee e indica dove la memoria è cresciuta"
+    - "Cause tipiche di crescita: cache senza limite, liste globali che accumulano, lru_cache su metodi di istanza"
+    - "lru_cache su un metodo tiene vivo self finché la cache esiste: perdita silenziosa"
+    - "Per il lavoro che consuma molta memoria, un processo separato che poi termina è spesso la soluzione più semplice"
+  examples:
+    - title: Il ciclo che il contatore non vede
+      language: python
+      code: |-
+        import gc, weakref
+
+        class Nodo:
+            def __init__(self, nome): self.nome, self.figli, self.padre = nome, [], None
+
+        padre, figlio = Nodo("p"), Nodo("f")
+        padre.figli.append(figlio)
+        figlio.padre = padre                 # ciclo: nessuno dei due arriva a zero
+
+        del padre, figlio
+        print(gc.collect())                  # > 0: li ha liberati il GC, non il contatore
+
+        # Con un riferimento debole il ciclo non si forma nemmeno.
+        class Nodo:
+            def __init__(self, nome): self.nome, self.figli, self._padre = nome, [], None
+            @property
+            def padre(self): return self._padre() if self._padre else None
+            @padre.setter
+            def padre(self, p): self._padre = weakref.ref(p) if p else None
+      note: >-
+        Il pattern padre-figlio è il modo più comune di creare cicli in un'applicazione
+        reale: alberi, grafi di dominio, nodi di parsing.
+    - title: Trovare dove cresce la memoria
+      language: python
+      code: |-
+        import tracemalloc
+
+        tracemalloc.start(10)                     # 10 frame di stack per allocazione
+        prima = tracemalloc.take_snapshot()
+        ... # il lavoro sospetto, ripetuto
+        dopo = tracemalloc.take_snapshot()
+
+        for stat in dopo.compare_to(prima, "lineno")[:10]:
+            print(stat)      # file:riga  +12.4 MiB  (+1523 blocchi)
+
+        # La perdita silenziosa più comune in un servizio:
+        class Servizio:
+            @functools.lru_cache(maxsize=None)     # tiene vivo self per sempre
+            def calcola(self, x): ...
+        # Alternative: cache come attributo di istanza, o funzione libera + chiave esplicita
+      note: >-
+        Il confronto fra due istantanee è più utile di una sola: mostra la *crescita*,
+        che è ciò che interessa, invece della fotografia di un momento.
+  trade_offs:
+    - option: Lasciare il GC attivo (default)
+      pros: I cicli vengono liberati senza pensarci
+      cons: Pause occasionali, qualche microsecondo per collezione
+      when: Il default, quasi sempre giusto
+    - option: gc.disable() nei servizi
+      pros: Nessuna pausa, latenza più prevedibile
+      cons: Se un ciclo c'è, la memoria cresce indefinitamente
+      when: Servizi ad alto throughput, dopo aver verificato l'assenza di cicli
+    - option: weakref nelle cache
+      pros: Gli oggetti muoiono quando nessuno li usa più
+      cons: Le voci spariscono quando meno te lo aspetti, comportamento meno prevedibile
+      when: Cache di oggetti pesanti, registri di osservatori
+    - option: Processo separato per il lavoro pesante
+      pros: Alla fine il sistema operativo riprende tutta la memoria
+      cons: Serializzazione dei dati, complessità di orchestrazione
+      when: Elaborazioni batch che allocano molto e poi devono restituire la memoria
+  numbers:
+    - "Generazioni del GC: 3, con soglie di default (700, 10, 10) - la 0 viene ispezionata molto più spesso"
+    - "La memoria non torna sempre al sistema operativo: RSS che resta alto dopo una elaborazione è quasi sempre frammentazione, non perdita"
+    - "tracemalloc aggiunge un sovraccarico sensibile: si usa in diagnosi, non in produzione continua"
+  interview_answer: >-
+    CPython usa due meccanismi. Il principale è il conteggio dei riferimenti, che libera
+    l'oggetto nell'istante in cui l'ultimo riferimento sparisce: è deterministico e per
+    questo i distruttori si comportano in modo prevedibile. Il conteggio però non vede i
+    cicli, quindi c'è un garbage collector generazionale che periodicamente cerca gruppi di
+    oggetti raggiungibili solo fra loro. Nella pratica le perdite che vedo hanno quasi
+    sempre tre cause: una cache senza limite, una struttura globale che accumula, o un
+    lru_cache messo su un metodo di istanza, che tiene vivo self per sempre. Per indagare
+    parto da tracemalloc confrontando due istantanee, perché mi mostra dove la memoria
+    cresce invece di darmi una fotografia. E ricordo che l'RSS che non scende non significa
+    necessariamente una perdita: CPython alloca per arene e la frammentazione può trattenere
+    memoria che è già libera per il programma.
+  senior_signals:
+    - "Distingue conteggio dei riferimenti e GC generazionale e sa cosa risolve ciascuno"
+    - "Cita lru_cache su metodi di istanza come perdita tipica"
+    - "Sa che RSS alto non implica perdita e spiega la frammentazione"
+    - "Usa tracemalloc con il confronto fra istantanee, non a caso"
+  pitfalls:
+    - "Cache senza limite di dimensione o senza TTL"
+    - "lru_cache su metodi di istanza: self resta vivo quanto la cache"
+    - "Riferimenti reciproci padre-figlio senza weakref"
+    - "Concludere che c'è una perdita perché l'RSS non scende"
+    - "Usare __del__ per liberare risorse: l'ordine e il momento non sono garantiti, meglio i context manager"
+  follow_ups:
+    - question: Perché il reference counting non basta?
+      answer: >-
+        Perché non vede i cicli. Due oggetti che si riferiscono a vicenda mantengono
+        ciascuno un contatore maggiore di zero anche quando nessun altro li raggiunge,
+        quindi non verrebbero mai liberati. Il garbage collector generazionale esiste
+        esattamente per questo: percorre gli oggetti tracciati e libera i gruppi che
+        risultano raggiungibili solo fra loro.
+    - question: Come indaghi una crescita di memoria in un servizio in produzione?
+      answer: >-
+        Prima confermo che sia crescita e non frammentazione, guardando se l'RSS cresce
+        in modo monotono su più cicli di carico. Poi uso tracemalloc su due istantanee a
+        distanza di tempo, ordinando per differenza: nella quasi totalità dei casi il
+        colpevole compare nei primi tre risultati. Cerco cache senza limite, strutture
+        globali che accumulano e oggetti tenuti vivi da chiusure o da lru_cache. Se serve
+        una vista più ricca, memray dà un profilo completo con overhead accettabile.
+    - question: Che problema c'è con __del__?
+      answer: >-
+        Che non dà garanzie utili: non è detto quando verrà chiamato, può non essere
+        chiamato affatto alla chiusura dell'interprete, e un'eccezione al suo interno
+        viene ignorata. Per liberare risorse - file, connessioni, lock - si usano i
+        context manager con `with`, che hanno una semantica deterministica anche in
+        presenza di eccezioni.
+  related: [py-01-modello-oggetti, py-06-idiomi-performance, py-03-gil-concorrenza]
+  resources:
+    - title: "Python docs - gc e tracemalloc"
+      url: "https://docs.python.org/3/library/gc.html"
+      kind: doc
+    - title: "Anthony Shaw - CPython Internals"
+      url: "https://realpython.com/products/cpython-internals-book/"
+      kind: book
+    - title: "memray - profiler di memoria (Bloomberg)"
+      url: "https://github.com/bloomberg/memray"
+      kind: repo
+
+- id: py-03-gil-concorrenza
+  title: GIL, thread e processi
+  category: languages
+  track: knowledge
+  level: hard
+  tags: [python, concorrenza, gil, performance]
+  estimated_minutes: 35
+  summary: >-
+    Il Global Interpreter Lock impedisce a più thread di eseguire bytecode Python
+    contemporaneamente: i thread restano utili per l'I/O, che rilascia il lock, ma non
+    accelerano il calcolo. Per quello servono più processi - o, dal 3.13, la build senza
+    GIL.
+  deep_dive: |-
+    Il GIL è un lock globale dell'interprete CPython: un solo thread alla volta può
+    eseguire bytecode. Non è un limite del linguaggio ma di questa implementazione, e
+    serve a rendere semplice e veloce la gestione del conteggio dei riferimenti senza
+    sincronizzazione fine su ogni oggetto.
+
+    La conseguenza pratica è la distinzione fra carichi *I/O bound* e *CPU bound*.
+    Quando un thread fa I/O - una lettura da socket, una query, un file - rilascia il
+    GIL mentre aspetta, quindi gli altri thread lavorano: con dieci richieste HTTP in
+    parallelo i thread danno un guadagno quasi lineare. Quando invece il thread calcola,
+    il GIL resta preso e gli altri aspettano: quattro thread su un calcolo puro non sono
+    più veloci di uno, e spesso sono *più lenti* per via del passaggio di contesto e
+    della contesa sul lock.
+
+    Per il calcolo si usano più processi: `multiprocessing` o
+    `concurrent.futures.ProcessPoolExecutor`. Ogni processo ha il proprio interprete e
+    il proprio GIL, quindi il parallelismo è reale. Il prezzo è che i dati vanno
+    serializzati per attraversare il confine (pickle), quindi conviene quando il lavoro
+    per elemento è grande rispetto al costo di trasferimento; per dati grandi esistono
+    `shared_memory` e formati a copia zero.
+
+    Ci sono due eccezioni importanti che fanno buona impressione al colloquio. La prima:
+    le librerie numeriche - NumPy, Pandas, molte parti di scikit-learn - *rilasciano il
+    GIL* durante le operazioni pesanti scritte in C, quindi anche i thread possono dare
+    parallelismo reale su quei carichi. La seconda: dal 3.12 esistono i
+    *sub-interpreters* con GIL separato (PEP 684) e dal 3.13 una build sperimentale
+    *free-threaded* senza GIL (PEP 703), attivabile a compilazione; è il percorso su cui
+    CPython sta andando, ma oggi comporta penalità di prestazioni sul singolo thread e
+    supporto non universale nelle estensioni.
+
+    Su cosa usare, la regola pratica: `asyncio` per migliaia di connessioni di rete
+    concorrenti, thread per I/O bloccante con librerie che non hanno un'interfaccia
+    asincrona (driver di database sincroni, chiamate a sistema), processi per il calcolo.
+    E `concurrent.futures` dà un'interfaccia uniforme fra thread e processi, il che
+    permette di cambiare idea con una riga.
+
+    Un'ultima cosa che va detta: il GIL *non* rende il codice thread-safe. Protegge le
+    strutture interne dell'interprete, non le tue: un `contatore += 1` da due thread può
+    perdere aggiornamenti, perché è una sequenza di bytecode che può essere interrotta.
+    Servono comunque `Lock`, `Queue` o strutture pensate per la concorrenza.
+  key_points:
+    - "Il GIL è un lock di CPython: un solo thread alla volta esegue bytecode Python"
+    - "I/O bound: i thread funzionano, perché il GIL viene rilasciato durante l'attesa"
+    - "CPU bound: i thread non aiutano e spesso peggiorano; servono più processi"
+    - "NumPy, Pandas e molte estensioni in C rilasciano il GIL: lì anche i thread danno parallelismo reale"
+    - "multiprocessing paga la serializzazione (pickle): conviene se il lavoro per elemento è grande"
+    - "PEP 684 (sub-interpreters, 3.12) e PEP 703 (free-threading, 3.13 sperimentale) stanno cambiando il quadro"
+    - "concurrent.futures dà la stessa interfaccia per thread e processi: si cambia con una riga"
+    - "Il GIL NON rende il codice thread-safe: contatore += 1 può comunque perdere aggiornamenti"
+    - "Regola pratica: asyncio per molte connessioni, thread per I/O bloccante, processi per il calcolo"
+  examples:
+    - title: Lo stesso lavoro, tre esecutori
+      language: python
+      code: |-
+        from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+        import time, math
+
+        def cpu(n):  return sum(math.isqrt(i) for i in range(n))      # calcolo puro
+        def io(url): return requests.get(url).status_code             # attesa di rete
+
+        # CPU bound: i thread non aiutano (GIL), i processi sì.
+        #   seriale      4 x cpu(5_000_000)  ~ 4.0 s
+        #   4 thread                          ~ 4.1 s   <- nessun guadagno
+        #   4 processi                        ~ 1.1 s   <- parallelismo vero
+
+        # I/O bound: i thread bastano e avanzano.
+        #   seriale      20 richieste da 100 ms ~ 2.0 s
+        #   20 thread                            ~ 0.15 s
+
+        with ProcessPoolExecutor(max_workers=4) as pool:      # calcolo
+            risultati = list(pool.map(cpu, [5_000_000] * 4))
+        with ThreadPoolExecutor(max_workers=20) as pool:      # rete
+            codici = list(pool.map(io, urls))
+      note: >-
+        Cambiare `ThreadPoolExecutor` in `ProcessPoolExecutor` è una riga: è il motivo
+        per cui conviene partire da `concurrent.futures` invece che da thread a mano.
+    - title: Il GIL non protegge il tuo stato
+      language: python
+      code: |-
+        import threading
+
+        contatore = 0
+        def incrementa(n):
+            global contatore
+            for _ in range(n):
+                contatore += 1        # LOAD, ADD, STORE: interrompibile fra i passi
+
+        t = [threading.Thread(target=incrementa, args=(100_000,)) for _ in range(4)]
+        [x.start() for x in t]; [x.join() for x in t]
+        print(contatore)              # spesso < 400000: aggiornamenti persi
+
+        # Corretto: lock esplicito (oppure una struttura pensata per la concorrenza)
+        lock = threading.Lock()
+        def incrementa(n):
+            global contatore
+            for _ in range(n):
+                with lock:
+                    contatore += 1
+      note: >-
+        Il risultato dipende dall'intervallo di switch dell'interprete, quindi il bug
+        appare in modo intermittente: esattamente il tipo di race più costoso da trovare.
+  trade_offs:
+    - option: asyncio
+      pros: Migliaia di connessioni con un thread, memoria bassa, nessun lock
+      cons: Serve tutto lo stack asincrono; una chiamata bloccante ferma l'event loop
+      when: Server di rete, client con molte chiamate concorrenti
+    - option: Thread
+      pros: Funziona con librerie sincrone, codice lineare, memoria condivisa
+      cons: Nessun parallelismo sul calcolo, servono lock, costo per thread
+      when: I/O bloccante, driver sincroni, integrazione con codice legacy
+    - option: Processi
+      pros: Parallelismo reale, isolamento dei guasti
+      cons: Serializzazione dei dati, memoria duplicata, avvio più lento
+      when: Calcolo intensivo in Python puro
+    - option: Estensioni che rilasciano il GIL (NumPy, Polars)
+      pros: Parallelismo anche con i thread, prestazioni da codice nativo
+      cons: Vale solo per le operazioni supportate
+      when: Elaborazione numerica e dataframe
+  numbers:
+    - "Un thread costa tipicamente ~8 MB di stack virtuale: migliaia di thread non sono praticabili, migliaia di coroutine sì"
+    - "Avvio di un processo: decine-centinaia di millisecondi; per questo si usa un pool, non un processo per compito"
+    - "La build free-threaded (3.13) oggi paga una penalità sul singolo thread: va misurata, non assunta"
+  interview_answer: >-
+    Il GIL è un lock dell'interprete CPython che lascia eseguire bytecode a un thread alla
+    volta. La conseguenza pratica è che i thread aiutano sui carichi I/O bound, perché il
+    GIL viene rilasciato durante l'attesa, mentre non danno nessun guadagno sul calcolo
+    puro: lì servono più processi, ciascuno con il proprio interprete. Due eccezioni che
+    cito sempre: le librerie numeriche come NumPy rilasciano il GIL nelle operazioni in C,
+    quindi anche i thread parallelizzano davvero; e dal 3.13 esiste una build
+    free-threading senza GIL, ancora sperimentale. Nella scelta parto da asyncio per le
+    connessioni di rete numerose, thread per l'I/O bloccante con librerie sincrone e
+    processi per il calcolo, e uso concurrent.futures per poter cambiare idea con una riga.
+    Infine ricordo che il GIL non rende thread-safe il mio codice: un incremento da due
+    thread può comunque perdere aggiornamenti.
+  senior_signals:
+    - "Distingue I/O bound e CPU bound e ne trae la scelta dello strumento"
+    - "Sa che NumPy e simili rilasciano il GIL"
+    - "Conosce PEP 703 e il free-threading senza spacciarlo per già pronto"
+    - "Chiarisce che il GIL non sostituisce i lock applicativi"
+  pitfalls:
+    - "Usare i thread per accelerare un calcolo e non vedere alcun miglioramento"
+    - "Credere che il GIL renda atomico un `contatore += 1`"
+    - "Chiamare codice bloccante dentro un event loop asyncio"
+    - "Avviare un processo per ogni piccolo compito, pagando avvio e serializzazione"
+    - "Passare oggetti enormi a un ProcessPoolExecutor: il pickle costa più del lavoro"
+  follow_ups:
+    - question: Quando i thread in Python danno un guadagno reale?
+      answer: >-
+        Quando il tempo è speso in attesa e non in calcolo: chiamate di rete, query a un
+        database con driver sincrono, lettura di file, chiamate di sistema. In quei casi
+        il GIL viene rilasciato durante l'attesa e gli altri thread avanzano. Lo stesso
+        vale per le estensioni in C che lo rilasciano esplicitamente, come le operazioni
+        pesanti di NumPy: lì anche un carico "di calcolo" parallelizza davvero.
+    - question: Come sceglieresti fra asyncio e thread?
+      answer: >-
+        Guardo due cose: quante operazioni concorrenti servono e che librerie ho. Se sono
+        migliaia di connessioni di rete e lo stack è asincrono, asyncio vince nettamente
+        su memoria e costo di contesto. Se le librerie che devo usare sono sincrone - un
+        driver, un SDK - i thread sono la scelta pragmatica, perché adattare tutto ad
+        async costerebbe più di quanto renda. Spesso convivono: event loop principale e
+        `asyncio.to_thread` per le poche chiamate bloccanti.
+    - question: Cosa cambia con il free-threading del 3.13?
+      answer: >-
+        Rimuove il GIL in una build dedicata, quindi i thread possono eseguire bytecode
+        davvero in parallelo. In cambio il conteggio dei riferimenti diventa più costoso
+        e c'è una penalità sul singolo thread, e le estensioni in C devono essere
+        adattate. Oggi lo considero una direzione promettente da sperimentare, non una
+        scelta di produzione: se qualcuno me lo chiede, la risposta onesta è "va misurato
+        sul carico specifico".
+  related: [py-04-asyncio, py-06-idiomi-performance, rel-33-race-conditions]
+  resources:
+    - title: "Python docs - concurrent.futures"
+      url: "https://docs.python.org/3/library/concurrent.futures.html"
+      kind: doc
+    - title: "PEP 703 - Making the GIL optional in CPython"
+      url: "https://peps.python.org/pep-0703/"
+      kind: doc
+    - title: "David Beazley - Understanding the Python GIL"
+      url: "https://www.dabeaz.com/python/UnderstandingGIL.pdf"
+      kind: article
+
+- id: py-04-asyncio
+  title: asyncio - event loop, task e cancellazione
+  category: languages
+  track: knowledge
+  level: hard
+  tags: [python, asyncio, concorrenza, async]
+  estimated_minutes: 35
+  summary: >-
+    asyncio esegue molte operazioni di I/O su un solo thread grazie a un event loop che
+    alterna coroutine sospese su `await`. È concorrenza cooperativa: basta una chiamata
+    bloccante per fermare tutto.
+  deep_dive: |-
+    Una coroutine non è un thread: è una funzione che può *sospendersi* a ogni `await`,
+    restituendo il controllo all'event loop, che nel frattempo fa avanzare qualcun altro.
+    Tutto gira su un solo thread, quindi non serve alcun lock fra coroutine per le
+    sezioni che non contengono `await` - sono atomiche per costruzione. La contropartita
+    è che la cooperazione è obbligatoria: una funzione che *non* si sospende - un calcolo
+    lungo, una chiamata bloccante come `requests.get` o `time.sleep` - blocca l'intero
+    loop e con esso tutte le altre richieste.
+
+    La distinzione fra coroutine e `Task` è ciò che confonde di più. Chiamare una
+    coroutine non la esegue: crea un oggetto. `await` la esegue e aspetta il risultato,
+    quindi *non* dà concorrenza se lo si fa in sequenza. Per eseguire più cose insieme
+    servono `asyncio.gather` (attende tutte), `asyncio.create_task` (programma in
+    background) o, dal 3.11, i `TaskGroup`, che sono la forma consigliata perché
+    garantiscono che nessun task sopravviva al blocco e propagano gli errori in modo
+    strutturato.
+
+    Sulla cancellazione: in asyncio è cooperativa e si realizza sollevando
+    `CancelledError` nel punto di sospensione. Due conseguenze pratiche. La prima:
+    `CancelledError` non va catturata da un `except Exception` generico - dal 3.8 eredita
+    da `BaseException` proprio per evitarlo, ma un `except BaseException` distratto
+    rompe la cancellazione. La seconda: la pulizia va messa in `finally`, e se serve
+    fare I/O durante la pulizia si usa `asyncio.shield` o si protegge il blocco.
+
+    `asyncio.timeout` (3.11) è il modo moderno di mettere un limite: solleva
+    `TimeoutError` cancellando ciò che sta dentro. È preferibile a `wait_for` annidati e
+    si compone bene con i TaskGroup.
+
+    Il fenomeno dei *task fantasma* merita attenzione: `create_task` non trattiene un
+    riferimento forte al task, quindi se non lo si conserva il garbage collector può
+    raccoglierlo a metà. La documentazione stessa raccomanda di tenere i riferimenti in
+    un insieme e rimuoverli alla fine. Con i TaskGroup il problema non si pone.
+
+    Infine, il punto che in un colloquio distingue: `asyncio` *non* rende il codice più
+    veloce, lo rende più *scalabile* sull'attesa. Una singola richiesta non diventa più
+    rapida; diventa possibile averne diecimila in volo con poca memoria. E se dentro
+    c'è del calcolo, quello va spostato fuori dal loop con `asyncio.to_thread` o un
+    process pool.
+  key_points:
+    - "Le coroutine si sospendono su await e cedono il controllo all'event loop: concorrenza cooperativa su un thread solo"
+    - "Fra due await il codice è atomico: non servono lock fra coroutine"
+    - "Una chiamata bloccante (requests, time.sleep, calcolo lungo) ferma tutto il loop"
+    - "Chiamare una coroutine non la esegue: crea un oggetto. `await` in sequenza non dà concorrenza"
+    - "Per eseguire insieme: gather, create_task o - meglio dal 3.11 - TaskGroup, che propaga gli errori e non lascia task orfani"
+    - "La cancellazione solleva CancelledError nel punto di sospensione: non catturarla con except generici"
+    - "La pulizia va in finally; se richiede I/O, va protetta (asyncio.shield)"
+    - "asyncio.timeout (3.11) è il modo moderno di mettere un limite di tempo"
+    - "create_task senza tenere il riferimento: il task può essere raccolto dal GC a metà"
+    - "asyncio non velocizza la singola richiesta: rende possibile averne moltissime in attesa insieme"
+    - "Il calcolo va spostato fuori dal loop: asyncio.to_thread o un process pool"
+  examples:
+    - title: Sequenza, concorrenza e TaskGroup
+      language: python
+      code: |-
+        # SEQUENZIALE: 3 x 100 ms = 300 ms. `await` aspetta, non parallelizza.
+        a = await chiama("/a"); b = await chiama("/b"); c = await chiama("/c")
+
+        # CONCORRENTE: ~100 ms
+        a, b, c = await asyncio.gather(chiama("/a"), chiama("/b"), chiama("/c"))
+
+        # TaskGroup (3.11+): se uno fallisce, gli altri vengono cancellati e
+        # l'errore arriva come ExceptionGroup. Nessun task sopravvive al blocco.
+        async with asyncio.TaskGroup() as tg:
+            ta = tg.create_task(chiama("/a"))
+            tb = tg.create_task(chiama("/b"))
+        a, b = ta.result(), tb.result()
+
+        # gather con return_exceptions=True quando un fallimento non deve fermare gli altri
+        esiti = await asyncio.gather(*chiamate, return_exceptions=True)
+      note: >-
+        `gather` senza `return_exceptions` propaga il primo errore ma *non* cancella gli
+        altri task: è la differenza principale rispetto al TaskGroup.
+    - title: Bloccare il loop, e come non farlo
+      language: python
+      code: |-
+        # FERMA TUTTO: nessun'altra richiesta viene servita per 2 secondi.
+        @app.get("/report")
+        async def report():
+            dati = requests.get(URL).json()      # client sincrono: blocca il loop
+            time.sleep(2)                        # idem
+            return elabora_pesante(dati)         # calcolo: idem
+
+        # CORRETTO: I/O asincrono, attesa asincrona, calcolo fuori dal loop.
+        @app.get("/report")
+        async def report():
+            async with httpx.AsyncClient() as c:
+                dati = (await c.get(URL)).json()
+            await asyncio.sleep(2)
+            return await asyncio.to_thread(elabora_pesante, dati)
+      note: >-
+        Il sintomo tipico in produzione è una latenza che degrada per *tutte* le
+        richieste, non solo per quella lenta: è la firma del loop bloccato.
+    - title: Cancellazione e pulizia fatte bene
+      language: python
+      code: |-
+        async def lavora(conn):
+            try:
+                async with asyncio.timeout(5):        # 3.11+: limite di tempo
+                    return await operazione_lunga(conn)
+            except TimeoutError:
+                logger.warning("operazione scaduta")
+                raise
+            except asyncio.CancelledError:
+                # si può registrare, ma poi si rilancia SEMPRE
+                logger.info("cancellata, pulisco")
+                raise
+            finally:
+                # la pulizia deve poter finire anche durante la cancellazione
+                await asyncio.shield(conn.rollback())
+      note: >-
+        Ingoiare `CancelledError` è uno dei pochi errori che rompono l'intero modello:
+        il task diventa non cancellabile e lo spegnimento ordinato non termina più.
+  trade_offs:
+    - option: asyncio
+      pros: Migliaia di operazioni in volo, memoria bassa, nessun lock fra coroutine
+      cons: Tutto lo stack deve essere asincrono; un blocco ferma tutti
+      when: Server e client di rete, molte chiamate concorrenti
+    - option: Thread
+      pros: Funziona con librerie sincrone, nessuna riscrittura
+      cons: Costo per thread, lock necessari, nessun parallelismo sul calcolo
+      when: Poche decine di operazioni, librerie senza supporto async
+    - option: gather
+      pros: Semplice, compatto
+      cons: Non cancella gli altri task quando uno fallisce, task orfani possibili
+      when: Poche operazioni indipendenti
+    - option: TaskGroup
+      pros: Errori strutturati, cancellazione automatica dei fratelli, nessun orfano
+      cons: Richiede Python 3.11+
+      when: Il default dal 3.11 in poi
+  numbers:
+    - "Una coroutine costa qualche centinaio di byte contro i megabyte di stack di un thread"
+    - "Un event loop regge comodamente decine di migliaia di connessioni in attesa"
+    - "Basta un calcolo da 200 ms dentro il loop per aggiungere 200 ms alla latenza di tutte le richieste in coda"
+  interview_answer: >-
+    asyncio è concorrenza cooperativa su un solo thread: le coroutine si sospendono su
+    await e l'event loop fa avanzare le altre, quindi il guadagno è sull'attesa, non sul
+    calcolo. La conseguenza da tenere sempre presente è che una chiamata bloccante -
+    requests, time.sleep, un calcolo lungo - ferma l'intero loop e degrada la latenza di
+    tutte le richieste, non solo di quella; per quello uso client asincroni e sposto il
+    calcolo con asyncio.to_thread. Un altro punto su cui si sbaglia spesso è che scrivere
+    tre await in fila non dà concorrenza: serve gather o, dal 3.11, un TaskGroup, che
+    preferisco perché cancella i fratelli quando uno fallisce e non lascia task orfani. E
+    sulla cancellazione sto attento a non catturare CancelledError con except generici, e a
+    mettere la pulizia in finally.
+  senior_signals:
+    - "Sa che await in sequenza non è concorrenza e propone gather/TaskGroup"
+    - "Identifica il loop bloccato dal sintomo (latenza che degrada per tutti)"
+    - "Tratta correttamente CancelledError e la pulizia in finally"
+    - "Conosce TaskGroup e asyncio.timeout e sa perché sono meglio delle forme vecchie"
+  pitfalls:
+    - "Chiamate sincrone dentro una funzione async: il loop si ferma"
+    - "Tre await in fila credendo di aver parallelizzato"
+    - "except Exception che ingoia CancelledError (o peggio, except BaseException)"
+    - "create_task senza conservare il riferimento: il task può sparire a metà"
+    - "Nessun timeout sulle chiamate: una coroutine appesa resta in volo per sempre"
+  follow_ups:
+    - question: Cosa succede se chiami una funzione bloccante dentro una coroutine?
+      answer: >-
+        Il thread dell'event loop resta occupato, quindi nessun'altra coroutine avanza:
+        tutte le richieste in volo si fermano per quella durata. Il sintomo in produzione
+        è una latenza che peggiora per tutti contemporaneamente. La soluzione è usare la
+        variante asincrona della libreria oppure spostare la chiamata con
+        `asyncio.to_thread`, che la esegue in un thread separato lasciando libero il
+        loop.
+    - question: Differenza fra gather e TaskGroup?
+      answer: >-
+        `gather` avvia tutto e attende; se uno fallisce propaga l'eccezione ma gli altri
+        continuano a girare, e se nessuno li attende diventano orfani. Il `TaskGroup` del
+        3.11 ha semantica strutturata: all'uscita dal blocco tutti i task sono conclusi,
+        se uno fallisce gli altri vengono cancellati e gli errori arrivano raccolti in un
+        `ExceptionGroup`. È quello che uso per default, perché rende impossibile
+        dimenticare un task in volo.
+    - question: Come implementi un limite di concorrenza su molte chiamate?
+      answer: >-
+        Con un `asyncio.Semaphore` della dimensione voluta, acquisito dentro la coroutine
+        che fa la chiamata: le altre restano in attesa invece di partire tutte insieme.
+        È importante perché `gather` su diecimila elementi apre diecimila connessioni e
+        fa cadere il servizio a valle prima ancora del proprio. In alternativa si divide
+        il lavoro in lotti, ma il semaforo tiene il livello di parallelismo costante ed è
+        più efficiente.
+  related: [py-03-gil-concorrenza, js-04-event-loop, rel-32-retries-timeouts-breakers]
+  resources:
+    - title: "Python docs - asyncio"
+      url: "https://docs.python.org/3/library/asyncio.html"
+      kind: doc
+    - title: "Python docs - Coroutines and Tasks (gather, TaskGroup, timeout)"
+      url: "https://docs.python.org/3/library/asyncio-task.html"
+      kind: doc
+    - title: "Real Python - Async IO in Python"
+      url: "https://realpython.com/async-io-python/"
+      kind: article
+
+- id: py-05-tipi-e-typing
+  title: Type hints, mypy e tipi a runtime
+  category: languages
+  track: knowledge
+  level: medium
+  tags: [python, typing, mypy, qualita]
+  estimated_minutes: 30
+  summary: >-
+    Le annotazioni di tipo non sono controllate a runtime: servono a un analizzatore
+    statico come mypy o pyright, e a strumenti come Pydantic che le leggono per validare.
+    Conoscere questa separazione evita sia di fidarsene troppo sia di sottovalutarle.
+  deep_dive: |-
+    Python resta dinamico: le annotazioni non cambiano l'esecuzione, non convertono i
+    valori e non sollevano errori se il tipo non corrisponde. Vivono in
+    `__annotations__` e servono a due categorie di consumatori: gli analizzatori statici
+    (mypy, pyright), che le controllano prima dell'esecuzione, e le librerie che le
+    leggono a runtime per generare comportamento - Pydantic per la validazione, FastAPI
+    per la serializzazione e la documentazione, dataclasses per generare il costruttore.
+
+    Il concetto che vale più di tutti gli altri è il *Protocol* (PEP 544): definisce un
+    tipo per *struttura* invece che per ereditarietà. Una classe soddisfa un Protocol se
+    ha i metodi giusti, senza doverlo importare né dichiarare. È il modo idiomatico di
+    definire le porte in un'architettura esagonale: il dominio dichiara il Protocol e
+    l'infrastruttura lo soddisfa senza saperlo, quindi la dipendenza va in una direzione
+    sola davvero.
+
+    Altre costruzioni che ricorrono in un colloquio: `Optional[X]` (cioè `X | None` dal
+    3.10) e l'importanza di dichiararlo, perché il 90% degli errori che mypy trova sono
+    valori `None` non gestiti; `Literal` per i valori ammessi, che trasforma stringhe
+    magiche in un tipo verificato; `TypedDict` per i dizionari con chiavi note; i
+    generici con `TypeVar` - e dal 3.12 la sintassi `def primo[T](x: list[T]) -> T` che
+    li rende molto più leggibili; `overload` per le funzioni che cambiano tipo di
+    ritorno in base agli argomenti; e `Self` (3.11) per i metodi che restituiscono
+    l'istanza.
+
+    Sul rigore: `Any` disattiva il controllo e si propaga silenziosamente; `object` è il
+    suo opposto sicuro (non puoi farci nulla senza restringere); `unknown` non esiste in
+    Python, ma `object` svolge quel ruolo. L'impostazione che cambia davvero la qualità è
+    `strict = true` (o almeno `disallow_untyped_defs` e `warn_return_any`), e su un
+    progetto esistente si adotta per moduli, non tutto insieme.
+
+    Va detto anche il limite: il controllo statico non vede i dati che arrivano
+    dall'esterno. Un JSON deserializzato è `Any`, e da lì in poi mypy non protegge più
+    nulla. Per questo la pratica robusta è *validare ai confini* con Pydantic (o
+    equivalente) e lavorare con tipi certi all'interno: gli analizzatori garantiscono la
+    coerenza del codice, la validazione garantisce la forma dei dati. Sono due difese
+    diverse e servono entrambe.
+  key_points:
+    - "Le annotazioni non sono controllate a runtime: non convertono e non sollevano errori da sole"
+    - "I consumatori sono due: analizzatori statici (mypy, pyright) e librerie che le leggono (Pydantic, FastAPI, dataclasses)"
+    - "Protocol (PEP 544): tipizzazione strutturale, una classe lo soddisfa senza importarlo. È il modo idiomatico per le porte"
+    - "X | None invece di Optional[X] dal 3.10; dichiarare i None è ciò che intercetta la maggior parte dei bug"
+    - "Literal trasforma le stringhe magiche in un tipo verificato; TypedDict tipizza i dizionari con chiavi note"
+    - "Generici con TypeVar, e dal 3.12 la sintassi def primo[T](...) molto più leggibile"
+    - "Any disattiva il controllo e si propaga: object è l'alternativa sicura quando il tipo è davvero ignoto"
+    - "strict = true (o almeno disallow_untyped_defs) è ciò che rende utile mypy; su un progetto esistente si adotta per moduli"
+    - "Il controllo statico non vede i dati esterni: un JSON deserializzato è Any"
+    - "Pratica robusta: validare ai confini con Pydantic e lavorare con tipi certi dentro"
+  examples:
+    - title: Protocol - l'inversione delle dipendenze senza ereditarietà
+      language: python
+      code: |-
+        from typing import Protocol
+
+        class Posta(Protocol):                       # dichiarato nel DOMINIO
+            def invia(self, a: str, oggetto: str, corpo: str) -> None: ...
+
+        class PostaSMTP:                             # nell'INFRASTRUTTURA
+            def __init__(self, url: str): ...
+            def invia(self, a: str, oggetto: str, corpo: str) -> None: ...
+        # non importa Posta, non eredita da Posta: la conformità è strutturale
+
+        def notifica(posta: Posta, utente: Utente) -> None:
+            posta.invia(utente.email, "Benvenuto", "...")
+
+        notifica(PostaSMTP(url), utente)   # mypy verifica la compatibilità
+      note: >-
+        È la differenza con una classe base astratta: lì l'implementazione deve
+        importare ed ereditare, e la dipendenza torna nella direzione sbagliata.
+    - title: Literal, TypedDict e generici (sintassi 3.12)
+      language: python
+      code: |-
+        from typing import Literal, TypedDict
+
+        Stato = Literal["bozza", "confermato", "annullato"]     # niente stringhe magiche
+
+        def cambia(stato: Stato) -> None: ...
+        cambia("confermata")        # mypy: errore, il refuso si vede prima di eseguire
+
+        class RigaCsv(TypedDict):
+            sku: str
+            quantita: int
+            prezzo_cents: int
+
+        # Generici, sintassi 3.12: leggibile quanto quella di altri linguaggi
+        def primo[T](elementi: list[T], default: T) -> T:
+            return elementi[0] if elementi else default
+      note: >-
+        `Literal` è la costruzione che ripaga prima di tutte: intercetta i refusi sugli
+        stati, che sono fra i bug più noiosi da trovare a runtime.
+    - title: Il confine, dove la tipizzazione statica finisce
+      language: python
+      code: |-
+        # Qui mypy non protegge nulla: il JSON è Any
+        dati = json.loads(corpo)
+        totale = dati["ordine"]["totale"] * 2        # nessun errore statico, esplode dopo
+
+        # Con validazione al confine, da qui in poi i tipi sono certi
+        class Ordine(BaseModel):
+            id: UUID
+            totale_cents: int = Field(ge=0)
+            stato: Stato
+
+        ordine = Ordine.model_validate_json(corpo)   # errore chiaro se la forma è sbagliata
+        totale = ordine.totale_cents * 2             # tipo garantito, mypy lo verifica
+      note: >-
+        Le due difese sono complementari: la validazione garantisce la forma dei dati in
+        ingresso, l'analisi statica garantisce la coerenza del codice che li usa.
+  trade_offs:
+    - option: Nessuna annotazione
+      pros: Massima velocità di scrittura, nessun attrito
+      cons: Errori scoperti a runtime, refactoring rischioso, IDE meno utile
+      when: Script usa e getta, notebook
+    - option: Annotazioni + mypy strict
+      pros: Molti bug intercettati prima, refactoring sicuro, autocompletamento reale
+      cons: Attrito iniziale, tipi complessi da esprimere, librerie non tipizzate
+      when: Codice di produzione destinato a durare
+    - option: Pydantic ai confini
+      pros: Validazione vera dei dati esterni, messaggi d'errore utili, serializzazione
+      cons: Overhead rispetto a una dataclass, dipendenza esterna
+      when: API, configurazione, dati da fonti non fidate
+    - option: Protocol vs ABC
+      pros: Nessun import nell'implementazione, dipendenze a senso unico
+      cons: Nessun controllo a runtime (salvo runtime_checkable, limitato)
+      when: Porte e interfacce nell'architettura esagonale
+  numbers:
+    - "L'esperienza comune sui progetti che adottano mypy strict: la maggior parte degli errori trovati riguarda valori None non gestiti"
+    - "Adozione graduale: si abilita strict per modulo con [[tool.mypy.overrides]], non sul progetto intero al primo colpo"
+  interview_answer: >-
+    Le annotazioni in Python non sono controllate a runtime: servono a mypy o pyright
+    prima dell'esecuzione, e a librerie come Pydantic o FastAPI che le leggono per
+    generare validazione e documentazione. Le uso con mypy in modalità strict perché il
+    valore vero è nel refactoring: senza tipi, cambiare una firma significa sperare di aver
+    trovato tutti i chiamanti. Il costrutto che uso di più è Protocol, perché mi dà
+    tipizzazione strutturale: il dominio dichiara l'interfaccia e l'infrastruttura la
+    soddisfa senza importarla, quindi la dipendenza va davvero in una direzione sola. E
+    tengo presente il limite: sui dati che arrivano dall'esterno il controllo statico non
+    può fare nulla, perché un JSON deserializzato è Any - per quello valido ai confini con
+    Pydantic e da lì in poi lavoro con tipi certi.
+  senior_signals:
+    - "Distingue nettamente controllo statico e validazione a runtime"
+    - "Usa Protocol per invertire le dipendenze e sa perché è meglio di una ABC in quel ruolo"
+    - "Propone l'adozione graduale di strict per moduli"
+    - "Sa che Any si propaga e preferisce object quando il tipo è davvero ignoto"
+  pitfalls:
+    - "Credere che le annotazioni validino i dati a runtime"
+    - "Any sparso ovunque: disattiva il controllo e si propaga in silenzio"
+    - "Tipizzare solo le firme pubbliche e lasciare il resto senza: mypy non ha abbastanza informazioni"
+    - "Abilitare strict su tutto il progetto in un colpo solo e trovarsi con migliaia di errori"
+    - "Dimenticare che i dizionari da JSON non sono TypedDict: la forma va validata, non dichiarata"
+  follow_ups:
+    - question: Che differenza c'è fra Protocol e una classe base astratta?
+      answer: >-
+        Con l'ABC la compatibilità è nominale: l'implementazione deve importare la classe
+        base ed ereditarla, quindi l'infrastruttura dipende dal modulo che definisce
+        l'interfaccia, e spesso finisce per essere il contrario di quello che si vuole.
+        Con Protocol la compatibilità è strutturale: basta avere i metodi giusti. È
+        perfetto per dichiarare nel dominio ciò di cui ha bisogno, senza che chi lo
+        implementa ne sappia nulla. L'ABC resta utile quando voglio condividere codice
+        nella classe base o imporre il controllo a runtime.
+    - question: A cosa serve mypy se Python resta dinamico?
+      answer: >-
+        A trovare prima una classe di errori che altrimenti si scopre in produzione:
+        None non gestiti, firme cambiate e chiamanti dimenticati, rami che restituiscono
+        tipi diversi, attributi inesistenti dopo un refactor. Il beneficio si sente
+        soprattutto nel refactoring: cambiare un tipo e vedere l'elenco esatto dei punti
+        da aggiornare è un'altra esperienza rispetto a cercare con grep. Non sostituisce
+        i test, li affianca coprendo cose che i test non coprono mai tutte.
+    - question: Come introdurresti i type hints in un progetto esistente e grande?
+      answer: >-
+        Per moduli, dal basso verso l'alto: prima quelli senza dipendenze - utilità,
+        modelli, value object - poi quelli che li usano. Aggiungo mypy in CI subito ma in
+        modalità permissiva, con strict abilitato solo sui moduli già coperti tramite le
+        override per modulo, e alzo l'asticella man mano. Così la build resta verde e la
+        copertura cresce senza una settimana di fermo per "tipizzare tutto".
+  related: [py-01-modello-oggetti, pat-06-hexagonal-clean, js-07-typescript, pat-04-dto-entity-model]
+  resources:
+    - title: "Python docs - typing"
+      url: "https://docs.python.org/3/library/typing.html"
+      kind: doc
+    - title: "mypy - documentazione e cheat sheet"
+      url: "https://mypy.readthedocs.io/en/stable/cheat_sheet_py3.html"
+      kind: doc
+    - title: "PEP 544 - Protocols: structural subtyping"
+      url: "https://peps.python.org/pep-0544/"
+      kind: doc
+
+- id: py-06-idiomi-performance
+  title: Idiomi e prestazioni - strutture dati, generatori, profiling
+  category: languages
+  track: technical
+  level: medium
+  tags: [python, performance, idiomi, profiling]
+  estimated_minutes: 30
+  summary: >-
+    In Python la differenza di prestazioni fra due soluzioni corrette nasce quasi sempre
+    dalla struttura dati scelta e dal numero di operazioni a livello di interprete, non da
+    micro-ottimizzazioni. Prima si misura, poi si cambia.
+  deep_dive: |-
+    Le complessità delle strutture standard vanno sapute a memoria, perché decidono più
+    di qualunque trucco. `list`: indicizzazione e `append` ammortizzato O(1), ma `in`,
+    `insert(0, x)` e `pop(0)` sono O(n). `dict` e `set`: inserimento, ricerca e
+    cancellazione O(1) medio. `collections.deque`: inserimento e rimozione O(1) a
+    *entrambe* le estremità, ed è la risposta giusta a ogni coda. `heapq`: inserimento
+    ed estrazione del minimo O(log n). Il classico errore da colloquio è un `if x in
+    lista` dentro un ciclo: trasforma un algoritmo lineare in uno quadratico, e basta
+    convertire la lista in `set` per risolverlo.
+
+    Il secondo tema è la *memoria* e la pigrizia. Una list comprehension materializza
+    tutto; un generatore produce un elemento alla volta con memoria costante. Su un file
+    da qualche gigabyte è la differenza fra funzionare e non funzionare. `itertools` è
+    la libreria che rende idiomatiche queste pipeline - `islice`, `chain`, `groupby`,
+    `batched` (3.12) - e `yield from` compone generatori senza cicli espliciti.
+
+    Il terzo è la natura interpretata: ogni operazione a livello Python costa. Da qui tre
+    conseguenze pratiche che si vedono nei benchmark reali. Concatenare stringhe con
+    `+=` in un ciclo crea una stringa nuova ogni volta: si usa `"".join(pezzi)`. Chiamare
+    una funzione in un ciclo stretto costa: a volte conviene srotolare o spostare il
+    lavoro in una comprehension. E soprattutto: se il calcolo è numerico e massiccio,
+    la risposta giusta non è ottimizzare il ciclo Python ma delegare a una libreria
+    vettorizzata (NumPy, Polars) o compilata, dove un'operazione su un milione di
+    elementi è una sola chiamata.
+
+    Sul *come* ottimizzare, l'ordine conta: prima si misura, e con gli strumenti giusti.
+    `timeit` per i micro-confronti, `cProfile` con `pstats` per capire dove va il tempo
+    su un'esecuzione reale, `py-spy` per profilare un processo *già in produzione* senza
+    modificarlo - è lo strumento che fa la differenza quando il problema si manifesta
+    solo sotto carico. Ottimizzare a intuito è il modo più efficace di rendere il codice
+    peggiore e non più veloce.
+
+    Infine gli idiomi che rendono il codice più veloce *e* più leggibile: `enumerate` e
+    `zip` invece degli indici, decomposizione invece di accessi ripetuti,
+    `collections.Counter` e `defaultdict` invece di costruire dizionari a mano,
+    `functools.lru_cache` per funzioni pure costose (con l'avvertenza di non metterlo sui
+    metodi di istanza), e `dict.setdefault` o il *walrus* `:=` per evitare doppie
+    ricerche.
+  key_points:
+    - "list: indicizzazione e append O(1) ammortizzato; `in`, insert(0) e pop(0) sono O(n)"
+    - "dict e set: ricerca, inserimento e cancellazione O(1) medio. `x in set` invece di `x in list` è la correzione più redditizia"
+    - "deque: O(1) a entrambe le estremità, è la struttura giusta per le code"
+    - "heapq: O(log n) per inserimento ed estrazione del minimo; ideale per i primi k elementi"
+    - "Generatori: memoria costante contro la materializzazione completa di una comprehension"
+    - "itertools (islice, chain, groupby, batched) rende idiomatiche le pipeline pigre"
+    - "Concatenare stringhe con += in un ciclo è quadratico: usa ''.join(pezzi)"
+    - "Per il calcolo numerico massiccio non si ottimizza il ciclo Python: si vettorizza (NumPy, Polars)"
+    - "Misurare prima: timeit per i micro-confronti, cProfile per l'esecuzione reale, py-spy per un processo in produzione"
+    - "lru_cache per funzioni pure costose, mai sui metodi di istanza (tiene vivo self)"
+    - "enumerate, zip, Counter, defaultdict, setdefault e il walrus := rendono il codice più veloce e più leggibile insieme"
+  examples:
+    - title: La correzione che vale più di tutte le micro-ottimizzazioni
+      language: python
+      code: |-
+        # O(n * m): `in` su una lista scorre tutti gli elementi
+        validi = [r for r in righe if r.sku in sku_ammessi]        # sku_ammessi: list
+
+        # O(n): stessa riga, struttura diversa
+        ammessi = set(sku_ammessi)
+        validi = [r for r in righe if r.sku in ammessi]
+
+        # Con 100.000 righe e 10.000 sku: da ~10^9 confronti a ~10^5.
+        # Nessun trucco, nessuna libreria: solo la struttura giusta.
+
+        # Stessa storia con le code
+        from collections import deque
+        coda = deque()          # popleft() O(1)
+        # lista.pop(0)          # O(n): ricopia tutti gli elementi a ogni estrazione
+      note: >-
+        È il primo posto dove guardare quando "Python è lento": nove volte su dieci non è
+        Python, è una ricerca lineare dentro un ciclo.
+    - title: Generatori e memoria costante
+      language: python
+      code: |-
+        # Materializza tutto: con un file da 5 GB non c'è memoria che basti
+        righe = [json.loads(r) for r in open("eventi.jsonl")]
+        totale = sum(r["importo"] for r in righe if r["tipo"] == "vendita")
+
+        # Pipeline pigra: un elemento alla volta, memoria costante
+        def eventi(percorso):
+            with open(percorso) as f:
+                for riga in f:                 # il file è già un iteratore di righe
+                    yield json.loads(riga)
+
+        totale = sum(e["importo"] for e in eventi("eventi.jsonl") if e["tipo"] == "vendita")
+
+        # A lotti, per scrivere su database senza caricare tutto (3.12+)
+        from itertools import batched
+        for lotto in batched(eventi("eventi.jsonl"), 1000):
+            await repo.inserisci_molti(lotto)
+      note: >-
+        La versione pigra non è solo più parsimoniosa: comincia a produrre risultati
+        subito, il che conta quando il lavoro è lungo.
+    - title: Misurare prima di cambiare
+      language: python
+      code: |-
+        # Micro-confronto fra due implementazioni
+        python -m timeit -s "d=dict.fromkeys(range(1000))" "999 in d"
+        python -m timeit -s "l=list(range(1000))"          "999 in l"
+
+        # Dove va il tempo in un'esecuzione reale
+        python -m cProfile -s cumtime script.py | head -25
+
+        # Profilare un processo GIA' IN PRODUZIONE, senza toccarlo né riavviarlo
+        py-spy top --pid 12345
+        py-spy record --pid 12345 --output profilo.svg --duration 30
+      note: >-
+        `py-spy` si attacca a un processo vivo e produce un flame graph: è lo strumento
+        che risolve i casi in cui il problema esiste solo sotto carico reale.
+  trade_offs:
+    - option: Comprehension (materializza)
+      pros: Semplice, riutilizzabile, veloce su dati piccoli
+      cons: Memoria proporzionale ai dati
+      when: Collezioni che stanno comodamente in memoria
+    - option: Generatore (pigro)
+      pros: Memoria costante, risultati immediati, componibile
+      cons: Si consuma una volta sola, debug meno immediato
+      when: File grandi, flussi, pipeline
+    - option: Vettorizzazione (NumPy/Polars)
+      pros: Ordini di grandezza più veloce sui numeri, rilascia il GIL
+      cons: Dipendenza, modello mentale diverso, costo di conversione
+      when: Calcolo numerico su molti elementi
+    - option: Riscrivere in C/Rust (o usare una libreria che lo fa)
+      pros: Prestazioni native sul punto caldo
+      cons: Complessità di build e manutenzione
+      when: Solo dopo aver profilato e isolato un vero collo di bottiglia
+  numbers:
+    - "`x in list` è O(n), `x in set` è O(1) medio: su 10.000 elementi sono ordini di grandezza"
+    - "list.pop(0) è O(n), deque.popleft() è O(1)"
+    - "Una comprehension su un file da 5 GB richiede memoria comparabile; un generatore, costante"
+    - "cProfile aggiunge un sovraccarico sensibile: per la produzione si usa py-spy, che è a campionamento"
+  interview_answer: >-
+    Parto sempre dal misurare, perché in Python l'intuito sbaglia spesso: uso timeit per
+    confrontare due implementazioni, cProfile per vedere dove va il tempo in
+    un'esecuzione reale e py-spy quando il problema si manifesta solo in produzione,
+    perché si attacca al processo senza riavviarlo. Detto questo, la correzione che ripaga
+    più di tutte è la struttura dati: un `in` su una lista dentro un ciclo trasforma un
+    algoritmo lineare in uno quadratico, e basta un set per risolverlo; allo stesso modo
+    uso deque per le code invece di pop(0). Sul consumo di memoria preferisco i generatori
+    quando i dati sono grandi, perché lavorano a memoria costante e cominciano a produrre
+    subito. E se il carico è numerico e massiccio, non ottimizzo il ciclo Python: vettorizzo
+    con NumPy o Polars, dove un'operazione su un milione di elementi è una chiamata sola.
+  senior_signals:
+    - "Misura prima di ottimizzare e nomina lo strumento giusto per ciascun caso"
+    - "Conosce le complessità delle strutture standard e le usa per scegliere"
+    - "Sa quando smettere di ottimizzare Python e delegare a una libreria vettorizzata"
+    - "Cita py-spy per la produzione: è ciò che distingue chi ha davvero indagato un problema dal vivo"
+  pitfalls:
+    - "Ottimizzare a intuito senza profilare"
+    - "`x in lista` dentro un ciclo: complessità quadratica silenziosa"
+    - "Concatenare stringhe con += in un ciclo"
+    - "Materializzare in memoria dati che si potrebbero elaborare in streaming"
+    - "lru_cache su metodi di istanza: perdita di memoria garantita"
+  follow_ups:
+    - question: Come profileresti un servizio Python lento in produzione?
+      answer: >-
+        Con py-spy, che si attacca al processo per pid e campiona gli stack senza
+        richiedere modifiche al codice né un riavvio: `py-spy top` per una vista
+        immediata, `py-spy record` per un flame graph su trenta secondi di carico reale.
+        Prima però guardo le metriche per capire se il tempo è CPU o attesa: se è attesa,
+        il profilo della CPU mostrerà poco e il problema è in una dipendenza, e lì servono
+        i trace distribuiti più che il profiler.
+    - question: Quando conviene un generatore e quando una lista?
+      answer: >-
+        Generatore quando i dati sono grandi, quando servono solo i primi elementi, o
+        quando la pipeline è lunga e conviene non materializzare gli stadi intermedi.
+        Lista quando i dati sono piccoli, quando devo scorrerli più volte, quando mi
+        serve `len()` o l'accesso per indice: un generatore si consuma una volta sola, ed
+        è la fonte di bug più comune quando qualcuno lo itera due volte aspettandosi lo
+        stesso risultato.
+    - question: Python è troppo lento per questo carico. Come rispondi?
+      answer: >-
+        Chiedo cosa è stato misurato. Nella maggior parte dei casi il collo di bottiglia
+        non è l'interprete ma l'attesa di I/O o un algoritmo sbagliato, e lì il linguaggio
+        non c'entra. Se invece è davvero calcolo in Python puro, le strade nell'ordine
+        sono: cambiare struttura dati, vettorizzare con NumPy o Polars, parallelizzare su
+        più processi, e solo alla fine spostare il punto caldo in un'estensione compilata.
+        Riscrivere tutto in un altro linguaggio è raramente la risposta proporzionata.
+  related: [py-01-modello-oggetti, py-02-memoria-gc, dsa-01-complexity, py-03-gil-concorrenza]
+  resources:
+    - title: "Python docs - Time complexity delle strutture dati"
+      url: "https://wiki.python.org/moin/TimeComplexity"
+      kind: doc
+    - title: "py-spy - profiler per processi Python in esecuzione"
+      url: "https://github.com/benfred/py-spy"
+      kind: repo
+    - title: "Python docs - itertools"
+      url: "https://docs.python.org/3/library/itertools.html"
+      kind: doc
+
+- id: py-07-testing-packaging
+  title: Testing e packaging - pytest, ambienti, distribuzione
+  category: languages
+  track: technical
+  level: medium
+  tags: [python, pytest, packaging, strumenti]
+  estimated_minutes: 30
+  summary: >-
+    pytest con fixture e parametrizzazione copre quasi tutte le esigenze di test; sul
+    confezionamento lo standard moderno è pyproject.toml, e gli strumenti si sono
+    consolidati attorno a ruff e uv.
+  deep_dive: |-
+    In pytest i concetti che contano sono tre. Le *fixture* sono dipendenze dichiarate
+    come parametri della funzione di test: pytest le costruisce, le passa e le smonta,
+    con un ambito configurabile (`function`, `module`, `session`) che decide quante volte
+    vengono create. La *parametrizzazione* con `@pytest.mark.parametrize` trasforma dieci
+    test quasi identici in uno solo con dieci casi, ciascuno riportato separatamente. E
+    `monkeypatch` sostituisce attributi, variabili d'ambiente e funzioni per la durata di
+    un test, ripristinando tutto alla fine.
+
+    Sui doppi di test conviene avere il vocabolario chiaro, perché ai colloqui lo si
+    chiede: uno *stub* restituisce risposte preconfezionate, un *fake* è
+    un'implementazione funzionante ma semplificata (il repository in memoria), un *mock*
+    verifica *come* è stato chiamato. La preferenza pratica va ai fake: i mock legano il
+    test all'implementazione, quindi ogni refactor li rompe anche quando il
+    comportamento è identico. Un test che verifica "ha chiamato `salva` una volta" fallisce
+    se cambio nome al metodo; un test che verifica "dopo l'operazione l'ordine risulta
+    annullato" no.
+
+    Sulla piramide: molti test unitari veloci, meno test di integrazione su ciò che
+    tocca il mondo (database, HTTP), pochissimi end-to-end. Per l'integrazione,
+    `testcontainers` avvia un database vero in Docker per la durata della suite ed è
+    molto più affidabile di un doppio in memoria che finge di essere Postgres - i bug
+    veri stanno proprio nelle differenze.
+
+    Sul confezionamento, il quadro si è semplificato. `pyproject.toml` (PEP 517/518/621)
+    è l'unico file di configurazione necessario: dipendenze, metadati, configurazione
+    degli strumenti. L'ambiente virtuale resta obbligatorio - `python -m venv` o `uv
+    venv` - e per le applicazioni si *blocca* tutto in un lockfile (uv, Poetry,
+    pip-tools), mentre per le librerie si lasciano intervalli permissivi, perché
+    vincolare le dipendenze di una libreria crea conflitti a chi la usa.
+
+    Sugli strumenti moderni vale la pena conoscere due nomi: *ruff*, che ha sostituito
+    flake8, isort e in buona parte black con un solo binario scritto in Rust e ordini di
+    grandezza più veloce; e *uv*, che fa la stessa cosa per la gestione di ambienti e
+    dipendenze. In un colloquio del 2026 citarli dice che si segue l'ecosistema.
+
+    Ultima cosa, sul confine fra test e produzione: i test devono essere deterministici.
+    Tempo, casualità, identificatori e rete vanno iniettati o sostituiti, altrimenti si
+    ottiene una suite che fallisce a caso - e una suite che fallisce a caso viene
+    ignorata, che è peggio di non averla.
+  key_points:
+    - "Fixture: dipendenze dichiarate come parametri, con scope function/module/session che decide quante volte vengono create"
+    - "parametrize: dieci test quasi identici diventano uno con dieci casi riportati separatamente"
+    - "monkeypatch sostituisce attributi e variabili d'ambiente per la durata del test, con ripristino automatico"
+    - "Vocabolario: stub (risposte preconfezionate), fake (implementazione semplificata), mock (verifica le chiamate)"
+    - "Preferisci i fake ai mock: i mock legano il test all'implementazione e si rompono a ogni refactor"
+    - "Piramide: molti unitari, alcuni di integrazione, pochissimi end-to-end"
+    - "testcontainers avvia un database reale per i test di integrazione: i bug stanno nelle differenze dal doppio"
+    - "pyproject.toml (PEP 517/518/621) è l'unico file di configurazione necessario"
+    - "Applicazioni: dipendenze bloccate in un lockfile. Librerie: intervalli permissivi, altrimenti si creano conflitti"
+    - "Strumenti attuali: ruff al posto di flake8/isort/black, uv per ambienti e dipendenze"
+    - "I test devono essere deterministici: tempo, casualità e rete vanno iniettati o sostituiti"
+  examples:
+    - title: Fixture, parametrizzazione e un fake al posto di un mock
+      language: python
+      code: |-
+        import pytest
+
+        @pytest.fixture
+        def ordini() -> OrdiniInMemoria:          # fake: implementazione vera ma semplice
+            return OrdiniInMemoria()
+
+        @pytest.fixture
+        def servizio(ordini) -> AnnullaOrdine:    # le fixture si compongono
+            return AnnullaOrdine(ordini, OrologioFinto("2026-02-11T10:00"))
+
+        @pytest.mark.parametrize(
+            "stato, annullabile",
+            [("creato", True), ("pagato", True), ("spedito", False), ("annullato", False)],
+        )
+        def test_annullabilita(stato, annullabile):
+            ordine = Ordine(stato=StatoOrdine(stato), creato_il=IERI)
+            assert ordine.puo_essere_annullato(ADESSO) is annullabile
+
+        async def test_annulla(servizio, ordini):
+            ordini.dati[ID] = Ordine(stato=StatoOrdine.PAGATO, creato_il=IERI)
+            await servizio.esegui(ID)
+            assert ordini.dati[ID].stato is StatoOrdine.ANNULLATO   # comportamento, non chiamate
+      note: >-
+        L'ultima riga è il punto: verifica l'effetto osservabile. Con un mock avrei
+        verificato che è stato chiamato `salva`, e il test si sarebbe rotto al primo
+        rinominamento senza che nulla fosse davvero cambiato.
+    - title: Integrazione con un database vero
+      language: python
+      code: |-
+        import pytest
+        from testcontainers.postgres import PostgresContainer
+
+        @pytest.fixture(scope="session")          # una volta per suite, non per test
+        def db_url():
+            with PostgresContainer("postgres:16-alpine") as pg:
+                yield pg.get_connection_url()
+
+        @pytest.fixture
+        async def conn(db_url):
+            pool = await asyncpg.create_pool(db_url)
+            async with pool.acquire() as c:
+                tx = c.transaction(); await tx.start()
+                yield c
+                await tx.rollback()               # ogni test riparte pulito
+      note: >-
+        Transazione con rollback per test: niente pulizia manuale, niente ordine di
+        esecuzione che conta, e la suite resta veloce nonostante il database vero.
+    - title: pyproject.toml, tutto in un file
+      language: toml
+      code: |-
+        [project]
+        name = "interview-prep-copilot-api"
+        requires-python = ">=3.12"
+        dependencies = ["fastapi>=0.115", "pydantic>=2.9"]
+
+        [project.optional-dependencies]
+        dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "mypy>=1.11"]
+
+        [tool.ruff]
+        line-length = 100
+        [tool.ruff.lint]
+        select = ["E", "F", "I", "UP", "B", "SIM"]   # errori, import, aggiornamenti, bug, semplificazioni
+
+        [tool.pytest.ini_options]
+        asyncio_mode = "auto"
+        addopts = "-q --strict-markers"
+
+        [tool.mypy]
+        strict = true
+      note: >-
+        Un solo file per dipendenze, lint, test e tipi: è il motivo per cui setup.py,
+        setup.cfg, .flake8 e requirements.txt stanno sparendo dai progetti nuovi.
+  trade_offs:
+    - option: Fake (implementazione in memoria)
+      pros: Test veloci e stabili, verificano il comportamento
+      cons: Vanno mantenuti allineati all'implementazione reale
+      when: Repository, client, gateway nel dominio
+    - option: Mock
+      pros: Immediati, utili quando il collaboratore è difficile da costruire
+      cons: Legano il test all'implementazione, si rompono a ogni refactor
+      when: Verificare che un effetto collaterale sia avvenuto (una mail inviata)
+    - option: Database reale con testcontainers
+      pros: Trova i bug veri (vincoli, tipi, transazioni, SQL)
+      cons: Più lento, richiede Docker anche in CI
+      when: Test dei repository e delle migrazioni
+    - option: End-to-end
+      pros: Verifica il sistema come lo vede l'utente
+      cons: Lenti, fragili, difficili da diagnosticare
+      when: Pochi percorsi critici (login, checkout)
+  numbers:
+    - "Una suite di dominio con fake gira in secondi; con database reale in decine di secondi o minuti"
+    - "Piramide tipica: 70% unitari, 20% integrazione, 10% end-to-end - le proporzioni contano più dei numeri esatti"
+    - "ruff è di ordini di grandezza più veloce degli strumenti che sostituisce: su progetti grandi passa da minuti a secondi"
+  interview_answer: >-
+    Su pytest uso tre cose quasi sempre: fixture per costruire le dipendenze del test,
+    parametrize per coprire molti casi con un test solo e monkeypatch per sostituire
+    variabili d'ambiente o funzioni. Sui doppi preferisco i fake ai mock: un repository in
+    memoria mi fa verificare il comportamento - dopo l'operazione l'ordine è annullato -
+    mentre un mock mi fa verificare le chiamate, e quel tipo di test si rompe a ogni
+    refactor anche quando il comportamento non cambia. Per i test dei repository uso un
+    database vero con testcontainers, perché i bug stanno proprio nelle differenze fra il
+    doppio e il motore reale, e tengo ogni test dentro una transazione con rollback. Sul
+    confezionamento uso pyproject.toml per tutto, con dipendenze bloccate per le
+    applicazioni e intervalli permissivi per le librerie, e come strumenti ruff e uv.
+  senior_signals:
+    - "Distingue stub, fake e mock e motiva la preferenza per i fake"
+    - "Testa il comportamento osservabile e non le chiamate"
+    - "Conosce testcontainers e la transazione con rollback per test"
+    - "Distingue il lock per le applicazioni dagli intervalli per le librerie"
+  pitfalls:
+    - "Mock ovunque: la suite verifica l'implementazione e ostacola il refactoring"
+    - "Test che dipendono dall'ordine di esecuzione o da stato globale"
+    - "Tempo e casualità non controllati: fallimenti intermittenti"
+    - "Bloccare le dipendenze di una libreria: conflitti garantiti per chi la usa"
+    - "Nessun test di integrazione: le query passano nei test e falliscono in produzione"
+  follow_ups:
+    - question: Perché preferire i fake ai mock?
+      answer: >-
+        Perché un mock verifica *come* il codice lavora, un fake verifica *cosa* produce.
+        Con i mock, rinominare un metodo o cambiare l'ordine di due chiamate rompe la
+        suite anche se il comportamento è identico: il test diventa un freno al
+        refactoring invece che una rete. Con un fake - un repository in memoria - il test
+        asserisce sullo stato finale e resta valido finché il comportamento resta valido.
+        I mock li tengo per gli effetti collaterali che non lasciano stato osservabile,
+        tipo una mail inviata.
+    - question: Cosa metti in un test di integrazione e cosa in uno unitario?
+      answer: >-
+        Unitario: regole di dominio, calcoli, transizioni di stato, tutto ciò che si può
+        esercitare senza uscire dal processo. Integrazione: tutto ciò che tocca un
+        confine reale - query SQL e migrazioni, serializzazione HTTP, client esterni
+        contro un doppio realistico. La domanda che uso è: questo test potrebbe passare
+        con un errore che in produzione esploderebbe? Se sì, serve un test di
+        integrazione.
+    - question: Come gestisci le dipendenze di un'applicazione rispetto a una libreria?
+      answer: >-
+        Per un'applicazione blocco tutto in un lockfile, perché voglio che il build di
+        oggi produca lo stesso risultato fra sei mesi e che un aggiornamento sia una
+        decisione esplicita. Per una libreria dichiaro intervalli permissivi - un minimo
+        e al più un limite superiore motivato - perché vincolare le dipendenze di una
+        libreria significa creare conflitti irrisolvibili a chi la installa insieme ad
+        altre.
+  related: [eng-01-testing, py-05-tipi-e-typing, pat-02-repository]
+  resources:
+    - title: "pytest - documentazione"
+      url: "https://docs.pytest.org/en/stable/"
+      kind: doc
+    - title: "Python Packaging User Guide"
+      url: "https://packaging.python.org/en/latest/"
+      kind: doc
+    - title: "ruff - linter e formatter"
+      url: "https://github.com/astral-sh/ruff"
+      kind: repo
+    - title: "uv - gestione di ambienti e dipendenze"
+      url: "https://github.com/astral-sh/uv"
+      kind: repo

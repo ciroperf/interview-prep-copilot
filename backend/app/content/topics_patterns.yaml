@@ -1,6 +1,6 @@
-# Pattern di strutturazione del codice: come sono organizzate davvero le codebase
-# professionali. È la parte che distingue chi sa scrivere codice da chi sa
-# organizzarlo, ed è quasi sempre oggetto di domande nei colloqui mid/senior.
+# Categoria "Coding patterns" - come si struttura il codice di un backend
+# professionale: livelli, confini, dipendenze e gestione degli errori.
+
 - id: pat-01-layered-architecture
   title: Architettura a livelli - controller, service, repository
   category: patterns
@@ -9,38 +9,174 @@
   tags: [architettura, layer, service, repository, struttura]
   estimated_minutes: 30
   summary: >-
-    È la struttura di default della stragrande maggioranza delle applicazioni backend:
-    un livello che parla con l'esterno (controller), uno che contiene le regole di
-    business (service) e uno che parla con i dati (repository). Il valore non sta nei
-    nomi, sta nella regola che le dipendenze vanno in una sola direzione.
+    È la struttura di default della stragrande maggioranza delle applicazioni backend: un
+    livello che parla con l'esterno (controller), uno che contiene le regole di business
+    (service) e uno che parla con i dati (repository). Il valore non sta nei nomi, sta
+    nella regola che le dipendenze vanno in una sola direzione.
+  deep_dive: |-
+    I tre livelli hanno ciascuno una responsabilità che si può enunciare in una riga. Il
+    *controller* traduce: prende una richiesta HTTP, ne valida la forma, chiama
+    un'operazione applicativa e trasforma il risultato in una risposta. Il *service*
+    contiene il caso d'uso: è l'unico punto che conosce il flusso completo di
+    un'operazione, apre la transazione e coordina le dipendenze. Il *repository*
+    incapsula l'accesso ai dati ed espone metodi nel linguaggio del dominio.
+
+    La regola che conta più dei nomi è la direzione: controller → service → repository, e
+    mai il contrario. Un repository che chiama un service è un errore di progettazione,
+    perché crea un ciclo e rende impossibile ragionare sui livelli separatamente. La
+    stessa regola implica che nessun oggetto del framework web deve attraversare il
+    confine: se un service riceve un `Request` o restituisce uno status code, quel
+    service è legato al web e non potrà essere richiamato da un job, da una CLI o da un
+    consumer di coda.
+
+    Il test mentale che uso per capire se la stratificazione regge è proprio questo:
+    *immagina di dover eseguire la stessa operazione da un comando a riga di comando*.
+    Se serve costruire una finta richiesta HTTP, il confine è nel posto sbagliato. È una
+    domanda che spesso rivela fat controller mascherati: trecento righe che contengono
+    query, regole di business e formattazione della risposta, testabili solo avviando un
+    client HTTP.
+
+    Sulla validazione vale la pena distinguere due tipi. La validazione *di forma* -
+    campo obbligatorio, formato email, intervallo numerico - appartiene al confine e si
+    fa nel DTO in ingresso: è economica e non richiede il database. La validazione *di
+    dominio* - "questo utente può ancora aprire un ordine", "l'email non è già
+    registrata" - richiede stato e appartiene al service o all'entità, e spesso va
+    chiusa con un vincolo nel database, perché fra il controllo e la scrittura esiste una
+    finestra di concorrenza.
+
+    Infine una nota di pragmatismo, che ai colloqui fa la differenza fra chi ha letto un
+    libro e chi ha mantenuto un sistema: non tutte le operazioni meritano tre livelli.
+    Per un CRUD in cui il service si limita a inoltrare al repository, quel livello non
+    aggiunge nulla e si può tollerare che il controller chiami direttamente il
+    repository, purché la scelta sia dichiarata e coerente. Il problema non è la
+    semplificazione: è la semplificazione a macchia di leopardo, dove metà del codice
+    segue una regola e metà un'altra.
   key_points:
-    - "Controller (o handler, o route): traduce HTTP in chiamate applicative. Valida l'input, gestisce status code, non contiene regole di business"
+    - "Controller (o handler, o route): traduce HTTP in chiamate applicative. Valida la forma dell'input, gestisce status code, non contiene regole di business"
     - "Service (o use case, o application layer): orchestra la logica. È l'unico livello che conosce il flusso completo di un'operazione"
     - "Repository: incapsula l'accesso ai dati. Espone metodi di dominio, non SQL"
     - "La regola vera: controller -> service -> repository e mai il contrario. Un repository che chiama un service è un errore di design"
-    - "Nessun oggetto del framework HTTP deve attraversare il service layer: se il service riceve un Request, è legato al web e non lo puoi riusare in un job o in una CLI"
+    - "Nessun oggetto del framework HTTP deve attraversare il service layer: se il service riceve un Request, non lo puoi riusare in un job o in una CLI"
+    - "Test mentale: potrei invocare questa operazione da una CLI? Se serve una finta richiesta HTTP, il confine è sbagliato"
+    - "Validazione di forma nel DTO al confine; validazione di dominio nel service o nell'entità, con un vincolo DB a chiudere la finestra di concorrenza"
     - "Il sintomo di un'applicazione mal stratificata è il fat controller: 300 righe con query, regole di business e formattazione nello stesso metodo"
-    - "Per un CRUD semplice il service che si limita a inoltrare al repository è accettabile: non tutte le operazioni meritano tre livelli"
+    - "Per un CRUD semplice il service che si limita a inoltrare al repository è accettabile: la coerenza conta più della purezza"
+  examples:
+    - title: Lo stesso caso d'uso, prima e dopo
+      language: python
+      code: |-
+        # PRIMA: fat controller. Testabile solo con un client HTTP, non riusabile.
+        @router.post("/ordini")
+        async def crea_ordine(req: Request, db=Depends(get_db)):
+            dati = await req.json()
+            if not dati.get("articoli"):
+                return JSONResponse({"errore": "articoli mancanti"}, status_code=400)
+            utente = await db.fetch_one("SELECT * FROM utenti WHERE id=:i", i=dati["utente_id"])
+            if utente["credito_cents"] < sum(a["prezzo"] for a in dati["articoli"]):
+                return JSONResponse({"errore": "credito insufficiente"}, status_code=422)
+            ...   # altre 200 righe fra query, regole e formattazione
+
+        # DOPO: ogni livello fa una cosa sola.
+        @router.post("/ordini", response_model=OrdineOut, status_code=201)
+        async def crea_ordine(corpo: OrdineIn, servizio: OrdiniService = Depends()):
+            ordine = await servizio.crea(corpo.utente_id, corpo.articoli)   # niente HTTP qui
+            return OrdineOut.from_domain(ordine)
+            # le eccezioni di dominio diventano status code in un handler centrale
+      note: >-
+        Il secondo controller si legge in tre righe e il service si testa senza rete: sono
+        due proprietà che si guadagnano insieme, non per caso.
+    - title: Le due validazioni, in due posti diversi
+      language: python
+      code: |-
+        # Forma: al confine, costa nulla, non tocca il database
+        class OrdineIn(BaseModel):
+            utente_id: UUID
+            articoli: list[ArticoloIn] = Field(min_length=1, max_length=100)
+
+        # Dominio: nel service, e chiusa da un vincolo perché fra controllo e
+        # scrittura c'è sempre una finestra
+        class OrdiniService:
+            async def crea(self, utente_id: UUID, articoli: list[ArticoloIn]) -> Ordine:
+                utente = await self.utenti.trova(utente_id) or raise_(UtenteInesistente())
+                if not utente.puo_ordinare():            # regola che appartiene all'entità
+                    raise UtenteSospeso(utente_id)
+                async with self.uow:                      # confine transazionale
+                    ordine = Ordine.nuovo(utente, articoli)
+                    await self.ordini.salva(ordine)
+                    return ordine
+      note: >-
+        `puo_ordinare()` sta sull'entità e non nel service: è una regola che riguarda un
+        solo oggetto, e tenerla lì è ciò che evita il modello anemico.
+  trade_offs:
+    - option: Tre livelli pieni
+      pros: Confini chiari, testabilità, riuso da CLI e job, sostituibilità
+      cons: Più file e più passaggi per operazioni banali
+      when: Domini con regole vere, applicazioni destinate a crescere
+    - option: Controller + repository (senza service)
+      pros: Meno cerimonia, adatto a CRUD puri
+      cons: Non c'è un posto naturale per la transazione e per le regole quando arriveranno
+      when: CRUD dichiaratamente senza logica, endpoint di sola lettura
+    - option: Vertical slice per caso d'uso
+      pros: Tutto ciò che serve a un'operazione sta insieme, pochissimo salto fra file
+      cons: Duplicazione fra slice simili, meno riuso evidente
+      when: Progetti con molti casi d'uso indipendenti
+  numbers:
+    - "Un service che riceve più di 5-6 dipendenze nel costruttore sta quasi sempre facendo più di un caso d'uso"
+    - "Un controller oltre le 20-30 righe per endpoint contiene, quasi certamente, logica che appartiene altrove"
   interview_answer: >-
     Organizzo per livelli con una direzione di dipendenza sola: il controller traduce la
     richiesta HTTP e non sa nulla di regole, il service contiene la logica e orchestra, il
     repository sa come si leggono e scrivono i dati. Il controllo che faccio per capire se
     la stratificazione regge è provare a immaginare di chiamare la stessa operazione da un
     comando CLI o da un consumer di coda: se il service ha bisogno dell'oggetto Request o
-    restituisce uno status code, non è riusabile e il confine è sbagliato. Sul dogmatismo
-    sono cauto: se un'operazione è una lettura secca, un service che inoltra al repository
-    senza aggiungere niente è solo rumore, e in quei casi lo salto dichiarandolo.
+    restituisce uno status code, non è riusabile e il confine è sbagliato. Divido anche le
+    validazioni: quelle di forma stanno nel DTO al confine, quelle di dominio nel service o
+    nell'entità, e dove c'è concorrenza le chiudo con un vincolo nel database. Detto
+    questo, non applico tre livelli a un CRUD che non ha logica: l'importante è che la
+    scelta sia dichiarata e uniforme.
+  senior_signals:
+    - "Insiste sulla direzione delle dipendenze più che sui nomi dei livelli"
+    - "Usa il test della CLI per verificare i confini"
+    - "Separa validazione di forma e di dominio, e chiude quest'ultima con un vincolo"
+    - "Ammette che per un CRUD tre livelli possono essere cerimonia inutile"
   pitfalls:
     - "Fat controller: la logica finisce nell'handler HTTP e diventa impossibile da testare senza un client HTTP"
     - "Service anemico che inoltra e basta su ogni singola operazione, aggiungendo un livello senza valore"
     - "Oggetti del framework (Request, Response, sessione) che filtrano nei livelli sottostanti"
     - "Repository che restituisce il risultato di una query grezza invece di entità di dominio"
-  follow_up_questions:
-    - "Dove metti una validazione che richiede una query al database?"
-    - "Il service può chiamare un altro service? Con quali rischi?"
+    - "Regole applicate a metà del progetto e non all'altra metà"
+  follow_ups:
+    - question: Dove metti una validazione che richiede una query al database?
+      answer: >-
+        Nel service, perché ha bisogno di stato e quindi non appartiene al confine HTTP.
+        Ma la tratto come una verifica ottimistica: fra il controllo e la scrittura esiste
+        una finestra in cui un'altra richiesta può cambiare le carte, quindi il vincolo
+        vero lo metto nel database (UNIQUE, CHECK, foreign key) e gestisco la violazione
+        traducendola nello stesso errore di dominio. Così il messaggio è gentile nel caso
+        normale e la correttezza è garantita comunque.
+    - question: Il service può chiamare un altro service? Con quali rischi?
+      answer: >-
+        Sì, ma con due cautele. La prima è il rischio di cicli: se A chiama B e B chiama
+        A, i confini sono sbagliati e conviene estrarre un caso d'uso di livello
+        superiore o un servizio di dominio condiviso. La seconda è la transazione: se
+        ciascuno apre la propria, l'operazione complessiva non è più atomica. Per questo
+        preferisco che la transazione sia aperta dal caso d'uso più esterno e che i
+        servizi interni la ricevano, invece di crearne una propria.
+    - question: Dove metti la logica di autorizzazione in questa struttura?
+      answer: >-
+        La parte dichiarativa - questa rotta richiede un utente autenticato con un certo
+        ruolo - sta nel controller, perché è una questione di confine. La parte che
+        dipende dai dati - questo ordine appartiene a chi lo sta chiedendo - sta nel
+        service o, meglio ancora, strutturalmente nel repository, che filtra sempre per
+        proprietario. Mettere tutto nel controller è la strada più rapida verso un IDOR
+        il giorno in cui qualcuno chiamerà lo stesso caso d'uso da un altro canale.
+  related: [pat-02-repository, pat-03-service-layer, pat-06-hexagonal-clean, pat-10-project-structure]
   resources:
     - title: "Martin Fowler - Patterns of Enterprise Application Architecture"
-      url: "https://martinfowler.com/eaaCatalog/"
+      url: "https://martinfowler.com/books/eaa.html"
+      kind: book
+    - title: "Cosmic Python - Architecture Patterns with Python"
+      url: "https://www.cosmicpython.com/book/preface.html"
       kind: book
 
 - id: pat-02-repository
@@ -54,14 +190,109 @@
     Il repository è una collezione in memoria finta: nasconde al resto dell'applicazione
     da dove arrivano i dati. Il beneficio principale non è poter cambiare database, cosa
     che non succede quasi mai, ma poter testare la logica di business senza database.
+  deep_dive: |-
+    La metafora originale di Fowler è esatta e vale la pena citarla: un repository si
+    comporta come una *collezione in memoria* di oggetti di dominio. Chi lo usa chiede
+    "dammi gli abbonamenti in scadenza" e riceve oggetti, senza sapere se dietro c'è
+    Postgres, un file o una chiamata HTTP. Da questa metafora discendono tutte le regole
+    pratiche: metodi che parlano il linguaggio del dominio, entità in uscita, nessun
+    dettaglio di persistenza che trapela.
+
+    Il beneficio che si cita per primo - poter cambiare database - è quasi sempre falso:
+    nessuno passa da Postgres a Mongo in un progetto vivo. Il beneficio vero è un altro:
+    i test. Con un repository in memoria, i test della logica di business girano in
+    millisecondi, senza container, senza fixture, senza pulizia dello stato fra un test e
+    l'altro. Quando una suite di dominio passa da minuti a secondi, cambia il modo in cui
+    si lavora.
+
+    Il confine giusto è l'*aggregato*, non la tabella. Un repository per `Ordine`
+    restituisce ordini completi delle loro righe, perché quello è l'oggetto che cambia
+    insieme; un repository per `RigaOrdine` esporrebbe un pezzo che non ha senso da solo
+    e permetterebbe di violare gli invarianti. La regola "un repository per tabella"
+    produce codice che rispecchia lo schema invece del dominio, che è esattamente ciò
+    che il pattern vorrebbe evitare.
+
+    Ci sono due modi di sbagliarlo che vale la pena riconoscere. Il primo è il
+    *repository generico* con un metodo `query(filtro)`: espone la sintassi della
+    persistenza travestita, e chi lo usa finisce per costruire query, quindi
+    l'astrazione non esiste più. Il secondo è la *leaky abstraction* tipica degli ORM: il
+    repository restituisce entità con lazy loading attivo, e le query partono più tardi,
+    dentro il service o addirittura nel template - da cui gli N+1 che appaiono solo in
+    produzione.
+
+    Restano due domande legittime. Le *query di sola lettura complesse* - il riepilogo
+    che richiederebbe sei join - non devono passare per forza dal repository di dominio:
+    è perfettamente accettabile avere un percorso di lettura separato che proietta
+    direttamente su un DTO, ed è la forma leggera di CQRS. E con ORM che sono già
+    repository (Django ORM, Entity Framework), aggiungerne uno sopra va giustificato:
+    se si ottiene solo `save/find_by_id/delete`, si sta riscrivendo l'ORM con più
+    codice e meno funzionalità.
   key_points:
-    - "Espone metodi nel linguaggio del dominio: find_active_subscribers(), non select_where(status=1)"
+    - "Espone metodi nel linguaggio del dominio: trova_abbonamenti_in_scadenza(), non select_where(status=1)"
     - "Restituisce entità di dominio, non righe, non ResultSet, non DTO del database"
     - "Rende testabile la logica: in test si passa un'implementazione in memoria e i test girano in millisecondi"
+    - "Cambiare database è il beneficio che non si realizza quasi mai: il beneficio vero è la velocità dei test"
     - "Non è un wrapper 1:1 sull'ORM: se hai solo save/find_by_id/delete stai riscrivendo l'ORM con più codice"
     - "Un repository per aggregato, non uno per tabella: è il confine del dominio a decidere, non lo schema"
+    - "Il repository non decide quando fare commit: quello è compito dell'Unit of Work al livello del caso d'uso"
     - "Le query complesse di sola lettura spesso non passano dal repository: è legittimo avere un percorso di lettura separato (vedi CQRS)"
-    - "Con un ORM come Django ORM o Entity Framework il repository è già in parte fornito: aggiungerne un altro sopra va giustificato"
+    - "Attenzione alla leaky abstraction: entità con lazy loading attivo fanno partire query fuori dal repository"
+  examples:
+    - title: L'interfaccia parla di dominio, non di SQL
+      language: python
+      code: |-
+        from typing import Protocol
+
+        class OrdiniRepository(Protocol):
+            async def trova(self, ordine_id: OrdineId) -> Ordine | None: ...
+            async def salva(self, ordine: Ordine) -> None: ...
+            async def in_attesa_di_pagamento_da(self, minuti: int) -> list[Ordine]: ...
+
+        # NO: questa è la persistenza travestita. Chi la usa costruisce query.
+        class RepositoryGenerico(Protocol):
+            async def query(self, tabella: str, filtro: dict, order_by: str) -> list[dict]: ...
+      note: >-
+        Il nome del metodo è il test: se per capire cosa fa devo leggere l'SQL dentro,
+        l'astrazione non sta facendo il suo lavoro.
+    - title: La stessa interfaccia, due implementazioni
+      language: python
+      code: |-
+        class OrdiniPostgres:
+            def __init__(self, conn): self.conn = conn
+            async def trova(self, ordine_id):
+                riga = await self.conn.fetchrow(
+                    "SELECT * FROM ordini WHERE id = $1", ordine_id)
+                return Ordine.da_riga(riga) if riga else None     # entità, non dict
+
+        class OrdiniInMemoria:                 # per i test: nessun database, nessun IO
+            def __init__(self): self.dati: dict[OrdineId, Ordine] = {}
+            async def trova(self, ordine_id): return self.dati.get(ordine_id)
+            async def salva(self, ordine): self.dati[ordine.id] = ordine
+
+        # Il test del dominio non sa nemmeno che esiste un database.
+        async def test_ordine_scaduto_viene_annullato():
+            repo = OrdiniInMemoria()
+            servizio = OrdiniService(repo, orologio=OrologioFinto("2026-02-11T10:00"))
+            ...
+      note: >-
+        L'implementazione in memoria va tenuta onesta: se non applica gli stessi vincoli
+        (unicità, obbligatorietà), i test passano e la produzione no.
+  trade_offs:
+    - option: Repository con interfaccia di dominio
+      pros: Test veloci, dominio indipendente, intenzioni esplicite nel nome dei metodi
+      cons: Codice in più, rischio di duplicare ciò che l'ORM già offre
+      when: Domini con regole, progetti destinati a durare
+    - option: ORM usato direttamente nel service
+      pros: Meno codice, tutte le funzionalità dell'ORM disponibili
+      cons: Test che richiedono un database, logica legata alla persistenza
+      when: CRUD, prototipi, script
+    - option: Repository per scrittura + query dirette per lettura
+      pros: Invarianti protetti dove servono, letture efficienti senza forzature
+      cons: Due percorsi da mantenere, duplicazione apparente
+      when: Schermate di riepilogo e report accanto a un dominio ricco
+  numbers:
+    - "Una suite di dominio con repository in memoria gira in millisecondi; la stessa con database in container, in minuti"
+    - "Un repository con più di 10-15 metodi è di solito un aggregato troppo grande o due aggregati fusi"
   interview_answer: >-
     Lo uso per tenere la logica di business indipendente dalla persistenza, e il guadagno
     che mi interessa davvero è la testabilità: posso scrivere i test del dominio con un
@@ -69,17 +300,50 @@
     metodo faccio attenzione a due cose. La prima è che l'interfaccia deve parlare il
     linguaggio del dominio, quindi metodi come trova_abbonamenti_in_scadenza e non una
     query generica che lascia passare i dettagli SQL. La seconda è che ne definisco uno per
-    aggregato e non uno per tabella, perché altrimenti sto solo rispecchiando lo schema. Dove
-    il pattern non lo applico è sulle query di reporting: lì una lettura diretta, magari con
-    SQL scritto a mano, è più onesta che piegare il repository.
+    aggregato e non uno per tabella, perché è il confine del dominio a decidere. Per le
+    query di reporting complesse non forzo il repository: uso un percorso di lettura
+    separato che proietta su un DTO, che è la forma leggera di CQRS.
+  senior_signals:
+    - "Smonta il mito del cambio di database e porta la testabilità come beneficio reale"
+    - "Definisce il confine sull'aggregato e non sulla tabella"
+    - "Riconosce quando il repository è ridondante rispetto all'ORM"
+    - "Ammette un percorso di lettura separato invece di piegare il repository ai report"
   pitfalls:
     - "Repository generico con metodi tipo query(filtro) che lascia trapelare i dettagli della persistenza"
     - "Un repository per ogni tabella, che replica lo schema invece del dominio"
     - "Leaky abstraction: il repository restituisce oggetti con lazy loading attivo e le query partono dal service"
     - "Aggiungere un repository sopra un ORM che è già un'astrazione, raddoppiando il codice senza guadagno"
-  follow_up_questions:
-    - "Come gestisci una query che serve solo a una schermata di report?"
-    - "Il repository dovrebbe gestire le transazioni? Perché no?"
+    - "Implementazione in memoria che non applica i vincoli reali: i test passano, la produzione no"
+  follow_ups:
+    - question: Come gestisci una query che serve solo a una schermata di report?
+      answer: >-
+        Non la faccio passare dal repository di dominio: creo un percorso di lettura
+        separato, una query che proietta direttamente sul DTO della schermata. Caricare
+        aggregati completi per poi buttarne via il 90% è sprecato e, peggio, costringe a
+        piegare il modello di dominio a esigenze di visualizzazione. È la forma leggera di
+        CQRS: stesso database, due percorsi di codice.
+    - question: Il repository dovrebbe gestire le transazioni? Perché no?
+      answer: >-
+        No. Se ogni metodo del repository fa commit, un'operazione che tocca tre entità
+        produce tre commit e un errore a metà lascia dati incoerenti. La transazione
+        appartiene al caso d'uso, che è l'unico a sapere dove comincia e dove finisce
+        l'operazione: è il compito dell'Unit of Work. Il repository partecipa alla
+        transazione corrente, non la governa.
+    - question: Come eviti che l'implementazione in memoria diverga da quella reale?
+      answer: >-
+        Scrivendo una suite di test *sull'interfaccia* ed eseguendola contro entrambe le
+        implementazioni: gli stessi test, una volta con quella in memoria e una volta
+        contro un database reale in CI. Così i comportamenti che contano - unicità,
+        ordinamento, errori - restano allineati, e la versione in memoria resta un doppio
+        fedele invece di una comoda finzione.
+  related: [pat-01-layered-architecture, pat-08-unit-of-work, pat-11-cqrs, eng-01-testing]
+  resources:
+    - title: "Martin Fowler - Repository"
+      url: "https://martinfowler.com/eaaCatalog/repository.html"
+      kind: article
+    - title: "Cosmic Python - Repository Pattern"
+      url: "https://www.cosmicpython.com/book/chapter_02_repository.html"
+      kind: book
 
 - id: pat-03-service-layer
   title: Service layer e use case
@@ -92,31 +356,177 @@
     Il service layer definisce cosa l'applicazione sa fare: un metodo per ogni operazione
     di business significativa. È il punto in cui si aprono le transazioni, si orchestrano
     le dipendenze e si pubblicano gli eventi.
+  deep_dive: |-
+    Un service layer ben fatto è la *risposta alla domanda "cosa sa fare questa
+    applicazione?"*: scorrendo i metodi si legge l'elenco dei casi d'uso -
+    `registra_utente`, `conferma_ordine`, `rimborsa_pagamento`. Se invece si legge
+    `get_ordine`, `set_stato`, `update_riga`, non è un service layer: è un CRUD con un
+    nome diverso, e la logica sarà finita da qualche altra parte, tipicamente nei
+    controller.
+
+    Tre responsabilità appartengono naturalmente a questo livello. Il *confine
+    transazionale*: la transazione si apre qui, non nel repository, perché solo il caso
+    d'uso sa dove l'operazione comincia e finisce. L'*orchestrazione*: chiamare i
+    repository, i servizi esterni, pubblicare gli eventi nell'ordine giusto. E la
+    *traduzione dei fallimenti* in errori di dominio significativi.
+
+    Quello che invece *non* appartiene al service è la logica che riguarda un singolo
+    oggetto. "Questo ordine può essere annullato?" è una domanda a cui deve saper
+    rispondere l'ordine, non il servizio. Quando tutte le regole migrano nei service e le
+    entità diventano contenitori di dati con getter e setter, si ottiene l'*anemic domain
+    model*: formalmente orientato agli oggetti, sostanzialmente procedurale, con il
+    difetto pratico che le stesse regole vengono riscritte in più service e prima o poi
+    divergono.
+
+    Esiste una distinzione utile fra *application service* e *domain service*. Il primo
+    coordina infrastruttura e dominio ed è il caso d'uso vero e proprio. Il secondo
+    contiene logica di dominio che non appartiene naturalmente a nessuna entità - il
+    calcolo di un prezzo che dipende da listino, cliente e promozioni - e non tocca
+    infrastruttura. Tenerli separati evita di riempire il caso d'uso di calcoli che
+    dovrebbero essere testabili da soli.
+
+    Un segnale diagnostico che vale la pena conoscere: un service che ne chiama altri tre
+    in cascata indica quasi sempre che manca un caso d'uso di livello superiore, oppure
+    che i servizi sono stati divisi per *entità* (`UtentiService`, `OrdiniService`,
+    `PagamentiService`) invece che per *caso d'uso*. La divisione per entità porta
+    fatalmente a servizi che si chiamano fra loro in cerchio, con transazioni annidate e
+    dipendenze circolari.
+
+    Ultima regola: il service restituisce dati di dominio, non risposte HTTP. Chi lo
+    chiama - un controller, un job, un consumer - decide come presentarli. È la stessa
+    regola della direzione delle dipendenze, vista dal lato dell'output.
   key_points:
     - "Un metodo = un caso d'uso completo: registra_utente(), conferma_ordine(). Non get/set travestiti"
+    - "Scorrendo i metodi si deve leggere cosa sa fare l'applicazione"
     - "È il confine transazionale naturale: la transazione si apre e si chiude qui, non nel repository"
     - "Orchestra, non calcola: le regole che riguardano un singolo oggetto stanno nell'oggetto stesso"
     - "Domain service vs application service: il primo contiene logica di dominio che non appartiene a una singola entità, il secondo coordina infrastruttura e dominio"
     - "Attenzione al modello anemico: se tutte le regole stanno nei service e le entità sono solo contenitori di dati, hai scritto codice procedurale con nomi da OOP"
     - "Un service che ne chiama altri tre in cascata è un segnale: probabilmente manca un caso d'uso di livello superiore"
+    - "Servizi divisi per entità invece che per caso d'uso finiscono per chiamarsi in cerchio"
     - "Restituisce dati, non risposte HTTP: chi lo chiama decide come presentarli"
+  examples:
+    - title: Anemico contro ricco, sullo stesso dominio
+      language: python
+      code: |-
+        # ANEMICO: l'entità è una struttura dati, la regola vive (e si duplica) nel service.
+        class Ordine:
+            stato: str
+            creato_il: datetime
+
+        class OrdiniService:
+            async def annulla(self, ordine_id):
+                o = await self.repo.trova(ordine_id)
+                if o.stato not in ("creato", "pagato"):          # regola qui...
+                    raise NonAnnullabile()
+                if (utcnow() - o.creato_il) > timedelta(days=14):
+                    raise NonAnnullabile()
+                o.stato = "annullato"
+
+        # RICCO: la regola sta dove stanno i dati; il service orchestra e basta.
+        @dataclass
+        class Ordine:
+            stato: StatoOrdine
+            creato_il: datetime
+
+            def puo_essere_annullato(self, adesso: datetime) -> bool:
+                return (self.stato in (StatoOrdine.CREATO, StatoOrdine.PAGATO)
+                        and adesso - self.creato_il <= timedelta(days=14))
+
+            def annulla(self, adesso: datetime) -> OrdineAnnullato:
+                if not self.puo_essere_annullato(adesso):
+                    raise NonAnnullabile(self.id)
+                self.stato = StatoOrdine.ANNULLATO
+                return OrdineAnnullato(self.id, adesso)      # evento di dominio
+      note: >-
+        La versione ricca si testa senza repository e senza mock, e la regola esiste in un
+        punto solo: è questo che impedisce alle copie di divergere.
+    - title: Il caso d'uso, con transazione ed evento
+      language: python
+      code: |-
+        class AnnullaOrdine:                       # un caso d'uso, una classe
+            def __init__(self, uow, ordini, eventi, orologio):
+                self.uow, self.ordini, self.eventi, self.orologio = uow, ordini, eventi, orologio
+
+            async def esegui(self, ordine_id: OrdineId) -> None:
+                async with self.uow:                                  # confine transazionale
+                    ordine = await self.ordini.trova(ordine_id)
+                    if ordine is None:
+                        raise OrdineInesistente(ordine_id)
+                    evento = ordine.annulla(self.orologio.adesso())   # regola nell'entità
+                    await self.ordini.salva(ordine)
+                    await self.eventi.pubblica(evento)                # outbox, stessa transazione
+      note: >-
+        L'orologio iniettato non è pedanteria: è ciò che rende il test deterministico
+        senza congelare il tempo globale del processo.
+  trade_offs:
+    - option: Una classe per caso d'uso
+      pros: Dipendenze minime e visibili, facilissima da testare, nomi espliciti
+      cons: Molte classi piccole, un po' di ripetizione nell'assemblaggio
+      when: Domini con molti casi d'uso distinti
+    - option: Un service per aggregato
+      pros: Meno file, dipendenze condivise fra metodi affini
+      cons: Cresce fino a diventare una classe da mille righe con dieci dipendenze
+      when: Domini piccoli, pochi casi d'uso per aggregato
+    - option: Logica nel controller
+      pros: Nessun livello intermedio, velocissimo da scrivere
+      cons: Non riusabile, testabile solo via HTTP, transazioni sparse
+      when: Prototipi e strumenti interni usa e getta
+  numbers:
+    - "Oltre 5-6 dipendenze in un caso d'uso: quasi sempre sta facendo più di una cosa"
+    - "Un service che supera le 300-400 righe è quasi sempre un raggruppamento per entità mascherato"
   interview_answer: >-
     Il service layer è dove vive un'operazione di business completa, con un metodo per caso
-    d'uso. Ci metto tre cose: il confine della transazione, l'orchestrazione delle
-    dipendenze e la pubblicazione degli eventi. Quello che cerco di NON metterci sono le
-    regole che riguardano un singolo oggetto: se devo sapere se un ordine può essere
-    annullato, quella è una domanda che deve saper rispondere l'ordine stesso, altrimenti
-    finisco con il modello anemico, cioè entità che sono solo strutture dati e tutta la
-    logica sparsa in service procedurali. È il difetto più comune che vedo e si riconosce
-    subito: getter e setter ovunque e nessun metodo che esprima un comportamento.
+    d'uso: scorrendo i nomi si deve capire cosa sa fare l'applicazione. Ci metto tre cose:
+    il confine della transazione, l'orchestrazione delle dipendenze e la pubblicazione degli
+    eventi. Quello che cerco di non metterci sono le regole che riguardano un singolo
+    oggetto: se devo sapere se un ordine può essere annullato, quella è una domanda che deve
+    saper rispondere l'ordine stesso, altrimenti finisco con il modello anemico, cioè entità
+    che sono solo strutture dati e regole duplicate in più service. Divido i servizi per
+    caso d'uso e non per entità, perché la divisione per entità porta a servizi che si
+    chiamano fra loro in cerchio, con transazioni annidate.
+  senior_signals:
+    - "Usa il service layer come documentazione dei casi d'uso"
+    - "Riconosce e sa nominare il modello anemico, spiegandone il danno pratico"
+    - "Distingue application service e domain service"
+    - "Vede nella cascata di service un sintomo di confini sbagliati"
   pitfalls:
     - "Modello anemico: entità senza comportamento e service enormi"
     - "Service che restituisce oggetti HTTP o codici di stato"
     - "Transazioni aperte nel repository invece che nel service, con più commit per operazione"
     - "Service divisi per entità invece che per caso d'uso, che finiscono per chiamarsi fra loro in cerchio"
-  follow_up_questions:
-    - "Cos'è un anemic domain model e perché è considerato un anti-pattern?"
-    - "Dove apri la transazione in un'operazione che tocca tre repository?"
+    - "Tempo, id casuali e generatori presi da funzioni globali: test non deterministici"
+  follow_ups:
+    - question: Cos'è un anemic domain model e perché è considerato un anti-pattern?
+      answer: >-
+        È un modello in cui le entità contengono solo dati e tutte le regole stanno nei
+        service. Il difetto non è estetico: la stessa regola finisce riscritta in più
+        punti - il service di creazione, quello di modifica, il job notturno - e prima o
+        poi le copie divergono, con comportamenti diversi a seconda del percorso. Mettere
+        la regola sull'oggetto la rende unica, testabile da sola e impossibile da
+        aggirare.
+    - question: Dove apri la transazione in un'operazione che tocca tre repository?
+      answer: >-
+        Nel caso d'uso, una sola volta, con una Unit of Work che i tre repository
+        condividono. Se ciascun repository aprisse la propria, avrei tre commit separati
+        e un errore a metà lascerebbe lo stato incoerente. Dentro quella transazione
+        evito chiamate di rete esterne, perché la latenza di qualcun altro diventerebbe
+        contesa sul mio database: quelle vanno prima, oppure dopo tramite outbox.
+    - question: Come testi un caso d'uso senza database e senza rete?
+      answer: >-
+        Iniettando i collaboratori: repository in memoria, orologio finto, generatore di
+        id deterministico, publisher di eventi che accumula in una lista. Il test allora
+        verifica il comportamento osservabile - lo stato dell'aggregato e gli eventi
+        pubblicati - invece delle chiamate ai mock. È anche il motivo per cui preferisco
+        la constructor injection: rende evidente quali collaboratori vanno sostituiti.
+  related: [pat-01-layered-architecture, pat-08-unit-of-work, pat-07-ddd-tactical, pat-05-dependency-injection]
+  resources:
+    - title: "Martin Fowler - Anemic Domain Model"
+      url: "https://martinfowler.com/bliki/AnemicDomainModel.html"
+      kind: article
+    - title: "Martin Fowler - Service Layer"
+      url: "https://martinfowler.com/eaaCatalog/serviceLayer.html"
+      kind: article
 
 - id: pat-04-dto-entity-model
   title: DTO, entity e modello di dominio
@@ -130,15 +540,116 @@
     con l'esterno, l'entity è la riga persistita, il modello di dominio è il concetto di
     business con il suo comportamento. Tenerli separati costa codice; unirli costa
     flessibilità.
+  deep_dive: |-
+    I tre oggetti rispondono a tre domande diverse. Il *DTO* risponde a "cosa può mandare
+    e ricevere un client": è piatto, senza comportamento, ed è un contratto pubblico.
+    L'*entity di persistenza* risponde a "come sono fatti i dati sul disco": rispecchia
+    lo schema, ha annotazioni dell'ORM, chiavi, relazioni. Il *modello di dominio*
+    risponde a "cosa significa questo concetto nel business e cosa sa fare": ha
+    comportamento e invarianti.
+
+    Le due ragioni per cui separare DTO ed entity non sono estetiche, sono pratiche. La
+    prima è la sicurezza: se il corpo della richiesta viene deserializzato direttamente
+    nell'entity, il client può valorizzare campi che non dovrebbe toccare - è
+    l'*over-posting*, il cui esempio canonico è `is_admin: true` in un aggiornamento di
+    profilo. Un DTO in ingresso che elenca solo i campi modificabili rende l'attacco
+    impossibile per costruzione, invece di affidarlo alla memoria di chi scrive
+    l'endpoint. La seconda è l'evoluzione: finché il DTO è separato, rinominare una
+    colonna è un refactor interno; se l'entity è esposta, ogni refactor è una modifica
+    breaking per tutti i client.
+
+    Un dettaglio che si dimentica spesso: i DTO in ingresso e in uscita *non sono lo
+    stesso oggetto*. Quello che accetti non è quello che restituisci - la password entra
+    e non esce, l'id esce e non entra, i timestamp li genera il server. Usare un unico
+    DTO per entrambi costringe a rendere opzionale metà dei campi, e da quel momento
+    nessuno sa più cosa sia obbligatorio davvero.
+
+    Sul mapping vale una regola: esplicito e in un punto solo. Le librerie di
+    auto-mapping basate su convenzioni sembrano un risparmio, ma spostano gli errori dal
+    compilatore al runtime: un campo rinominato smette silenziosamente di essere
+    copiato. Una funzione di conversione scritta a mano è verbosa e si rompe rumorosamente,
+    che è esattamente ciò che si vuole.
+
+    Quanto alla domanda "entity e domain model devono essere separati?", la risposta
+    onesta dipende dalla ricchezza del dominio. In progetti piccoli o in domini
+    sostanzialmente CRUD, farli coincidere è ragionevole e risparmia molto codice: si
+    accetta che l'oggetto di dominio porti le annotazioni dell'ORM. In domini con regole
+    complesse la separazione ripaga, perché permette al modello di avere la forma giusta
+    per le regole invece che per lo schema - tipi valore, invarianti nel costruttore,
+    stati impossibili da rappresentare. Ciò che conviene separare quasi sempre, invece,
+    è il DTO: costa poco e protegge da due problemi concreti.
   key_points:
     - "DTO (Data Transfer Object): struttura piatta e senza logica, usata per entrare e uscire dall'applicazione. È il contratto pubblico"
     - "Entity di persistenza: mappa lo schema del database, con annotazioni o metadati dell'ORM"
     - "Domain model: contiene le regole. Un Ordine sa dire se può essere annullato"
-    - "Separare DTO ed entity evita due problemi concreti: l'over-posting (il client manda campi che non dovrebbe poter scrivere, tipo is_admin) e il fatto che ogni refactor dello schema diventi breaking per l'API"
+    - "Separare DTO ed entity evita due problemi concreti: l'over-posting (il client scrive campi che non dovrebbe, tipo is_admin) e il fatto che ogni refactor dello schema diventi breaking"
     - "DTO distinti in ingresso e in uscita: quello che accetti non è quello che restituisci (la password entra, non esce)"
-    - "Il mapping si fa in un punto solo, esplicito. Le librerie di auto-mapping nascondono i bug dietro la magia"
-    - "In progetti piccoli è legittimo far coincidere entity e domain model. DTO ed entity, invece, conviene separarli quasi sempre: il costo è basso e il beneficio è di sicurezza"
+    - "Il mapping si fa in un punto solo, esplicito. Le librerie di auto-mapping spostano gli errori dal compilatore al runtime"
+    - "In progetti piccoli è legittimo far coincidere entity e domain model. DTO ed entity, invece, conviene separarli quasi sempre"
+    - "Il DTO in uscita è anche il punto in cui si applica il filtro sui dati sensibili: se un campo non è nel DTO, non può trapelare"
     - "In Python con Pydantic e FastAPI i DTO sono i modelli di request/response; in Java tipicamente record o class dedicate"
+  examples:
+    - title: Over-posting, e come sparisce con un DTO
+      language: python
+      code: |-
+        # VULNERABILE: il corpo finisce direttamente nell'entity.
+        @router.patch("/utenti/{id}")
+        async def aggiorna(id: UUID, corpo: dict, db=Depends(get_db)):
+            await db.execute(update(Utente).where(Utente.id == id).values(**corpo))
+            # corpo = {"nome": "Mario", "is_admin": true}  ->  promozione gratuita
+
+        # SICURO: il DTO elenca ciò che è modificabile. Tutto il resto viene ignorato.
+        class UtentePatch(BaseModel):
+            model_config = ConfigDict(extra="forbid")     # campi sconosciuti = errore 422
+            nome: str | None = Field(default=None, max_length=80)
+            citta: str | None = None
+
+        @router.patch("/utenti/{id}", response_model=UtenteOut)
+        async def aggiorna(id: UUID, corpo: UtentePatch, servizio: UtentiService = Depends()):
+            return UtenteOut.from_domain(await servizio.aggiorna(id, corpo.model_dump(exclude_none=True)))
+      note: >-
+        `extra="forbid"` trasforma un tentativo di over-posting in un errore esplicito
+        invece che in un campo silenziosamente ignorato: molto più facile da diagnosticare.
+    - title: Tre DTO per lo stesso concetto
+      language: python
+      code: |-
+        class UtenteCreate(BaseModel):        # IN: cosa accetto
+            email: EmailStr
+            password: SecretStr               # entra...
+            nome: str
+
+        class UtenteOut(BaseModel):           # OUT: cosa restituisco
+            id: UUID
+            email: EmailStr
+            nome: str
+            creato_il: datetime               # ...e la password non c'è: non può trapelare
+
+        class UtenteAdminOut(UtenteOut):      # OUT per amministratori: campi in più
+            ultimo_accesso: datetime | None
+            sospeso: bool
+      note: >-
+        Il DTO in uscita è anche una difesa: aggiungere una colonna al database non la fa
+        comparire nell'API per sbaglio, perché il DTO elenca esplicitamente cosa esce.
+  trade_offs:
+    - option: DTO separati da entity
+      pros: Nessun over-posting, contratto stabile, campi sensibili impossibili da esporre
+      cons: Codice di mapping da scrivere e mantenere
+      when: Quasi sempre, il costo è basso e il beneficio è di sicurezza
+    - option: Entity esposta direttamente
+      pros: Zero mapping, sviluppo rapidissimo
+      cons: Over-posting, refactor interni che rompono i client, campi esposti per sbaglio
+      when: Prototipi, strumenti interni con vita breve
+    - option: Domain model separato dall'entity
+      pros: Il modello ha la forma delle regole, invarianti garantiti nel costruttore
+      cons: Terzo mapping, più codice, curva per il team
+      when: Domini ricchi di regole, dove la correttezza vale il costo
+    - option: Entity = domain model
+      pros: Un oggetto solo, meno codice, produttività alta
+      cons: Il modello è vincolato allo schema; le annotazioni ORM entrano nel dominio
+      when: Domini CRUD o progetti piccoli
+  numbers:
+    - "Over-posting: è uno dei rischi classici delle API (mass assignment); un DTO con extra=forbid lo chiude in una riga"
+    - "Il mapping esplicito costa 5-15 righe per entità: il confronto è con il costo di un campo sensibile esposto per sbaglio"
   interview_answer: >-
     Li tengo separati soprattutto per due ragioni pratiche, più che per purezza
     architetturale. La prima è la sicurezza: se accetto direttamente l'entity come corpo
@@ -146,18 +657,54 @@
     over-posting su un flag di amministratore. La seconda è il versioning: finché il DTO è
     un oggetto a sé, posso rinominare una colonna senza che nessun client se ne accorga; se
     espongo l'entity, ogni refactor interno diventa una modifica breaking. Uso DTO distinti
-    per ingresso e uscita, perché quello che accetto non coincide mai del tutto con quello
-    che restituisco. Sul domain model sono più pragmatico: in progetti piccoli lo faccio
-    coincidere con l'entity e lo separo solo quando le regole di business iniziano a
-    diventare consistenti.
+    in ingresso e in uscita, perché quello che accetto non è quello che restituisco, e
+    tengo il mapping esplicito in un punto solo. Se invece parliamo di separare entity e
+    modello di dominio, dipende: in un dominio CRUD li faccio coincidere senza problemi,
+    mentre dove ci sono regole vere la separazione ripaga.
+  senior_signals:
+    - "Motiva la separazione con sicurezza ed evoluzione, non con la purezza"
+    - "Usa DTO diversi in ingresso e in uscita e sa dire perché"
+    - "Ammette che entity e domain model possono coincidere in domini semplici"
+    - "Preferisce il mapping esplicito all'auto-mapping e sa spiegare il motivo"
   pitfalls:
     - "Esporre l'entity ORM direttamente nell'API: over-posting e accoppiamento allo schema"
     - "Un unico DTO per richiesta e risposta, che costringe a campi opzionali dappertutto"
     - "Mapping sparso in venti punti invece che centralizzato"
     - "Mettere logica di business nel DTO: torna a essere un modello, con due fonti di verità"
-  follow_up_questions:
-    - "Cos'è l'over-posting e come lo previene un DTO?"
-    - "Quando è accettabile far coincidere entity e domain model?"
+    - "Serializzare l'entity con `dict(entity)`: ogni colonna aggiunta domani finisce nell'API"
+  follow_ups:
+    - question: Cos'è l'over-posting e come lo previene un DTO?
+      answer: >-
+        È quando il client invia campi che non dovrebbe poter scrivere e questi finiscono
+        applicati perché il corpo viene mappato direttamente sull'entity: il caso tipico è
+        `is_admin` o `saldo`. Il DTO in ingresso elenca esplicitamente i campi
+        modificabili, quindi i campi estranei vengono ignorati o - meglio - rifiutati con
+        un errore se si configura `extra="forbid"`. La difesa diventa strutturale invece
+        che dipendere dal fatto che qualcuno si ricordi di filtrare.
+    - question: Quando è accettabile far coincidere entity e domain model?
+      answer: >-
+        Quando il dominio è sostanzialmente CRUD e le regole sono poche e semplici: il
+        costo del terzo oggetto e del suo mapping non è ripagato. Accetto che l'oggetto
+        porti le annotazioni dell'ORM e tengo comunque il comportamento nei metodi, per
+        non scivolare nel modello anemico. Se però comincio a piegare il modello alla
+        forma dello schema - campi nullable che nel dominio non avrebbero senso, stati
+        impossibili rappresentabili - è il segnale che la separazione va introdotta.
+    - question: Dove metti la validazione, nel DTO o nel dominio?
+      answer: >-
+        Entrambe, ma cose diverse. Nel DTO la validazione di forma: tipi, lunghezze,
+        formati, campi obbligatori. Nel dominio gli invarianti: un intervallo di date
+        coerente, un totale che corrisponde alla somma delle righe, uno stato che può
+        transire solo verso certi altri. La prima protegge dal client sbagliato, la
+        seconda protegge dal codice sbagliato - inclusi job e migrazioni, che il DTO non
+        attraversano mai.
+  related: [pat-01-layered-architecture, core-01-what-is-an-api, pat-07-ddd-tactical, eng-04-security]
+  resources:
+    - title: "Martin Fowler - Data Transfer Object"
+      url: "https://martinfowler.com/eaaCatalog/dataTransferObject.html"
+      kind: article
+    - title: "OWASP - Mass Assignment Cheat Sheet"
+      url: "https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html"
+      kind: doc
 
 - id: pat-05-dependency-injection
   title: Dependency injection e inversion of control
@@ -170,31 +717,181 @@
     Invece di costruirsi le proprie dipendenze, un componente le riceve dall'esterno. È
     ciò che rende il codice testabile senza mock invasivi e ciò che permette di cambiare
     implementazione senza toccare chi la usa.
+  deep_dive: |-
+    Vale la pena distinguere tre cose che si confondono. L'*inversion of control* è il
+    principio generale: non sei tu a chiamare il framework, è il framework a chiamare te.
+    La *dependency inversion* (la D di SOLID) è la regola che i moduli di alto livello
+    non devono dipendere da quelli di basso livello, ma entrambi da astrazioni. La
+    *dependency injection* è la tecnica concreta con cui si ottiene: passare le
+    dipendenze dall'esterno invece di costruirle dentro.
+
+    Fra le forme di iniezione, quella da preferire è la *constructor injection*: le
+    dipendenze compaiono nella firma, l'oggetto non può esistere in uno stato
+    parzialmente inizializzato, e il costruttore diventa documentazione. Setter e field
+    injection permettono invece oggetti a metà e nascondono le dipendenze: si scopre
+    cosa serve solo quando qualcosa esplode a runtime.
+
+    Il beneficio pratico più immediato è la testabilità, e conviene essere precisi sul
+    perché. Se una classe si costruisce da sola il client del database, per testarla devi
+    sostituire un modulo globale con una patch: il test diventa dipendente dai percorsi
+    di import e si rompe al primo refactor. Passando l'astrazione dal costruttore, il test
+    fornisce un'implementazione finta e non sa nulla di come è organizzato il codice.
+
+    Il secondo beneficio, meno citato ma altrettanto reale, è che la DI rende *visibili*
+    i problemi di progettazione. Un costruttore con otto dipendenze non è colpa della DI:
+    è la classe che sta facendo otto cose, e la firma lo dice ad alta voce. Senza
+    iniezione lo stesso accoppiamento esiste, ma resta nascosto dentro i metodi.
+
+    Un contenitore DI *non è obbligatorio*. In Python si arriva molto lontano con i
+    parametri di default, le factory e il sistema `Depends` di FastAPI; in molti
+    linguaggi la "povera" composizione manuale nel punto di avvio è perfettamente
+    sufficiente. La regola che conta è il *composition root*: esiste un solo posto in cui
+    si assembla il grafo degli oggetti, all'avvio dell'applicazione, e nessun altro
+    modulo crea le proprie dipendenze. Quando il grafo è configurato per magia e per
+    capire cosa viene iniettato serve il debugger, il container è diventato il problema.
+
+    Infine l'anti-pattern da riconoscere: il *service locator*, cioè un registro globale
+    da cui i componenti pescano ciò che serve (`Container.get(Repo)`). Sembra DI ma è
+    l'opposto: la dipendenza non compare nella firma, quindi non si sa cosa serve a una
+    classe senza leggerne tutto il corpo, e i test devono manipolare uno stato globale.
   key_points:
     - "Constructor injection è la forma da preferire: le dipendenze sono esplicite e l'oggetto non può esistere incompleto"
     - "Setter e field injection nascondono le dipendenze e permettono stati parzialmente inizializzati"
+    - "IoC è il principio, dependency inversion è la regola SOLID, DI è la tecnica: tre cose diverse"
     - "Il vantaggio concreto: in test passi un'implementazione finta senza dover patchare moduli globali"
-    - "Dipendi dall'astrazione (interfaccia, Protocol) non dalla classe concreta: è il D di SOLID"
+    - "Dipendi dall'astrazione (interfaccia, Protocol) non dalla classe concreta"
+    - "La DI rende visibili i problemi di design: un costruttore con otto dipendenze è una classe che fa troppo"
     - "Un container DI non è obbligatorio: in Python spesso bastano i parametri di default e il sistema Depends di FastAPI"
-    - "Segnale di allarme: un costruttore con otto dipendenze. Non è colpa della DI, è la classe che fa troppe cose"
     - "Il composition root, cioè il punto in cui si assembla tutto, deve essere uno solo e stare all'avvio dell'applicazione"
+    - "Service locator (Container.get(...)) non è DI: nasconde la dipendenza e rende i test dipendenti da uno stato globale"
+    - "Anche tempo, id casuali e generatori sono dipendenze: iniettarli rende i test deterministici"
+  examples:
+    - title: La stessa classe, testabile e non
+      language: python
+      code: |-
+        # NON TESTABILE: si costruisce le dipendenze da sola e usa il tempo globale.
+        class NotificaService:
+            def __init__(self):
+                self.smtp = SMTPClient(os.environ["SMTP_URL"])   # costruita dentro
+            def invia_promemoria(self, u):
+                if datetime.now().hour < 9:                      # tempo globale
+                    return
+                self.smtp.send(u.email, "Promemoria")
+
+        # TESTABILE: dipendenze esplicite, incluse quelle "invisibili" come l'orologio.
+        class NotificaService:
+            def __init__(self, posta: Posta, orologio: Orologio):
+                self.posta, self.orologio = posta, orologio
+            def invia_promemoria(self, u: Utente) -> None:
+                if self.orologio.adesso().hour < 9:
+                    return
+                self.posta.invia(u.email, "Promemoria")
+
+        def test_non_invia_di_notte():
+            posta = PostaFinta()
+            servizio = NotificaService(posta, OrologioFinto("2026-02-11T06:00"))
+            servizio.invia_promemoria(utente)
+            assert posta.inviate == []            # nessuna patch, nessun monkeypatching
+      note: >-
+        L'orologio è la dipendenza che quasi nessuno inietta, ed è quella che rende i test
+        instabili "solo a volte", tipicamente a mezzanotte o al cambio di ora.
+    - title: Composition root e Protocol, senza container
+      language: python
+      code: |-
+        from typing import Protocol
+
+        class Posta(Protocol):                                  # l'astrazione
+            def invia(self, a: str, testo: str) -> None: ...
+
+        # main.py - UNICO punto in cui si assembla il grafo
+        def costruisci_app() -> FastAPI:
+            conn = crea_pool(settings.database_url)
+            ordini = OrdiniPostgres(conn)
+            posta = PostaSMTP(settings.smtp_url)
+            annulla = AnnullaOrdine(UnitOfWork(conn), ordini, EventiOutbox(conn), OrologioReale())
+
+            app = FastAPI()
+            app.dependency_overrides[get_annulla_ordine] = lambda: annulla
+            return app
+      note: >-
+        Nessun container e nessuna magia: il grafo si legge in dieci righe, e in test si
+        sostituisce un pezzo passando un oggetto diverso.
+  trade_offs:
+    - option: Constructor injection manuale
+      pros: Esplicita, nessuna libreria, grafo leggibile in un punto
+      cons: Assemblaggio verboso quando i componenti sono molti
+      when: Il default in Python e in progetti di dimensione media
+    - option: Container DI
+      pros: Assemblaggio automatico, scope e cicli di vita gestiti
+      cons: Magia difficile da seguire, errori a runtime invece che a compile time
+      when: Progetti grandi in ecosistemi dove è idiomatico (Spring, .NET)
+    - option: Sistema del framework (Depends di FastAPI)
+      pros: Integrato, override semplice nei test, nessuna dipendenza esterna
+      cons: "Legato al framework: attenzione a non farlo entrare nel dominio"
+      when: Applicazioni FastAPI, per le dipendenze del livello web
+    - option: Service locator
+      pros: Comodo da introdurre in un codice esistente
+      cons: Dipendenze nascoste, test accoppiati a uno stato globale
+      when: Da evitare; al più come passaggio temporaneo in una migrazione
+  numbers:
+    - "Costruttore oltre le 5-6 dipendenze: soglia pratica oltre cui conviene scomporre la classe"
+    - "Un test che ha bisogno di più di due patch su moduli globali segnala dipendenze non iniettate"
   interview_answer: >-
-    La uso soprattutto per la testabilità. Se una classe si costruisce da sola il client
-    del database, per testarla devo patchare un modulo globale, e quel tipo di test è
-    fragile e legato all'implementazione. Passandole un'interfaccia dal costruttore, in test
-    le do una versione in memoria e il test resta pulito. Preferisco sempre la constructor
-    injection perché rende le dipendenze visibili nella firma: se un costruttore ha otto
-    parametri, il codice me lo sta dicendo che quella classe fa troppe cose, mentre con la
-    field injection quel segnale sparisce. Un container non lo considero necessario: in
-    Python di solito mi bastano i parametri con default e, su FastAPI, il sistema di Depends.
+    La uso soprattutto per la testabilità. Se una classe si costruisce da sola il client del
+    database, per testarla devo patchare un modulo globale, e quel tipo di test è fragile e
+    legato all'implementazione. Passandole un'interfaccia dal costruttore, in test le do una
+    versione in memoria e il test resta pulito. Preferisco sempre la constructor injection
+    perché rende le dipendenze visibili nella firma: se un costruttore ha otto parametri, il
+    codice mi sta dicendo che quella classe fa troppe cose. Non serve necessariamente un
+    container: quello che conta è avere un composition root unico, dove il grafo si assembla
+    all'avvio, e non far pescare ai componenti le proprie dipendenze da un registro globale,
+    che sarebbe un service locator e riporterebbe indietro tutti i problemi. E includo fra
+    le dipendenze anche l'orologio e i generatori di id, perché sono la causa più comune di
+    test che falliscono a caso.
+  senior_signals:
+    - "Distingue IoC, dependency inversion e DI invece di usarli come sinonimi"
+    - "Cita il composition root e il service locator come anti-pattern"
+    - "Include orologio e generatori fra le dipendenze da iniettare"
+    - "Vede nel costruttore troppo grande un problema di design e non della tecnica"
   pitfalls:
     - "Service locator al posto della DI: la dipendenza è nascosta dentro il metodo e non si vede dalla firma"
     - "Field injection che permette oggetti a metà inizializzati"
     - "Iniettare classi concrete invece di astrazioni, perdendo il beneficio"
     - "Container DI configurati via magia, in cui capire cosa viene iniettato richiede il debugger"
-  follow_up_questions:
-    - "Differenza fra dependency injection e service locator?"
-    - "Come testeresti una classe che crea da sola il proprio client HTTP?"
+    - "Lasciare tempo e casualità come chiamate globali: test non deterministici"
+  follow_ups:
+    - question: Differenza fra dependency injection e service locator?
+      answer: >-
+        Nella DI le dipendenze arrivano dall'esterno e compaiono nella firma: guardando il
+        costruttore so esattamente di cosa ha bisogno quella classe. Con il service locator
+        la classe chiede a un registro globale ciò che le serve, quindi la dipendenza è
+        nascosta dentro il corpo dei metodi e si scopre solo leggendola tutta o quando un
+        test fallisce. In più il locator è uno stato globale, quindi i test si influenzano
+        a vicenda e l'ordine di esecuzione comincia a contare.
+    - question: Come testeresti una classe che crea da sola il proprio client HTTP?
+      answer: >-
+        La via pulita è cambiarla: far ricevere il client dal costruttore. Se non posso
+        toccarla subito, uso una patch sul modulo o inietto un transport finto nella
+        libreria HTTP, ma lo considero un rattoppo temporaneo, perché quel test si
+        romperà al primo spostamento di file. In ogni caso eviterei di far partire
+        chiamate reali: un test che dipende dalla rete non è un test unitario, è una
+        scommessa.
+    - question: La DI ha costi? Quando è eccessiva?
+      answer: >-
+        Sì: più indirezione, un grafo da assemblare e, se si esagera con le interfacce,
+        molte astrazioni con una sola implementazione. Diventa eccessiva quando si
+        introduce un'interfaccia per componenti che non verranno mai sostituiti e che non
+        servono nemmeno nei test - per esempio un value object o un helper puro. La regola
+        che uso: inietto ciò che tocca il mondo esterno (database, rete, tempo,
+        casualità) e costruisco direttamente ciò che è puro.
+  related: [pat-01-layered-architecture, pat-06-hexagonal-clean, eng-01-testing, pat-09-gof-patterns]
+  resources:
+    - title: "Martin Fowler - Inversion of Control Containers and the Dependency Injection pattern"
+      url: "https://martinfowler.com/articles/injection.html"
+      kind: article
+    - title: "FastAPI - Dependencies"
+      url: "https://fastapi.tiangolo.com/tutorial/dependencies/"
+      kind: doc
 
 - id: pat-06-hexagonal-clean
   title: Architettura esagonale e Clean Architecture
@@ -207,32 +904,161 @@
     Ports and adapters (esagonale) e Clean Architecture dicono la stessa cosa con parole
     diverse: il dominio sta al centro e non conosce nulla dell'infrastruttura; database,
     HTTP e code sono dettagli collegati attraverso interfacce definite dal dominio.
+  deep_dive: |-
+    Il cuore è una regola sola, la *dependency rule*: le dipendenze puntano verso
+    l'interno. Il dominio non importa nulla dall'infrastruttura; è l'infrastruttura a
+    conoscere il dominio. Tutto il resto - esagono, cerchi concentrici, nomi dei livelli -
+    è illustrazione di questo principio.
+
+    Il meccanismo che rende possibile l'inversione è la *porta*: un'interfaccia
+    *dichiarata dal dominio* e implementata fuori. È il dettaglio che distingue chi ha
+    capito da chi ha copiato la struttura di cartelle: se l'interfaccia del repository
+    vive nel package dell'infrastruttura, l'inversione non è avvenuta e il dominio
+    continua a dipendere da un modulo esterno. Le porte si dividono in *driving* (in
+    ingresso: i casi d'uso, come il mondo usa l'applicazione) e *driven* (in uscita: ciò
+    di cui l'applicazione ha bisogno - repository, posta, orologio). Gli *adapter* sono
+    le implementazioni concrete: Postgres, REST, Kafka, SMTP.
+
+    Il guadagno concreto è duplice. Il dominio si testa senza avviare nulla: niente
+    database, niente HTTP, niente container, quindi test rapidissimi e stabili. E le
+    decisioni infrastrutturali diventano rinviabili e reversibili: si può partire con un
+    adapter in memoria e sostituirlo con Postgres senza toccare una riga di dominio.
+
+    Il costo è altrettanto concreto e va detto: molte interfacce con una sola
+    implementazione, più file, più indirezione. Per un CRUD è sovradimensionato: cinque
+    livelli per una INSERT non aiutano nessuno. La domanda da farsi è se il dominio ha
+    *regole* - invarianti, stati, politiche - o se è essenzialmente un passaggio di dati
+    dal client al database. Nel secondo caso l'architettura a livelli semplice è la
+    scelta giusta, e dirlo a un colloquio è segno di maturità, non di ignoranza.
+
+    Clean Architecture aggiunge un vocabolario (entities, use cases, interface adapters,
+    frameworks & drivers) e ribadisce la stessa regola. Vale la pena conoscere entrambe le
+    terminologie perché compaiono in offerte e discussioni, ma è più utile saper
+    rispondere alla domanda pratica: *se domani cambio framework web, quante righe di
+    dominio devo toccare?* Se la risposta non è zero, la dependency rule è violata da
+    qualche parte - spesso da un'entità annotata con i metadati dell'ORM, o da un caso
+    d'uso che riceve la sessione del database invece di un'astrazione.
   key_points:
     - "Dependency rule: le dipendenze puntano verso l'interno. Il dominio non importa nulla da fuori"
     - "Port = interfaccia definita dal dominio. Adapter = implementazione concreta (Postgres, REST, Kafka)"
     - "Porte in ingresso (driving): come si usa l'applicazione. Porte in uscita (driven): cosa serve all'applicazione"
     - "L'inversione chiave: è il dominio a dichiarare l'interfaccia del repository, e l'infrastruttura a implementarla"
-    - "Il guadagno: il dominio si testa senza framework, senza database e senza rete"
+    - "Se l'interfaccia sta nel package dell'infrastruttura, l'inversione non è avvenuta"
+    - "Il guadagno: il dominio si testa senza framework, senza database e senza rete; le scelte infrastrutturali restano reversibili"
     - "Il costo: molte interfacce con una sola implementazione, e per un CRUD è sovradimensionato"
     - "Clean Architecture aggiunge la nomenclatura entities / use cases / interface adapters / frameworks, ma il principio è identico"
     - "Un test utile: se cambiare framework web significa toccare il dominio, la dependency rule è violata"
+  examples:
+    - title: Chi dichiara l'interfaccia decide chi dipende da chi
+      language: text
+      code: |-
+        dominio/                      <- non importa NULLA da fuori
+          ordine.py                   (entità, invarianti)
+          porte.py                    (Protocol: OrdiniRepository, Posta, Orologio)
+          casi_uso/annulla_ordine.py  (usa SOLO le porte)
+
+        infrastruttura/               <- importa dal dominio, mai il contrario
+          postgres/ordini_repo.py     (implementa OrdiniRepository)
+          smtp/posta.py               (implementa Posta)
+          web/router.py               (chiama i casi d'uso)
+
+        main.py                       <- composition root: collega porte e adapter
+
+        # Verifica meccanica della regola, da mettere in CI:
+        #   grep -rE "^(from|import) (infrastruttura|fastapi|sqlalchemy)" dominio/ && exit 1
+      note: >-
+        Quel grep in CI è più efficace di qualunque discussione: la dependency rule
+        diventa un test che fallisce, non una buona intenzione.
+    - title: Porta nel dominio, adapter fuori
+      language: python
+      code: |-
+        # dominio/porte.py - il dominio dichiara cosa gli serve
+        class OrdiniRepository(Protocol):
+            async def trova(self, id_: OrdineId) -> Ordine | None: ...
+            async def salva(self, ordine: Ordine) -> None: ...
+
+        # dominio/casi_uso/annulla_ordine.py - usa la porta, ignora chi la implementa
+        class AnnullaOrdine:
+            def __init__(self, ordini: OrdiniRepository, orologio: Orologio): ...
+
+        # infrastruttura/postgres/ordini_repo.py - l'adapter dipende dal dominio
+        class OrdiniPostgres:                      # soddisfa il Protocol, senza ereditarlo
+            def __init__(self, conn: asyncpg.Connection): self.conn = conn
+            async def trova(self, id_: OrdineId) -> Ordine | None: ...
+      note: >-
+        Con i Protocol di Python l'adapter non deve nemmeno importare l'interfaccia: la
+        conformità è strutturale, quindi la dipendenza è davvero a senso unico.
+  trade_offs:
+    - option: Esagonale / Clean completa
+      pros: Dominio testabile da solo, infrastruttura sostituibile, confini espliciti
+      cons: Molte interfacce, più file, curva di apprendimento per il team
+      when: Domini ricchi di regole, sistemi longevi, più adapter per la stessa porta
+    - option: Livelli semplici (controller/service/repository)
+      pros: Struttura chiara con poca cerimonia, comprensibile da chiunque
+      cons: Il dominio resta un po' legato all'infrastruttura (ORM, framework)
+      when: La maggioranza delle applicazioni gestionali e dei servizi CRUD
+    - option: Nessuna separazione
+      pros: Massima velocità iniziale
+      cons: Test lenti e fragili, ogni cambio infrastrutturale tocca tutto
+      when: Prototipi, script, proof of concept
+  numbers:
+    - "Test di dominio senza infrastruttura: millisecondi. Gli stessi con database: secondi o minuti"
+    - "Una porta con una sola implementazione e nessun doppio nei test è spesso indirezione pura"
   interview_answer: >-
     L'idea centrale è una sola: la direzione delle dipendenze. Il dominio definisce le
     interfacce di cui ha bisogno e l'infrastruttura le implementa, quindi il database
-    dipende dal dominio e non viceversa. Concretamente significa che nel package del dominio
-    non compare nessun import del framework web o dell'ORM, e che posso testare tutte le
-    regole senza avviare niente. Non la applico ovunque, però: per un CRUD è un costo puro,
-    perché mi ritrovo con dieci interfacce con una sola implementazione ciascuna. La tiro
-    fuori quando il dominio ha regole vere e vive più a lungo delle tecnologie che lo
-    circondano, che è il caso in cui quel costo si ripaga.
+    dipende dal dominio e non viceversa. Concretamente significa che nel package del
+    dominio non compare nessun import del framework web o dell'ORM, e che posso testare
+    tutte le regole senza avviare niente; dove posso, metto anche un controllo in CI che
+    fallisce se qualcuno importa l'infrastruttura dal dominio. Non la applico ovunque,
+    però: per un CRUD è un costo puro, perché mi ritrovo con dieci interfacce con una sola
+    implementazione ciascuna. La domanda che mi faccio è se il dominio ha regole vere o se
+    è un passaggio di dati: nel secondo caso i tre livelli classici bastano.
+  senior_signals:
+    - "Sottolinea che la porta va dichiarata nel dominio, non nell'infrastruttura"
+    - "Propone un controllo automatico della dependency rule invece di affidarsi alla disciplina"
+    - "Sa dire quando l'architettura non vale il costo"
+    - "Riconosce entità annotate con l'ORM come violazione concreta della regola"
   pitfalls:
     - "Applicarla a un CRUD e produrre cinque livelli di indirezione per una insert"
     - "Interfacce nel package dell'infrastruttura invece che in quello del dominio: l'inversione non avviene"
     - "Entità di dominio annotate con i metadati dell'ORM: il dominio dipende dalla persistenza"
-    - "Chiamarla clean e poi passare il DbContext dentro lo use case"
-  follow_up_questions:
-    - "Dove va dichiarata l'interfaccia del repository e perché?"
-    - "Quando l'architettura esagonale non vale il suo costo?"
+    - "Chiamarla clean e poi passare la sessione del database dentro lo use case"
+    - "Creare una porta per ogni classe, anche per quelle pure che nessuno sostituirà mai"
+  follow_ups:
+    - question: Dove va dichiarata l'interfaccia del repository e perché?
+      answer: >-
+        Nel package del dominio, insieme a chi la usa. È questo che inverte la
+        dipendenza: l'infrastruttura importa il dominio per implementarla, e il dominio
+        non importa niente. Se l'interfaccia sta nell'infrastruttura, il dominio deve
+        importarla per dichiarare il tipo, e la dipendenza torna nella direzione
+        sbagliata - a quel punto la struttura di cartelle sembra esagonale ma non lo è.
+    - question: Quando l'architettura esagonale non vale il suo costo?
+      answer: >-
+        Quando il dominio non ha regole: un servizio che riceve dati, li valida
+        superficialmente e li scrive su una tabella non guadagna nulla da cinque livelli.
+        Vale anche la dimensione del team e la durata attesa del progetto: in un servizio
+        piccolo, che due persone manterranno per sei mesi, l'indirezione costa più di
+        quanto renda. In quei casi uso i tre livelli classici e tengo comunque separati i
+        DTO, che è il 20% dello sforzo per l'80% del beneficio.
+    - question: Come verifichi che la dependency rule non venga violata nel tempo?
+      answer: >-
+        Con un controllo automatico in CI. Può essere semplicissimo - un grep che fallisce
+        se nel package del dominio compaiono import di framework o infrastruttura - o
+        fatto con strumenti dedicati (import-linter in Python, ArchUnit in Java). La
+        differenza è enorme: senza, la regola dura finché dura l'entusiasmo; con, diventa
+        parte della definizione di build verde.
+  related: [pat-01-layered-architecture, pat-02-repository, pat-05-dependency-injection, pat-07-ddd-tactical]
+  resources:
+    - title: "Alistair Cockburn - Hexagonal Architecture"
+      url: "https://alistair.cockburn.us/hexagonal-architecture/"
+      kind: article
+    - title: "Robert C. Martin - The Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      kind: article
+    - title: "import-linter - contratti di dipendenza in CI"
+      url: "https://import-linter.readthedocs.io/"
+      kind: doc
 
 - id: pat-07-ddd-tactical
   title: DDD tattico - entity, value object, aggregate
@@ -245,32 +1071,190 @@
     I pattern tattici del Domain-Driven Design danno un vocabolario per modellare: cosa ha
     identità, cosa è solo un valore, e quali oggetti devono cambiare insieme per restare
     coerenti.
+  deep_dive: |-
+    La prima distinzione è fra *entity* e *value object*, e non è filosofia: cambia il
+    codice. Un'entity ha identità che persiste nel tempo: due utenti con gli stessi dati
+    restano persone diverse, e l'uguaglianza si decide sull'id. Un value object è
+    definito interamente dal suo valore, è immutabile e si confronta campo per campo:
+    denaro, indirizzo, intervallo di date, email.
+
+    Il guadagno pratico dei value object è enorme e sottovalutato. Sostituire una
+    `str` con un tipo `Email` validato alla costruzione elimina per costruzione una
+    classe intera di bug: da quel momento non può esistere nel sistema un'email
+    invalida, perché l'unico modo di crearne una passa dal controllo. Lo stesso vale per
+    `Denaro` (importo + valuta, che impedisce di sommare euro e dollari o di usare i
+    float sui soldi) e per `IntervalloDate` (che garantisce fine ≥ inizio). L'anti-pattern
+    opposto ha un nome, *primitive obsession*: rappresentare tutto con stringhe e numeri
+    e spargere le validazioni ovunque.
+
+    L'*aggregate* è il concetto che ha le conseguenze più profonde, perché definisce i
+    confini transazionali. Un aggregato è un gruppo di oggetti che deve cambiare insieme
+    per rispettare un invariante, con una *radice* che è l'unico punto d'ingresso: si
+    modifica una riga d'ordine passando dall'ordine, mai direttamente, così la radice può
+    verificare che il totale resti coerente. Da qui due regole pratiche molto citate: una
+    transazione modifica *un solo aggregato*, e gli aggregati si riferiscono ad altri
+    aggregati *per id*, non per riferimento diretto.
+
+    Quelle due regole non sono purismo. Riferirsi per id evita di caricare mezzo database
+    per rispondere a una domanda e rende esplicito il confine; una transazione per
+    aggregato limita la contesa sui lock e tiene le transazioni corte. Quando
+    un'operazione deve toccarne due, la risposta è di solito un evento di dominio e una
+    consistenza eventuale - oppure la constatazione che il confine è sbagliato.
+
+    La dimensione dell'aggregato è la decisione difficile. Troppo grande: ogni modifica
+    blocca molte righe, le transazioni si allungano e la contesa esplode (il caso
+    tipico è mettere tutte le righe di un catalogo dentro un'unica radice). Troppo
+    piccolo: gli invarianti che riguardano più oggetti non hanno un guardiano. Il criterio
+    è l'invariante: *cosa deve essere vero in ogni istante?* Ciò che partecipa a quella
+    verità sta dentro; il resto sta fuori e si collega per id.
+
+    Sopra tutto questo c'è il *bounded context*, che è DDD strategico ma va citato: lo
+    stesso termine significa cose diverse in parti diverse del sistema. Il "Cliente"
+    delle vendite (con sconti e storico acquisti) non è il "Cliente" della fatturazione
+    (con partita IVA e indirizzi fiscali). Forzarli in un unico modello condiviso è la
+    causa più comune di modelli enormi che non soddisfano nessuno.
   key_points:
     - "Entity: ha identità che persiste nel tempo. Due utenti con gli stessi dati restano persone diverse"
     - "Value object: è definito dal suo valore, è immutabile e si confronta per uguaglianza. Denaro, indirizzo, intervallo di date"
     - "Sostituire una stringa con un value object elimina un'intera classe di bug: un Email validato non può contenere spazzatura"
+    - "Primitive obsession: rappresentare tutto con stringhe e numeri e spargere le validazioni ovunque"
     - "Aggregate: un gruppo di oggetti che cambia insieme, con una radice che è l'unico punto d'ingresso"
-    - "La radice dell'aggregato protegge gli invarianti: si modifica un OrderLine passando dall'Order, mai direttamente"
+    - "La radice dell'aggregato protegge gli invarianti: si modifica una riga passando dall'ordine, mai direttamente"
     - "Regola pratica: una transazione modifica un solo aggregato. Se ne servono due, di solito il confine è sbagliato o serve un evento"
     - "Gli aggregati fanno riferimento ad altri aggregati per id, non per riferimento diretto"
+    - "La dimensione si decide dall'invariante: ciò che deve essere vero in ogni istante sta dentro, il resto fuori"
     - "Bounded context: lo stesso termine significa cose diverse in parti diverse del sistema. Il Cliente delle vendite non è il Cliente della fatturazione"
+  examples:
+    - title: Value object, e i bug che spariscono
+      language: python
+      code: |-
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True)            # immutabile: uguaglianza per valore
+        class Denaro:
+            centesimi: int                 # mai float sui soldi
+            valuta: str = "EUR"
+
+            def __post_init__(self):
+                if self.centesimi < 0:
+                    raise ValueError("importo negativo")
+
+            def __add__(self, altro: "Denaro") -> "Denaro":
+                if self.valuta != altro.valuta:      # impossibile sommare EUR e USD
+                    raise ValueError(f"valute diverse: {self.valuta} e {altro.valuta}")
+                return Denaro(self.centesimi + altro.centesimi, self.valuta)
+
+        @dataclass(frozen=True)
+        class Email:
+            valore: str
+            def __post_init__(self):
+                if "@" not in self.valore or self.valore != self.valore.strip().lower():
+                    raise ValueError(f"email non valida o non normalizzata: {self.valore}")
+      note: >-
+        Normalizzare dentro il value object (minuscolo, senza spazi) è ciò che rende
+        affidabile il vincolo UNIQUE a valle: le due cose lavorano insieme.
+    - title: Aggregato, radice e riferimenti per id
+      language: python
+      code: |-
+        class Ordine:                      # RADICE dell'aggregato
+            def __init__(self, id_: OrdineId, cliente_id: ClienteId):   # per ID, non oggetto
+                self.id, self.cliente_id = id_, cliente_id
+                self._righe: list[RigaOrdine] = []       # interne: non esposte in scrittura
+
+            @property
+            def righe(self) -> tuple[RigaOrdine, ...]:
+                return tuple(self._righe)                 # sola lettura verso l'esterno
+
+            def aggiungi_riga(self, sku: str, quantita: int, prezzo: Denaro) -> None:
+                if self.stato is not StatoOrdine.BOZZA:
+                    raise OrdineNonModificabile(self.id)  # invariante protetto dalla radice
+                if len(self._righe) >= 100:
+                    raise TroppeRighe(self.id)
+                self._righe.append(RigaOrdine(sku, quantita, prezzo))
+
+            @property
+            def totale(self) -> Denaro:                   # derivato, non memorizzato
+                return reduce(add, (r.subtotale for r in self._righe), Denaro(0))
+      note: >-
+        `cliente_id` invece dell'oggetto Cliente: il confine resta piccolo, la transazione
+        tocca un aggregato solo e non si carica mezzo database per aggiungere una riga.
+  trade_offs:
+    - option: Value object ovunque
+      pros: Invarianti garantiti alla costruzione, firme autoesplicative, meno test
+      cons: Più tipi, mapping da e verso la persistenza
+      when: Concetti con regole (denaro, email, codici, intervalli)
+    - option: Primitive
+      pros: Zero codice in più, serializzazione immediata
+      cons: Validazione sparsa, scambi di parametri, bug ricorrenti
+      when: Dati davvero senza regole, script
+    - option: Aggregato ampio
+      pros: Invarianti complessi garantiti in una transazione
+      cons: Contesa sui lock, transazioni lunghe, caricamenti pesanti
+      when: Invarianti forti fra pochi oggetti che cambiano sempre insieme
+    - option: Aggregati piccoli + eventi
+      pros: Transazioni corte, poca contesa, scala meglio
+      cons: Consistenza eventuale fra aggregati, più parti mobili
+      when: Il default quando gli invarianti fra aggregati tollerano un ritardo
+  numbers:
+    - "Una transazione per aggregato è la regola pratica più citata del DDD tattico"
+    - "Aggregati che contengono collezioni illimitate (tutte le righe di uno storico) sono quasi sempre mal dimensionati"
   interview_answer: >-
     La distinzione che uso di più nella pratica è quella fra entity e value object. Tutto
-    ciò che non ha bisogno di identità propria lo modello come value object immutabile, e il
-    guadagno è immediato: un tipo Email o Denaro validato alla costruzione elimina un intero
-    gruppo di bug, perché diventa impossibile che esista un'istanza invalida. L'aggregato lo
-    uso per decidere i confini transazionali: la radice è l'unico punto da cui si modifica
-    ciò che sta dentro, così gli invarianti sono garantiti da un solo posto. La regola che
-    seguo è una transazione, un aggregato: se mi accorgo di doverne toccare due insieme, in
-    genere ho sbagliato i confini oppure quello che serve è un evento verso il secondo.
+    ciò che non ha bisogno di identità propria lo modello come value object immutabile, e
+    il guadagno è immediato: un tipo Email o Denaro validato alla costruzione elimina un
+    intero gruppo di bug, perché diventa impossibile che esista un'istanza invalida.
+    L'aggregato lo uso per decidere i confini transazionali: la radice è l'unico punto da
+    cui si modifica ciò che sta dentro, così gli invarianti sono garantiti da un solo
+    guardiano, e i riferimenti ad altri aggregati li tengo per id, non per oggetto. La
+    regola che seguo è una transazione per aggregato: se un'operazione ne deve toccare due,
+    o il confine è sbagliato o quella coerenza può essere eventuale, e allora uso un evento
+    di dominio.
+  senior_signals:
+    - "Motiva i value object con i bug che eliminano, non con la teoria"
+    - "Dimensiona l'aggregato a partire dall'invariante"
+    - "Spiega perché il riferimento per id limita contesa e caricamenti"
+    - "Cita il bounded context quando si parla di modelli condivisi fra domini"
   pitfalls:
     - "Aggregati troppo grandi: contesa sui lock e transazioni lunghe"
     - "Modificare un oggetto interno bypassando la radice, violando gli invarianti"
     - "Usare primitive ovunque (primitive obsession) invece di value object"
     - "Applicare tutto il vocabolario DDD a un dominio che è un CRUD, per gusto"
-  follow_up_questions:
-    - "Che differenza c'è fra entity e value object, con un esempio?"
-    - "Perché un aggregato dovrebbe riferirsi a un altro tramite id?"
+    - "Un unico modello condiviso fra bounded context diversi, che non soddisfa nessuno"
+  follow_ups:
+    - question: Che differenza c'è fra entity e value object, con un esempio?
+      answer: >-
+        L'entity ha identità: un Utente resta lo stesso anche se cambia nome ed email, e
+        due utenti con dati identici sono comunque persone diverse - l'uguaglianza si
+        decide sull'id. Il value object è il suo valore: due istanze di Denaro(1000,
+        "EUR") sono intercambiabili, sono immutabili e si confrontano campo per campo.
+        Nella pratica: Indirizzo è un value object dentro Utente, ma diventa un'entity se
+        l'applicazione deve poterlo referenziare e modificare nel tempo mantenendone
+        l'identità.
+    - question: Perché un aggregato dovrebbe riferirsi a un altro tramite id?
+      answer: >-
+        Per tenere piccolo il confine transazionale e prevedibile il caricamento. Con un
+        riferimento diretto si finisce per caricare a cascata oggetti che non servono, e
+        si è tentati di modificarli nella stessa transazione, violando la regola di un
+        aggregato per transazione. Con l'id, il confine è esplicito: se serve davvero il
+        Cliente, lo si carica tramite il suo repository, e la scelta è visibile nel
+        codice invece di nascosta dietro un lazy loading.
+    - question: Come gestisci un invariante che riguarda due aggregati?
+      answer: >-
+        Prima verifico se il confine è sbagliato: se due cose devono essere vere insieme
+        *sempre*, forse sono un aggregato solo. Se invece l'invariante tollera un
+        ritardo - "il totale del cliente deve riflettere i suoi ordini" - lo rendo
+        eventuale: il primo aggregato emette un evento, il secondo reagisce, e prevedo
+        una compensazione o una riconciliazione per i casi che falliscono. La terza via,
+        quando serve garanzia immediata e il volume lo consente, è un vincolo nel
+        database che copra entrambe le tabelle.
+  related: [pat-03-service-layer, pat-04-dto-entity-model, pat-06-hexagonal-clean, db-14-transactions-isolation]
+  resources:
+    - title: "Vaughn Vernon - Effective Aggregate Design"
+      url: "https://www.dddcommunity.org/library/vernon_2011/"
+      kind: article
+    - title: "Martin Fowler - DDD Aggregate"
+      url: "https://martinfowler.com/bliki/DDD_Aggregate.html"
+      kind: article
 
 - id: pat-08-unit-of-work
   title: Unit of Work e confini transazionali
@@ -283,28 +1267,171 @@
     L'Unit of Work tiene traccia di tutte le modifiche di un'operazione e le conferma o le
     annulla insieme. Risponde alla domanda che il repository lascia aperta: chi decide
     quando si fa commit.
+  deep_dive: |-
+    Il repository sa leggere e scrivere, ma non deve decidere *quando* confermare. Se
+    ogni `salva()` facesse commit, un'operazione che tocca tre entità produrrebbe tre
+    commit indipendenti, e un errore a metà lascerebbe il sistema in uno stato che non è
+    mai stato valido. L'Unit of Work risolve questo: raccoglie le modifiche e le conferma
+    tutte insieme, oppure le annulla.
+
+    La buona notizia è che raramente va scritta da zero: la `Session` di SQLAlchemy, il
+    `DbContext` di Entity Framework e l'EntityManager di JPA *sono* Unit of Work.
+    Riconoscerlo è già metà della risposta a un colloquio: la domanda non è "come la
+    implemento" ma "dove la apro e la chiudo", e la risposta è al livello del caso d'uso.
+
+    La forma idiomatica in Python è un context manager: entra, si ottiene la sessione,
+    all'uscita pulita si fa commit, in caso di eccezione rollback. Il vantaggio è che il
+    confine diventa visibile nel codice - una riga `async with uow:` - invece di essere
+    sparso in chiamate a `commit()` disseminate.
+
+    Tre errori operativi ricorrono. Il primo è aprire la Unit of Work e poi fare *una
+    chiamata di rete* al suo interno: la latenza di un servizio esterno diventa lock
+    tenuti sul proprio database, e sotto carico è una delle cause più comuni di contesa.
+    Il secondo è annidare transazioni senza accorgersene, tipicamente quando un service
+    ne chiama un altro che apre la propria: molti ORM le collassano in una sola, ma il
+    comportamento del rollback parziale diventa difficile da prevedere; meglio passare la
+    transazione esistente. Il terzo è dimenticare che il commit può fallire: una
+    violazione di vincolo arriva *al commit*, non alla `salva()`, quindi il codice di
+    gestione degli errori deve stare attorno al blocco, non attorno alla singola
+    chiamata.
+
+    Infine la combinazione che conviene conoscere: Unit of Work più *outbox*. Se
+    un'operazione deve anche pubblicare un evento, l'evento va scritto nella stessa
+    transazione, e non pubblicato direttamente dentro di essa: pubblicare prima del
+    commit significa annunciare un fatto che potrebbe non avvenire.
   key_points:
     - "Il repository sa leggere e scrivere, ma non deve decidere quando confermare: se ogni save fa commit, l'atomicità si perde"
     - "L'Unit of Work espone commit e rollback e viene aperta al livello del caso d'uso"
-    - "Molti ORM lo implementano già: la Session di SQLAlchemy e il DbContext di Entity Framework sono Unit of Work"
+    - "Molti ORM la implementano già: la Session di SQLAlchemy, il DbContext di Entity Framework, l'EntityManager di JPA"
     - "Implementazione idiomatica: un context manager che fa commit all'uscita pulita e rollback in caso di eccezione"
+    - "Il commit può fallire (violazione di vincolo): la gestione degli errori va attorno al blocco, non alla singola save"
     - "Va combinata con l'outbox pattern quando l'operazione deve anche pubblicare un evento"
+    - "Pubblicare l'evento prima del commit significa annunciare un fatto che potrebbe non avvenire"
     - "Non tenere mai aperta una Unit of Work durante una chiamata di rete esterna: la latenza altrui diventa un lock tuo"
+    - "Transazioni annidate: meglio passare quella esistente che aprirne una seconda"
+  examples:
+    - title: Unit of Work come context manager
+      language: python
+      code: |-
+        class UnitOfWork:
+            def __init__(self, pool): self.pool = pool
+
+            async def __aenter__(self) -> "UnitOfWork":
+                self.conn = await self.pool.acquire()
+                self.tx = self.conn.transaction()
+                await self.tx.start()
+                self.ordini = OrdiniPostgres(self.conn)     # repository che condividono
+                self.pagamenti = PagamentiPostgres(self.conn)  # la STESSA connessione
+                return self
+
+            async def __aexit__(self, exc_type, *_):
+                try:
+                    if exc_type is None:
+                        await self.tx.commit()              # può fallire: vincoli
+                    else:
+                        await self.tx.rollback()
+                finally:
+                    await self.pool.release(self.conn)
+
+        # Nel caso d'uso: un confine, visibile in una riga.
+        async with UnitOfWork(pool) as uow:
+            ordine = await uow.ordini.trova(id_)
+            ordine.paga(importo)
+            await uow.ordini.salva(ordine)
+            await uow.pagamenti.registra(Pagamento.da(ordine))
+        # commit qui, oppure rollback se qualcosa ha sollevato
+      note: >-
+        Il punto chiave è che i repository condividono la connessione della Unit of Work:
+        se ognuno ne prendesse una propria, non ci sarebbe nessuna atomicità.
+    - title: Il confine sbagliato, e come si nota
+      language: python
+      code: |-
+        # MALE: chiamata di rete dentro la transazione. Lock tenuti per la latenza altrui.
+        async with uow:
+            ordine = await uow.ordini.trova(id_)
+            esito = await psp.addebita(ordine.totale)      # 200 ms... o 5 secondi
+            ordine.registra_pagamento(esito)
+            await uow.ordini.salva(ordine)
+
+        # BENE: fuori ciò che non è database; dentro solo le scritture.
+        esito = await psp.addebita(importo, idempotency_key=chiave)   # prima, fuori
+        async with uow:
+            ordine = await uow.ordini.trova(id_)
+            ordine.registra_pagamento(esito)
+            await uow.ordini.salva(ordine)
+            await uow.outbox.aggiungi(PagamentoRegistrato(ordine.id))  # evento, stessa tx
+      note: >-
+        La chiamata al PSP è fuori dalla transazione ma resa sicura dalla idempotency key:
+        se il processo muore in mezzo, il retry non addebita due volte.
+  trade_offs:
+    - option: Unit of Work esplicita
+      pros: Confine visibile, repository che condividono la transazione, rollback garantito
+      cons: Un po' di infrastruttura da scrivere se l'ORM non la offre
+      when: Casi d'uso che scrivono su più repository
+    - option: Session/DbContext dell'ORM usata direttamente
+      pros: Zero codice, già testata, integrata con l'identity map
+      cons: Il dominio rischia di dipendere dall'ORM se la sessione gira ovunque
+      when: Progetti che accettano l'accoppiamento con l'ORM
+    - option: Autocommit per operazione
+      pros: Semplicissimo, nessun confine da gestire
+      cons: Nessuna atomicità fra più scritture
+      when: Operazioni davvero singole, letture, strumenti
+  numbers:
+    - "Una transazione che include una chiamata HTTP dura quanto quella chiamata: da millisecondi a secondi di lock"
+    - "idle_in_transaction_session_timeout di 30-60 secondi è la rete di sicurezza contro le transazioni dimenticate aperte"
   interview_answer: >-
     L'Unit of Work risolve il problema che il repository lascia aperto: se ogni metodo del
     repository fa commit, un'operazione che tocca tre entità produce tre commit separati e
     un errore a metà lascia dati incoerenti. Quindi il commit lo sposto al livello del caso
-    d'uso, con un context manager che conferma all'uscita e fa rollback sull'eccezione. La
+    d'uso, con un context manager che conferma all'uscita e fa rollback sull'eccezione, e
+    faccio in modo che tutti i repository coinvolti condividano la stessa connessione. La
     cosa che sottolineo è che spesso non va implementata da zero, perché la Session di
-    SQLAlchemy o il DbContext di Entity Framework sono già Unit of Work: il lavoro è
-    piuttosto decidere dove si apre e dove si chiude. E una regola che rispetto sempre: non
-    tengo una transazione aperta mentre chiamo un servizio esterno.
+    SQLAlchemy o il DbContext di Entity Framework sono già Unit of Work: la domanda vera è
+    dove si apre e si chiude. E dentro non ci metto mai chiamate di rete: quelle stanno
+    prima, rese sicure con una idempotency key, oppure dopo tramite outbox.
+  senior_signals:
+    - "Riconosce che l'ORM offre già una Unit of Work e sposta la discussione sui confini"
+    - "Fa condividere la connessione ai repository invece di dare per scontata l'atomicità"
+    - "Tiene le chiamate di rete fuori dalla transazione e spiega il motivo con i lock"
+    - "Ricorda che il commit può fallire e che gli errori di vincolo arrivano lì"
   pitfalls:
     - "Commit dentro il repository, con atomicità impossibile da garantire"
     - "Transazione aperta durante una chiamata HTTP o l'invio di una mail"
     - "Reimplementare da zero una Unit of Work che l'ORM fornisce già"
-  follow_up_questions:
-    - "Se un caso d'uso scrive su due repository, chi fa il commit?"
+    - "Repository che aprono ciascuno la propria connessione: nessuna atomicità reale"
+    - "Pubblicare l'evento prima del commit: si annuncia un fatto che potrebbe non avvenire"
+  follow_ups:
+    - question: Se un caso d'uso scrive su due repository, chi fa il commit?
+      answer: >-
+        Il caso d'uso, una volta sola, tramite la Unit of Work che i due repository
+        condividono. Il requisito tecnico è che entrambi usino la stessa connessione o
+        sessione: se ognuno ne prende una dal pool, sono due transazioni distinte e
+        l'atomicità non esiste, per quanto il codice sembri corretto. È esattamente il
+        tipo di bug che non si vede finché non fallisce la seconda scrittura.
+    - question: Cosa succede se il commit fallisce per una violazione di vincolo?
+      answer: >-
+        L'eccezione arriva al momento del commit, non alla chiamata che ha inserito la
+        riga: molti ORM accumulano le scritture e le mandano al flush. Quindi la gestione
+        va messa attorno al blocco transazionale e la violazione va tradotta nell'errore
+        di dominio corrispondente - per esempio email già registrata - invece di
+        diventare un 500. È anche il motivo per cui il controllo applicativo prima della
+        scrittura serve solo a dare un messaggio migliore, non a garantire la correttezza.
+    - question: Come gestisci un'operazione che deve scrivere sul database e chiamare un servizio esterno?
+      answer: >-
+        Non nella stessa transazione, perché non esiste atomicità fra i due. Se la
+        chiamata esterna può essere fatta prima, la rendo idempotente con una chiave e poi
+        registro l'esito in transazione. Se deve avvenire dopo, uso l'outbox: scrivo
+        l'intenzione nella stessa transazione e un worker esegue la chiamata,
+        ritentandola finché riesce. In entrambi i casi il sistema può trovarsi in uno
+        stato intermedio, e quello stato va modellato invece che ignorato.
+  related: [pat-02-repository, pat-03-service-layer, db-13-acid, rel-35-event-driven]
+  resources:
+    - title: "Martin Fowler - Unit of Work"
+      url: "https://martinfowler.com/eaaCatalog/unitOfWork.html"
+      kind: article
+    - title: "Cosmic Python - Unit of Work Pattern"
+      url: "https://www.cosmicpython.com/book/chapter_06_uow.html"
+      kind: book
 
 - id: pat-09-gof-patterns
   title: Design pattern che si usano davvero
@@ -317,6 +1444,41 @@
     Dei ventitré pattern GoF, una manciata compare quotidianamente nel codice
     professionale. Gli altri è utile riconoscerli, ma citarli in colloquio senza un caso
     d'uso reale fa più danno che bene.
+  deep_dive: |-
+    I pattern sono *nomi per soluzioni ricorrenti*, e il loro valore principale è il
+    vocabolario condiviso: dire "qui useiamo uno Strategy" comunica in due parole una
+    struttura che altrimenti richiederebbe un paragrafo. Il valore *non* è applicarli il
+    più possibile: l'indirezione ha un costo, e un pattern introdotto senza il problema
+    che lo giustifica peggiora il codice.
+
+    Quelli che compaiono davvero ogni giorno sono cinque o sei. *Strategy*: algoritmi
+    intercambiabili dietro un'interfaccia - metodi di pagamento, politiche di prezzo,
+    strategie di retry - ed è la cura naturale per le catene di `if` che crescono a ogni
+    nuovo caso. *Adapter*: adatta un'interfaccia esterna a quella che serve a te, ed è
+    letteralmente il pezzo che rende possibile l'architettura esagonale. *Decorator*:
+    aggiunge comportamento attorno a un oggetto senza modificarlo - logging, retry,
+    caching, metriche attorno a un client. *Factory* e *Builder*: centralizzano una
+    costruzione condizionale o con molti parametri opzionali. *Observer*: pubblicazione e
+    sottoscrizione, la base concettuale delle architetture a eventi.
+
+    C'è poi una cosa che vale la pena dire a un colloquio e che distingue: *molti pattern
+    GoF sono nati per linguaggi senza funzioni di prima classe*. In Python, una Strategy è
+    spesso semplicemente una funzione passata come parametro o un dizionario di funzioni;
+    un Decorator è il decoratore del linguaggio; una Factory è una funzione. Ricostruire
+    la gerarchia di classi del libro in un linguaggio dinamico significa spesso scrivere
+    trenta righe dove ne bastavano tre.
+
+    Il caso speciale è il *Singleton*, che è quasi sempre un anti-pattern: è stato globale
+    con un nome rispettabile. I problemi concreti sono tre: nasconde una dipendenza
+    (nessuna firma dichiara che quella classe usa il singleton), rende i test dipendenti
+    dall'ordine di esecuzione perché lo stato sopravvive fra un test e l'altro, e in
+    presenza di concorrenza richiede sincronizzazione nell'inizializzazione. La sostituzione
+    è quasi sempre la dependency injection: un'istanza unica creata nel composition root e
+    passata a chi serve - stessa unicità, nessuno dei difetti.
+
+    Il consiglio per il colloquio è pratico: scegli tre pattern che hai usato davvero e
+    preparati a raccontare il problema che risolvevano, cosa avresti fatto senza e cosa è
+    costato. Vale molto più che elencarne venti.
   key_points:
     - "Strategy: algoritmi intercambiabili dietro un'interfaccia. Metodi di pagamento, politiche di prezzo, strategie di retry. Sostituisce gli if a catena"
     - "Factory / Factory Method: centralizza una costruzione complessa o condizionale"
@@ -324,27 +1486,136 @@
     - "Adapter: adatta un'interfaccia esterna a quella che ti serve. È il cuore degli adapter nell'architettura esagonale"
     - "Decorator: aggiunge comportamento senza modificare l'oggetto. Logging, caching, retry attorno a un client"
     - "Observer: pubblicazione di eventi e notifica dei sottoscrittori, base delle architetture a eventi"
-    - "Template Method: scheletro fisso con passi sovrascrivibili. Utile ma crea accoppiamento per ereditarietà: spesso Strategy è preferibile"
-    - "Singleton: spesso un anti-pattern. È stato globale travestito, rende i test difficili e nasconde le dipendenze"
+    - "Template Method: scheletro fisso con passi sovrascrivibili. Crea accoppiamento per ereditarietà: spesso Strategy è preferibile"
+    - "Singleton: spesso un anti-pattern. È stato globale travestito, nasconde le dipendenze e rende i test dipendenti dall'ordine"
     - "Molti pattern GoF sono nati per linguaggi senza funzioni di prima classe: in Python Strategy è spesso solo una funzione passata come parametro"
+    - "Il valore dei pattern è il vocabolario condiviso, non il numero di pattern applicati"
+  examples:
+    - title: Strategy, nelle due forme
+      language: python
+      code: |-
+        # Catena di if che cresce a ogni metodo nuovo: ogni aggiunta tocca questa funzione.
+        def commissione(metodo: str, importo: int) -> int:
+            if metodo == "carta":    return round(importo * 0.029) + 25
+            elif metodo == "bonifico": return 0
+            elif metodo == "paypal":  return round(importo * 0.035) + 35
+            raise ValueError(metodo)
+
+        # Strategy "pythonico": un dizionario di funzioni. Aggiungere un metodo
+        # significa aggiungere una riga, senza toccare la logica esistente.
+        COMMISSIONI: dict[str, Callable[[int], int]] = {
+            "carta":    lambda i: round(i * 0.029) + 25,
+            "bonifico": lambda _: 0,
+            "paypal":   lambda i: round(i * 0.035) + 35,
+        }
+
+        # Strategy con Protocol, quando la strategia ha più di un metodo o uno stato.
+        class MetodoPagamento(Protocol):
+            def commissione(self, importo: int) -> int: ...
+            async def addebita(self, importo: int, cliente: ClienteId) -> Esito: ...
+      note: >-
+        La versione con dizionario copre la maggior parte dei casi reali in Python; il
+        Protocol serve quando la strategia ha comportamento vero, non solo un calcolo.
+    - title: Decorator per retry, cache e metriche
+      language: python
+      code: |-
+        class ClientePsp(Protocol):
+            async def addebita(self, importo: int) -> Esito: ...
+
+        class ConRetry:                       # decorator: stessa interfaccia, in più ritenta
+            def __init__(self, inner: ClientePsp, tentativi: int = 3):
+                self.inner, self.tentativi = inner, tentativi
+            async def addebita(self, importo: int) -> Esito:
+                for n in range(self.tentativi):
+                    try:
+                        return await self.inner.addebita(importo)
+                    except ErroreTransitorio:
+                        if n == self.tentativi - 1: raise
+                        await asyncio.sleep((2 ** n) * 0.1 * (0.5 + random.random()))
+
+        class ConMetriche:
+            def __init__(self, inner: ClientePsp): self.inner = inner
+            async def addebita(self, importo: int) -> Esito:
+                with LATENZA.labels("psp").time():
+                    return await self.inner.addebita(importo)
+
+        psp = ConMetriche(ConRetry(PspReale(config)))   # composizione, nessuna modifica
+      note: >-
+        Ogni preoccupazione resta in una classe piccola e testabile, e si compongono
+        nell'ordine che si vuole: è il motivo per cui questo pattern sopravvive a tutto.
+  trade_offs:
+    - option: Strategy con funzioni o dizionario
+      pros: Pochissimo codice, aggiungere un caso è una riga
+      cons: Meno adatto se la strategia ha stato o più metodi
+      when: Calcoli e politiche semplici, linguaggi con funzioni di prima classe
+    - option: Strategy con interfaccia
+      pros: Strategie con più metodi e stato, sostituibili nei test
+      cons: Più classi e più file
+      when: Integrazioni, comportamenti complessi
+    - option: Template Method
+      pros: Scheletro condiviso, passi specializzati
+      cons: Accoppiamento per ereditarietà, difficile da comporre
+      when: Poche varianti stabili di un algoritmo, gerarchia già esistente
+    - option: Singleton
+      pros: Un'istanza sola, accesso ovunque
+      cons: Stato globale, dipendenze nascoste, test accoppiati
+      when: Quasi mai; usa la DI con un'unica istanza costruita all'avvio
+  numbers:
+    - "23 pattern nel libro GoF; quelli che compaiono quotidianamente sono 5-6"
+    - "Una catena di if che supera 4-5 rami e cresce a ogni requisito nuovo è il segnale classico per Strategy"
   interview_answer: >-
     Quelli che uso davvero sono cinque o sei. Strategy quando ho più modi di fare la stessa
-    cosa e voglio togliere di mezzo un if a catena, per esempio i metodi di pagamento.
-    Adapter al confine con i servizi esterni, che è poi ciò che rende possibile l'inversione
-    delle dipendenze. Decorator per aggiungere retry, cache o logging attorno a un client
-    senza toccarne il codice. Factory e Builder quando la costruzione è complessa. Il
-    Singleton lo evito quasi sempre, perché è stato globale con un nome elegante e rende i
-    test dipendenti dall'ordine di esecuzione. Aggiungo sempre una precisazione: in Python
-    molti di questi pattern collassano, perché le funzioni sono oggetti di prima classe e
-    Strategy diventa semplicemente passare una funzione.
+    cosa e voglio togliere di mezzo un if a catena, per esempio i metodi di pagamento;
+    spesso in Python lo implemento con un dizionario di funzioni, non con una gerarchia di
+    classi. Adapter al confine con i servizi esterni, che è poi ciò che rende possibile
+    l'inversione delle dipendenze. Decorator per aggiungere retry, cache o logging attorno
+    a un client senza toccarne il codice. Factory e Builder quando la costruzione è
+    complessa. Il Singleton lo evito quasi sempre, perché è stato globale con un nome
+    elegante: nasconde le dipendenze e rende i test dipendenti dall'ordine di esecuzione;
+    se mi serve una sola istanza la creo nel composition root e la passo a chi la usa.
+  senior_signals:
+    - "Parte dal problema e non dall'elenco dei pattern"
+    - "Sa che molti pattern GoF sono ridondanti nei linguaggi con funzioni di prima classe"
+    - "Argomenta contro il Singleton con motivi concreti, non con il sentito dire"
+    - "Preferisce la composizione (Decorator, Strategy) all'ereditarietà (Template Method)"
   pitfalls:
     - "Applicare i pattern per dimostrare di conoscerli, ottenendo indirezione senza beneficio"
     - "Singleton usato per condividere stato, che poi rende i test dipendenti dall'ordine"
     - "Astrarre con Strategy quando esiste una sola implementazione e nessuna in vista"
     - "Reimplementare in Python pattern che il linguaggio rende inutili"
-  follow_up_questions:
-    - "Come sostituiresti una catena di if-else con Strategy? Conviene sempre?"
-    - "Perché il Singleton è considerato problematico?"
+    - "Gerarchie profonde di Template Method dove sarebbe bastata la composizione"
+  follow_ups:
+    - question: Come sostituiresti una catena di if-else con Strategy? Conviene sempre?
+      answer: >-
+        Estraggo ogni ramo in una funzione o classe con la stessa firma e le registro in
+        una mappa, così aggiungere un caso non tocca il codice esistente. Non conviene
+        sempre: se i rami sono due e stabili, l'if è più leggibile e il pattern è solo
+        indirezione. Il segnale che conviene è quando la catena cresce a ogni requisito,
+        quando i rami hanno stato proprio, o quando servono implementazioni diverse nei
+        test.
+    - question: Perché il Singleton è considerato problematico?
+      answer: >-
+        Perché è stato globale mascherato. Nasconde la dipendenza - nessuna firma dice che
+        una classe lo usa - quindi per capire cosa serve a un componente bisogna leggerne
+        tutto il corpo. Rende i test dipendenti dall'ordine, perché lo stato sopravvive
+        fra i test. E in ambienti concorrenti aggiunge sincronizzazione
+        nell'inizializzazione. La stessa unicità si ottiene creando un'istanza nel
+        composition root e passandola: si mantiene il vantaggio e spariscono i difetti.
+    - question: Che differenza c'è fra Decorator e Proxy, visto che si somigliano?
+      answer: >-
+        Strutturalmente sono identici: entrambi avvolgono un oggetto con la sua stessa
+        interfaccia. Cambia l'intenzione. Il Decorator *aggiunge* comportamento - retry,
+        logging, cache - e se ne possono comporre più insieme. Il Proxy *controlla
+        l'accesso* all'oggetto: lazy loading, verifica dei permessi, chiamata remota. Nel
+        codice si distinguono dal nome e dallo scopo, non dalla forma.
+  related: [pat-05-dependency-injection, pat-06-hexagonal-clean, pat-12-error-handling, eng-05-code-quality]
+  resources:
+    - title: "Refactoring Guru - Design Patterns"
+      url: "https://refactoring.guru/design-patterns"
+      kind: article
+    - title: "Peter Norvig - Design Patterns in Dynamic Languages"
+      url: "https://norvig.com/design-patterns/"
+      kind: article
 
 - id: pat-10-project-structure
   title: Organizzare le cartelle - per livello o per feature
@@ -357,31 +1628,174 @@
     Due modi di dividere il codice: per tipo tecnico (controllers/, services/, models/)
     oppure per funzionalità (ordini/, utenti/, pagamenti/, ciascuna con i propri livelli
     dentro). La seconda scala meglio, perché una modifica tocca una cartella sola.
+  deep_dive: |-
+    La divisione *per livello* mette insieme ciò che si somiglia: tutti i controller in
+    una cartella, tutti i service in un'altra. È intuitiva all'inizio e funziona finché
+    il progetto è piccolo. Il problema emerge con la crescita: aggiungere un campo a un
+    ordine costringe ad aprire cinque cartelle diverse, e il codice che cambia insieme
+    vive lontano. È l'opposto del principio di *coesione*: ciò che cambia insieme
+    dovrebbe stare insieme.
+
+    La divisione *per feature* (o vertical slice, o package by feature) mette in una
+    cartella tutto ciò che serve a una funzionalità: rotte, casi d'uso, modello,
+    repository, test. Una modifica funzionale resta locale, e il diff di una pull
+    request si legge senza saltare fra rami dell'albero.
+
+    Il beneficio meno ovvio, e più prezioso, è che i confini diventano *visibili*. Con
+    la divisione per feature, se il modulo `pagamenti` importa da `utenti`,
+    l'accoppiamento appare in una riga di import invece di nascondersi in una cartella
+    condivisa. Da lì si può decidere: è accettabile? va sostituito con un'interfaccia? È
+    anche il motivo per cui questa struttura è il passo naturale verso il monolite
+    modulare e, quando serve, verso l'estrazione di un servizio: la cartella è già il
+    confine.
+
+    Il vincolo va però reso *meccanico*, non affidato alla buona volontà. In Python si
+    usa `import-linter` per dichiarare contratti di dipendenza (il modulo A non può
+    importare B), in Java `ArchUnit`, in TypeScript le regole `no-restricted-imports`
+    di ESLint. Senza un controllo in CI, dopo sei mesi ogni modulo importa gli interni
+    di ogni altro e la struttura è solo decorativa.
+
+    Sulle cartelle condivise vale una regola pratica: `shared/` o `common/` devono
+    contenere solo ciò che è *davvero generico e stabile* - tipi di base, utilità pure,
+    client infrastrutturali. Nel momento in cui contengono logica di dominio diventano
+    discariche a cui tutti sono accoppiati, e l'accoppiamento indiretto è peggiore di
+    quello diretto perché è invisibile. Il segnale è il nome: `utils.py` con quattrocento
+    righe è quasi sempre una collezione di cose che appartengono altrove.
+
+    Come scegliere: layer-first sotto le venti-trenta classi, quando il progetto è
+    ancora piccolo; feature-first appena cresce. E soprattutto, coerenza: la cosa
+    peggiore è il misto incoerente, dove metà del codice segue una regola e metà
+    un'altra, e ogni file nuovo apre una discussione su dove metterlo.
   key_points:
     - "Per livello (layer-first): semplice all'inizio, ma ogni modifica funzionale tocca cinque cartelle diverse"
     - "Per feature (vertical slice, package by feature): ogni cartella contiene tutto ciò che serve a una funzionalità"
     - "Il vantaggio della divisione per feature è la coesione: il codice che cambia insieme sta insieme"
     - "Rende visibili i confini: se ordini/ importa da utenti/, l'accoppiamento si vede nell'import"
+    - "Il vincolo va reso meccanico con un controllo in CI: import-linter, ArchUnit, no-restricted-imports"
     - "È anche la strada naturale verso l'estrazione di un servizio: la cartella è già il confine"
     - "Il monolite modulare è esattamente questo: moduli con confini netti, un solo deploy"
-    - "Regola pratica: layer-first sotto le 20 classi, feature-first appena il progetto cresce"
+    - "shared/ deve contenere solo cose generiche e stabili: se ci finisce logica di dominio diventa una discarica"
+    - "Regola pratica: layer-first sotto le 20-30 classi, feature-first appena il progetto cresce"
     - "Quello che va evitato è il misto incoerente, in cui metà del codice segue una regola e metà l'altra"
+  examples:
+    - title: Le stesse funzionalità, due alberi
+      language: text
+      code: |-
+        PER LIVELLO                          PER FEATURE
+        app/                                 app/
+          controllers/                         ordini/
+            ordini.py                            rotte.py
+            utenti.py                            casi_uso.py
+            pagamenti.py                         modello.py
+          services/                              repository.py
+            ordini.py                            test_ordini.py
+            utenti.py                          utenti/
+            pagamenti.py                         rotte.py  casi_uso.py ...
+          repositories/                        pagamenti/
+            ordini.py ...                        rotte.py  casi_uso.py ...
+          models/                              condiviso/        <- solo roba generica
+            ordini.py ...                        tipi.py  db.py  errori.py
+
+        "Aggiungi lo sconto agli ordini":
+          per livello  -> 4-5 file in 4-5 cartelle diverse
+          per feature  -> tutti i file dentro ordini/
+      note: >-
+        Il secondo albero rende anche ovvio cosa cancellare quando una funzionalità
+        viene ritirata: una cartella, non una caccia al tesoro.
+    - title: Il confine reso meccanico, non solo dichiarato
+      language: ini
+      code: |-
+        # setup.cfg / .importlinter - il contratto fallisce in CI, non in code review
+        [importlinter]
+        root_package = app
+
+        [importlinter:contract:moduli-indipendenti]
+        name = I moduli di feature non si importano fra loro
+        type = independence
+        modules =
+            app.ordini
+            app.utenti
+            app.pagamenti
+
+        [importlinter:contract:dominio-pulito]
+        name = Il dominio non conosce il framework
+        type = forbidden
+        source_modules = app.ordini.modello
+        forbidden_modules = fastapi, sqlalchemy
+      note: >-
+        Un contratto di indipendenza non vieta la comunicazione: obbliga a farla passare
+        da un punto esplicito (un'interfaccia, un evento), che è esattamente il punto.
+  trade_offs:
+    - option: Per livello
+      pros: Immediata da capire, ottima per progetti piccoli e per chi arriva da tutorial
+      cons: Bassa coesione, modifiche sparse, confini invisibili
+      when: Sotto le 20-30 classi, prototipi, esercizi
+    - option: Per feature
+      pros: Coesione alta, confini visibili, estrazione futura facilitata
+      cons: Un po' di duplicazione fra moduli simili, serve disciplina su shared/
+      when: Progetti che crescono, più persone che lavorano in parallelo
+    - option: Misto (feature con livelli dentro)
+      pros: "Il meglio dei due: moduli coesi e struttura interna riconoscibile"
+      cons: Richiede una convenzione scritta perché resti uniforme
+      when: Il default pratico per applicazioni di media dimensione
+  numbers:
+    - "Soglia empirica per passare a feature-first: 20-30 classi o più di 2 persone sul codice"
+    - "Un file utils.py oltre le 200-300 righe è quasi sempre più moduli mascherati"
   interview_answer: >-
     Parto per feature appena il progetto supera qualche decina di file. Il motivo è
     concreto: con la divisione per livello, aggiungere un campo a un ordine mi fa aprire
     cinque cartelle diverse, mentre per feature resto dentro ordini/. Il beneficio
     collaterale che mi interessa di più è che i confini diventano visibili: se vedo che il
     modulo pagamenti importa direttamente dal modulo utenti, ho subito sotto gli occhi un
-    accoppiamento su cui ragionare, magari da sostituire con un'interfaccia. Ed è anche la
-    strada che rende praticabile un'estrazione futura, perché la cartella coincide già con
-    il confine del servizio.
+    accoppiamento su cui ragionare, magari da sostituire con un'interfaccia o un evento. E
+    quel vincolo lo rendo meccanico con un controllo in CI, tipo import-linter, perché
+    altrimenti dopo sei mesi ogni modulo importa gli interni di ogni altro. Su shared/ sono
+    severo: ci va solo roba generica e stabile, altrimenti diventa una discarica a cui
+    tutti sono accoppiati.
+  senior_signals:
+    - "Motiva la scelta con la coesione e con la visibilità dei confini"
+    - "Rende il vincolo automatico in CI invece di affidarlo alla code review"
+    - "Ha una regola esplicita su cosa può stare in shared/"
+    - "Collega la struttura alla possibilità futura di estrarre un servizio"
   pitfalls:
     - "Cartelle utils/ e common/ che diventano discariche senza coesione"
     - "Mischiare i due criteri senza una regola dichiarata"
     - "Dividere per feature ma poi condividere lo stesso modello fra tutte le feature, annullando i confini"
-  follow_up_questions:
-    - "Cosa metteresti in una cartella shared/ e cosa no?"
-    - "Come impedisci che un modulo importi gli interni di un altro?"
+    - "Confini dichiarati nella documentazione e mai verificati da nessuno strumento"
+  follow_ups:
+    - question: Cosa metteresti in una cartella shared/ e cosa no?
+      answer: >-
+        Ci metto ciò che è generico, stabile e privo di dominio: tipi di base e value
+        object trasversali, utilità pure (date, formattazione), configurazione, client
+        infrastrutturali, errori base. Non ci metto logica di dominio, né modelli
+        condivisi fra feature: nel momento in cui `shared` contiene il concetto di
+        Ordine, tutti i moduli ne dipendono e i confini svaniscono. Se due feature hanno
+        bisogno dello stesso concetto, di solito è il segnale che una delle due dovrebbe
+        chiedere all'altra tramite un'interfaccia.
+    - question: Come impedisci che un modulo importi gli interni di un altro?
+      answer: >-
+        Con due strumenti insieme. Una convenzione: ogni modulo espone un'interfaccia
+        pubblica esplicita - un `__init__.py` con ciò che è esportabile, o un package
+        `api` interno - e il resto è considerato privato. E un controllo automatico in
+        CI: import-linter in Python, ArchUnit in Java, ESLint no-restricted-imports in
+        TypeScript. La regola che non fallisce la build è una raccomandazione, e le
+        raccomandazioni durano finché dura la fretta.
+    - question: Per feature o per bounded context? Che differenza c'è?
+      answer: >-
+        La cartella per feature è una scelta di organizzazione del codice; il bounded
+        context è una scelta di modellazione, cioè dove un termine del dominio ha un
+        significato unico e coerente. Idealmente coincidono - un modulo per contesto - ma
+        una feature può anche essere una fetta più sottile dentro un contesto. Il segnale
+        che i confini sono sbagliati è lo stesso in entrambi i casi: due moduli che
+        devono cambiare sempre insieme.
+  related: [dist-28-microservices-monolith, pat-06-hexagonal-clean, pat-01-layered-architecture, eng-05-code-quality]
+  resources:
+    - title: "Simon Brown - Modular Monoliths"
+      url: "https://www.codingthearchitecture.com/presentations/sa2015-modular-monoliths"
+      kind: video
+    - title: "import-linter - contratti di dipendenza"
+      url: "https://import-linter.readthedocs.io/"
+      kind: doc
 
 - id: pat-11-cqrs
   title: CQRS - separare letture e scritture
@@ -394,6 +1808,47 @@
     CQRS separa il modello usato per modificare lo stato da quello usato per leggerlo. Il
     motivo è che i due hanno esigenze opposte: la scrittura ha bisogno di invarianti e
     transazioni, la lettura di forma comoda e velocità.
+  deep_dive: |-
+    Il punto di partenza è un'osservazione pratica: il modello che serve a *proteggere
+    gli invarianti* e il modello che serve a *mostrare una schermata* raramente
+    coincidono. Il primo vuole aggregati piccoli, regole, transazioni; il secondo vuole
+    una riga piatta con dentro esattamente i campi che la vista mostra, presi da cinque
+    tabelle diverse. Forzarli nello stesso modello produce aggregati caricati
+    interamente per mostrarne tre campi, oppure modelli di dominio deformati dalle
+    esigenze della UI.
+
+    CQRS separa i due percorsi. Il *command* modifica lo stato, passa dal dominio,
+    rispetta gli invarianti e - nella formulazione originale - non restituisce dati
+    (restituisce al massimo un esito o un identificatore). La *query* legge e basta: può
+    saltare completamente il dominio e usare SQL diretto che proietta su un DTO di
+    lettura.
+
+    La distinzione più importante da fare al colloquio è fra *forma leggera* e *forma
+    completa*. La leggera usa lo stesso database e due percorsi di codice: le scritture
+    passano dal repository e dal dominio, le letture sono query dirette. Non c'è nessuna
+    consistenza eventuale, nessuna sincronizzazione, e si ottiene già la gran parte del
+    beneficio - via i join forzati sugli aggregati, via il caricamento inutile. È la
+    forma che uso quasi sempre.
+
+    La forma completa usa *store separati*: il modello di lettura vive in un database
+    diverso (un colonnare, un motore di ricerca, una tabella denormalizzata) alimentato
+    da eventi. Qui si scala la lettura in modo indipendente e si possono avere proiezioni
+    multiple sullo stesso flusso, ma si paga con la consistenza eventuale - l'utente che
+    salva e ricarica può non vedersi - e con due modelli da mantenere allineati.
+
+    Da qui il problema pratico più frequente: l'utente crea qualcosa e nella lista non lo
+    trova. Le soluzioni sono le stesse del read-your-own-writes sulle replica: leggere
+    dalla sorgente di verità subito dopo una scrittura, oppure attendere che la
+    proiezione abbia raggiunto la versione scritta, oppure - la via più economica -
+    inserire il risultato in modo ottimistico nell'interfaccia. Qualunque si scelga, va
+    *dichiarata a chi progetta la UI*: la consistenza eventuale introdotta di nascosto è
+    la causa numero uno di "il sistema ha perso il mio dato".
+
+    Infine, il chiarimento che vale mezzo colloquio: CQRS ed *event sourcing* sono
+    indipendenti. Si può fare CQRS su un normale database relazionale senza alcun log di
+    eventi, e si può fare event sourcing senza separare le letture. Vengono citati
+    insieme perché si combinano bene - il log degli eventi è un ottimo alimentatore per
+    le proiezioni - ma nessuno dei due richiede l'altro.
   key_points:
     - "Command: modifica lo stato, passa dal dominio, rispetta gli invarianti, non restituisce dati"
     - "Query: legge e basta, può saltare il dominio e usare SQL diretto verso un DTO di lettura"
@@ -401,23 +1856,136 @@
     - "Nella forma completa i modelli di lettura sono store separati aggiornati per eventi, con consistenza eventuale"
     - "CQRS non richiede event sourcing, e l'event sourcing non richiede CQRS: sono spesso citati insieme ma sono indipendenti"
     - "Il caso in cui conviene: una schermata di riepilogo che richiederebbe sei join sul modello di dominio"
+    - "Il problema pratico tipico: l'utente salva e non si vede nella lista. Va gestito e dichiarato, non subito"
     - "Il costo della forma completa è alto: due modelli da mantenere e utenti che vedono dati leggermente indietro"
+  examples:
+    - title: Forma leggera - due percorsi, un database
+      language: python
+      code: |-
+        # COMMAND: passa dal dominio, protegge gli invarianti
+        class ConfermaOrdine:
+            async def esegui(self, ordine_id: OrdineId) -> None:
+                async with self.uow:
+                    ordine = await self.uow.ordini.trova(ordine_id)     # aggregato intero
+                    ordine.conferma(self.orologio.adesso())             # invarianti
+                    await self.uow.ordini.salva(ordine)
+
+        # QUERY: salta il dominio, proietta esattamente ciò che la schermata mostra
+        async def righe_riepilogo(conn, cliente_id: str) -> list[RigaRiepilogo]:
+            righe = await conn.fetch("""
+                SELECT o.id, o.creato_il, o.stato,
+                       count(r.*) AS n_righe,
+                       sum(r.qta * r.prezzo_cents) AS totale_cents,
+                       s.tracking_code
+                  FROM ordini o
+                  JOIN righe_ordine r ON r.ordine_id = o.id
+                  LEFT JOIN spedizioni s ON s.ordine_id = o.id
+                 WHERE o.cliente_id = $1
+                 GROUP BY o.id, s.tracking_code
+                 ORDER BY o.creato_il DESC LIMIT 50
+            """, cliente_id)
+            return [RigaRiepilogo(**r) for r in righe]
+      note: >-
+        Nessuna consistenza eventuale, nessun componente in più: solo la rinuncia a far
+        passare le letture di reporting dal modello di dominio.
+    - title: "Forma completa: proiezione da eventi e il problema del read-your-writes"
+      language: python
+      code: |-
+        # Il modello di lettura è alimentato dagli eventi del dominio.
+        async def proietta(evento: OrdineConfermato, conn) -> None:
+            await conn.execute("""
+                INSERT INTO lettura_ordini (id, cliente_id, stato, versione)
+                VALUES ($1, $2, 'confermato', $3)
+                ON CONFLICT (id) DO UPDATE
+                   SET stato = EXCLUDED.stato, versione = EXCLUDED.versione
+                 WHERE lettura_ordini.versione < EXCLUDED.versione   -- niente sorpassi
+            """, evento.ordine_id, evento.cliente_id, evento.versione)
+
+        # Lato lettura: aspetta che la proiezione abbia raggiunto la versione scritta.
+        async def leggi_dopo_scrittura(conn, ordine_id, versione_attesa, attesa_max=1.0):
+            scadenza = time.monotonic() + attesa_max
+            while time.monotonic() < scadenza:
+                v = await conn.fetchval("SELECT versione FROM lettura_ordini WHERE id=$1", ordine_id)
+                if v is not None and v >= versione_attesa:
+                    return await leggi(conn, ordine_id)
+                await asyncio.sleep(0.05)
+            return await leggi_da_sorgente_di_verita(conn, ordine_id)   # fallback onesto
+      note: >-
+        Il confronto sulla versione nella UPDATE evita che un evento vecchio, arrivato in
+        ritardo, sovrascriva uno più recente: è il bug classico delle proiezioni.
+  trade_offs:
+    - option: Nessuna separazione
+      pros: Un modello solo, semplicissimo
+      cons: Aggregati caricati per mostrare tre campi, dominio deformato dalla UI
+      when: CRUD, domini semplici
+    - option: CQRS leggero (stesso DB)
+      pros: Query efficienti, dominio protetto, nessuna consistenza eventuale
+      cons: Due percorsi di codice, qualche duplicazione
+      when: Il default quando compaiono schermate di riepilogo
+    - option: CQRS completo (store separati)
+      pros: Letture scalabili in modo indipendente, proiezioni multiple, formati su misura
+      cons: Consistenza eventuale, due sistemi, riallineamento da gestire
+      when: Volumi alti in lettura, requisiti di ricerca o analitica
+  numbers:
+    - "Una query di riepilogo con 5-6 join su modello di dominio carica spesso 10-100 volte i dati che servono"
+    - "Ritardo tipico di una proiezione asincrona: decine-centinaia di millisecondi; va dichiarato, non nascosto"
   interview_answer: >-
     Parto dalla versione leggera, che è quella che uso davvero: stesso database, ma due
     percorsi distinti. Le scritture passano dal dominio e dal repository, perché lì devo
     garantire gli invarianti; le letture di reporting le faccio con una query diretta che
     proietta su un DTO, senza caricare aggregati che non mi servono. Solo questo elimina
-    gran parte della complessità, perché smetto di piegare il modello di dominio a
-    esigenze di visualizzazione. La versione completa, con store di lettura separati
-    aggiornati per eventi, la considero solo quando i volumi di lettura sono
-    sproporzionati e accetto esplicitamente la consistenza eventuale.
+    gran parte della complessità, perché smetto di piegare il modello di dominio a esigenze
+    di visualizzazione, e non introduce nessuna consistenza eventuale. La versione completa,
+    con store di lettura separati alimentati da eventi, la considero solo quando le letture
+    hanno requisiti che il database transazionale non serve bene - ricerca, analitica,
+    volumi molto alti - e in quel caso metto in conto il read-your-own-writes e lo dichiaro
+    a chi progetta l'interfaccia. E chiarisco sempre che CQRS ed event sourcing sono cose
+    diverse: si combinano bene, ma nessuno dei due richiede l'altro.
+  senior_signals:
+    - "Distingue forma leggera e completa e sceglie la prima come default"
+    - "Separa nettamente CQRS da event sourcing"
+    - "Affronta il read-your-own-writes invece di ignorarlo"
+    - "Nella proiezione gestisce l'ordine degli eventi con una versione"
   pitfalls:
     - "Adottare CQRS completo su un CRUD, raddoppiando il codice"
     - "Confondere CQRS con event sourcing"
     - "Introdurre consistenza eventuale senza dirlo a chi progetta la UI"
-  follow_up_questions:
-    - "Serve event sourcing per fare CQRS?"
-    - "Come gestisci un utente che salva e subito dopo non vede la modifica nella lista?"
+    - "Proiezioni senza controllo di versione: un evento in ritardo sovrascrive lo stato nuovo"
+    - "Nessun modo di ricostruire la proiezione da zero quando si scopre un bug"
+  follow_ups:
+    - question: Serve event sourcing per fare CQRS?
+      answer: >-
+        No. Si può separare il percorso di lettura da quello di scrittura su un normale
+        database relazionale, con query dirette per le letture e il dominio per le
+        scritture: è la forma leggera e non richiede alcun log di eventi. L'event
+        sourcing diventa comodo nella forma completa, perché il log è un alimentatore
+        naturale per le proiezioni e permette di ricostruirle da zero, ma resta una
+        scelta indipendente e con un costo proprio.
+    - question: Come gestisci un utente che salva e subito dopo non vede la modifica nella lista?
+      answer: >-
+        Tre strade, in ordine di costo. La più economica: dopo la scrittura, la lista
+        mostra il risultato in modo ottimistico, perché il client sa già cosa ha appena
+        creato. La seconda: per quella sessione, leggo dalla sorgente di verità per
+        qualche secondo invece che dalla proiezione. La terza, la più precisa: la
+        scrittura restituisce una versione e la lettura attende che la proiezione l'abbia
+        raggiunta, con un fallback sulla sorgente se l'attesa supera una soglia.
+        Qualunque scelga, la dichiaro nel contratto invece di lasciarla scoprire.
+    - question: Come ricostruisci una proiezione quando scopri che era sbagliata?
+      answer: >-
+        Serve che la ricostruzione sia prevista fin dall'inizio: proiezione versionata,
+        possibilità di rileggere il flusso di eventi dall'origine (o di rigenerare dalla
+        tabella sorgente), e idempotenza della scrittura. In pratica si costruisce la
+        nuova proiezione accanto alla vecchia, la si allinea fino a raggiungere la testa
+        del flusso, e poi si sposta la lettura. Se questa procedura non esiste, un bug
+        nella proiezione diventa un incidente che si trascina.
+  related: [rel-35-event-driven, pat-02-repository, db-15-normalization, db-18-read-replicas]
+  resources:
+    - title: "Martin Fowler - CQRS"
+      url: "https://martinfowler.com/bliki/CQRS.html"
+      kind: article
+    - title: "Greg Young - CQRS Documents"
+      url: "https://cqrs.files.wordpress.com/2010/11/cqrs_documents.pdf"
+      kind: article
 
 - id: pat-12-error-handling
   title: Gestione degli errori - eccezioni, Result e confini
@@ -430,29 +1998,180 @@
     Come modellare i fallimenti è una decisione architetturale. La distinzione utile è fra
     errori attesi, che fanno parte del dominio, ed errori inattesi, che sono bug o guasti:
     i due meritano trattamenti diversi.
+  deep_dive: |-
+    La distinzione che organizza tutto è fra errori *attesi* e *inattesi*. Un errore
+    atteso è un esito previsto del dominio - saldo insufficiente, email già registrata,
+    ordine non annullabile - e fa parte del contratto dell'operazione: chi la chiama deve
+    sapere che può succedere. Un errore inatteso è un guasto o un bug - database
+    irraggiungibile, riferimento nullo, disco pieno: non si gestisce localmente, si lascia
+    salire, si osserva e si corregge.
+
+    Il primo tipo va modellato *esplicitamente*, con eccezioni di dominio proprie:
+    `SaldoInsufficiente(conto_id, richiesto, disponibile)` comunica molto più di un
+    `ValueError("errore")`, e permette a chi chiama di distinguere i casi senza leggere
+    stringhe. Il secondo tipo non va catturato: un `except Exception: pass` trasforma un
+    guasto in un comportamento sbagliato silenzioso, che è la cosa peggiore che possa
+    capitare a un sistema, perché nessuno se ne accorge.
+
+    La traduzione in HTTP va fatta in *un punto solo*, tipicamente un exception handler
+    del framework che mappa ogni eccezione di dominio sul suo status code. Se la mappatura
+    è sparsa nei controller, la stessa eccezione finirà tradotta in modi diversi in
+    endpoint diversi, e nessuno saprà più qual è il contratto. Questo punto unico è anche
+    il posto giusto per costruire il corpo in formato Problem Details e per decidere cosa
+    esporre: il messaggio per l'utente e il dettaglio per il log sono due cose diverse, e
+    stacktrace, query e nomi di tabelle non devono mai finire in una risposta.
+
+    L'alternativa alle eccezioni è il tipo *Result*: la funzione restituisce "successo con
+    valore" oppure "errore con motivo", e il chiamante è obbligato dal tipo a gestire
+    entrambi i casi. È idiomatico in Rust e in Go (dove l'errore è un valore di ritorno) e
+    ha un vantaggio reale: i fallimenti attesi compaiono nella *firma*, quindi non
+    sfuggono. Lo svantaggio in linguaggi come Python o Java è che va controcorrente
+    rispetto alle librerie, e finisce per produrre conversioni continue fra i due stili.
+    La soluzione pratica: Result dove i fallimenti attesi sono molti e vanno composti
+    (validazioni, parsing, pipeline), eccezioni per tutto il resto.
+
+    Due regole finali che valgono in qualunque stile. *Fail fast*: un errore non
+    gestibile deve fallire subito e rumorosamente, con abbastanza contesto da diagnosticarlo
+    (identificatori, non solo il messaggio); un errore ingoiato è un bug che si manifesta
+    dieci minuti dopo, altrove. E *non usare le eccezioni per il controllo di flusso
+    normale*: se una condizione capita nel 50% dei casi, non è un'eccezione, è un esito,
+    e va modellata come tale.
   key_points:
     - "Errore atteso (saldo insufficiente, email già registrata): è un esito di business, va modellato esplicitamente"
-    - "Errore inatteso (database irraggiungibile, NullPointer): non si gestisce localmente, si lascia salire e si osserva"
-    - "Eccezioni di dominio proprie, non eccezioni generiche: InsufficientFundsError dice molto più di ValueError"
+    - "Errore inatteso (database irraggiungibile, riferimento nullo): non si gestisce localmente, si lascia salire e si osserva"
+    - "Eccezioni di dominio proprie, con contesto nei campi: SaldoInsufficiente(conto, richiesto, disponibile)"
     - "Il dominio solleva eccezioni di dominio; è il livello HTTP a tradurle in status code, in un punto solo"
     - "L'alternativa è il tipo Result, esplicito nella firma. Idiomatico in Rust e Go, meno in Python e Java"
     - "Mai except generico che ingoia tutto: nasconde i bug e trasforma un guasto in un comportamento sbagliato silenzioso"
     - "Un errore non gestibile deve fallire in fretta e rumorosamente, con abbastanza contesto per la diagnosi"
     - "Il messaggio per l'utente e il dettaglio per il log sono due cose diverse: mai esporre stacktrace o query nel body"
+    - "Non usare le eccezioni per il controllo di flusso normale: se capita spesso, è un esito, non un'eccezione"
+    - "Il punto unico di traduzione è anche dove si costruisce il corpo standard (Problem Details, RFC 9457)"
+  examples:
+    - title: Eccezioni di dominio e un solo punto di traduzione
+      language: python
+      code: |-
+        # dominio/errori.py - nessun riferimento a HTTP
+        class ErroreDominio(Exception):
+            """Base di tutti gli esiti attesi."""
+
+        class SaldoInsufficiente(ErroreDominio):
+            def __init__(self, conto_id: str, richiesto: int, disponibile: int):
+                super().__init__(f"saldo insufficiente su {conto_id}")
+                self.conto_id, self.richiesto, self.disponibile = conto_id, richiesto, disponibile
+
+        # web/errori.py - UNICO punto in cui il dominio incontra HTTP
+        MAPPA: dict[type[ErroreDominio], int] = {
+            SaldoInsufficiente: 422,
+            EmailGiaRegistrata: 409,
+            RisorsaInesistente: 404,
+            OperazioneNonPermessa: 403,
+        }
+
+        @app.exception_handler(ErroreDominio)
+        async def gestisci(request: Request, exc: ErroreDominio) -> JSONResponse:
+            stato = MAPPA.get(type(exc), 400)
+            logger.warning("errore_dominio", tipo=type(exc).__name__, dettaglio=str(exc))
+            return JSONResponse(status_code=stato, media_type="application/problem+json",
+                content={"type": f"https://api.esempio.it/errors/{type(exc).__name__}",
+                         "title": messaggio_utente(exc), "status": stato})
+      note: >-
+        Il dominio non importa nulla da `fastapi`, e la mappa sta in un file solo: cambiare
+        uno status code è una riga, non una caccia in venti controller.
+    - title: Quando il Result conviene davvero
+      language: python
+      code: |-
+        # Molti fallimenti attesi da comporre: con le eccezioni si perde il primo errore
+        # o si scrive un try per ogni passo.
+        @dataclass(frozen=True)
+        class Ok[T]:  valore: T
+        @dataclass(frozen=True)
+        class Errore: motivo: str; campo: str
+
+        Result = Ok[T] | Errore
+
+        def valida(dati: dict) -> Result[Richiesta]:
+            errori = [e for e in (valida_email(dati), valida_date(dati), valida_importo(dati))
+                      if isinstance(e, Errore)]
+            if errori:
+                return errori[0]          # oppure li si accumula tutti per la risposta
+            return Ok(Richiesta(**dati))
+
+        # Il chiamante è costretto dal tipo a considerare entrambi i casi.
+        match valida(corpo):
+            case Ok(richiesta): ...
+            case Errore(motivo, campo): ...
+      note: >-
+        Il vantaggio è che i fallimenti attesi stanno nella firma. Lo svantaggio è che
+        tutto ciò che sta sotto (librerie, driver) continua a sollevare eccezioni.
+  trade_offs:
+    - option: Eccezioni di dominio
+      pros: Idiomatiche in Python/Java, non inquinano le firme, propagazione automatica
+      cons: Invisibili nella firma, facile dimenticarne una
+      when: Default in linguaggi a eccezioni, per esiti attesi ma poco frequenti
+    - option: Tipo Result
+      pros: I fallimenti compaiono nel tipo, impossibile ignorarli, ottimo da comporre
+      cons: Va controcorrente rispetto alle librerie, conversioni continue
+      when: Validazioni e pipeline con molti fallimenti attesi
+    - option: Codici di ritorno
+      pros: Nessun costo, esplicito
+      cons: Facilmente ignorati, nessun contesto
+      when: Interfacce di sistema, linguaggi senza eccezioni
+  numbers:
+    - "RFC 9457 (Problem Details) dà un formato standard per il corpo: type, title, status, detail, instance"
+    - "Regola pratica: se un 'errore' capita in più del 10-20% delle chiamate, è un esito da modellare, non un'eccezione"
   interview_answer: >-
     Distinguo fra errori attesi e inattesi. Il saldo insufficiente è un esito previsto del
-    dominio, quindi lo modello con un'eccezione di dominio esplicita, e lo tratto come parte
-    del contratto dell'operazione. Un timeout sul database invece è un guasto: non lo
-    gestisco nel caso d'uso, lo lascio salire e mi assicuro che arrivi al monitoraggio. La
-    traduzione da eccezioni a status code HTTP la faccio in un punto solo, tipicamente un
-    exception handler del framework, così i service non sanno nulla di HTTP e non ho
-    mappature sparse. La cosa che evito sempre è il catch generico che ingoia tutto: è il
-    modo più efficace per trasformare un bug in un comportamento sbagliato silenzioso.
+    dominio, quindi lo modello con un'eccezione di dominio esplicita che porta anche il
+    contesto - conto, importo richiesto, disponibile - e lo tratto come parte del contratto
+    dell'operazione. Un timeout sul database invece è un guasto: non lo gestisco nel caso
+    d'uso, lo lascio salire e mi assicuro che arrivi al monitoraggio. La traduzione da
+    eccezioni a status code HTTP la faccio in un punto solo, tipicamente un exception
+    handler del framework, così i service non sanno nulla di HTTP e il contratto degli
+    errori è definito in un file invece che sparso. Nel corpo uso il formato Problem
+    Details e tengo separati il messaggio per l'utente e il dettaglio per il log, perché
+    stacktrace e query non devono mai uscire. Il Result lo uso dove i fallimenti attesi
+    sono molti e vanno composti, tipicamente nelle validazioni.
+  senior_signals:
+    - "Organizza il discorso su atteso/inatteso invece che su try/except"
+    - "Centralizza la traduzione e sa dire perché"
+    - "Mette contesto strutturato nelle eccezioni invece che solo un messaggio"
+    - "Conosce il tipo Result e ne dichiara i limiti nel proprio linguaggio"
   pitfalls:
     - "except Exception: pass, che nasconde guasti reali"
     - "Mappare eccezioni a status code in ogni controller invece che in un handler centrale"
     - "Esporre messaggi interni o stacktrace nella risposta"
     - "Usare le eccezioni per il controllo di flusso normale"
-  follow_up_questions:
-    - "Come traduci un'eccezione di dominio in una risposta HTTP senza che il service conosca HTTP?"
-    - "Quando preferiresti un tipo Result a un'eccezione?"
+    - "Eccezioni senza contesto: 'operazione non valida' non aiuta nessuno a capire cosa sia successo"
+  follow_ups:
+    - question: Come traduci un'eccezione di dominio in una risposta HTTP senza che il service conosca HTTP?
+      answer: >-
+        Con un gestore centralizzato al livello web: il dominio solleva le proprie
+        eccezioni, il framework le intercetta e una mappa le associa agli status code. Il
+        dominio non importa nulla dal framework e la mappa è l'unico punto in cui il
+        contratto degli errori è definito. Nello stesso posto costruisco il corpo in
+        formato Problem Details, così tutti gli errori hanno la stessa forma.
+    - question: Quando preferiresti un tipo Result a un'eccezione?
+      answer: >-
+        Quando i fallimenti attesi sono tanti, frequenti e vanno composti: validazione di
+        un modulo, parsing, pipeline di trasformazioni. Lì il Result rende i casi di
+        errore visibili nella firma e permette di accumularli invece di fermarsi al
+        primo. Per gli esiti rari e eccezionali resto sulle eccezioni, perché in Python o
+        Java il Result costringe a convertire continuamente fra i due mondi e il codice
+        peggiora.
+    - question: Un errore va loggato dove viene sollevato o dove viene gestito?
+      answer: >-
+        Dove viene gestito, una volta sola, con tutto il contesto raccolto lungo il
+        percorso. Loggare a ogni livello produce la stessa eccezione ripetuta cinque
+        volte, con il rumore che ne consegue e la difficoltà di capire quale sia
+        l'occorrenza vera. Se un livello intermedio ha informazioni utili, le aggiunge
+        all'eccezione (contesto, identificatori) invece di scrivere una riga di log e
+        rilanciare.
+  related: [core-04-http-status-codes, pat-03-service-layer, rel-38-observability, pat-09-gof-patterns]
+  resources:
+    - title: "RFC 9457 - Problem Details for HTTP APIs"
+      url: "https://www.rfc-editor.org/rfc/rfc9457.html"
+      kind: doc
+    - title: "Joe Duffy - The Error Model"
+      url: "http://joeduffyblog.com/2016/02/07/the-error-model/"
+      kind: article

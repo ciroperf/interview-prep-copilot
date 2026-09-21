@@ -30,9 +30,11 @@ ANCHOR_BEHAVIORAL = "beh-01-star-method"
 ANCHOR_COMPANY = "beh-02-company-research"
 ANCHOR_SYSTEM_DESIGN = "sd-01-interview-framework"
 
-# Quanti argomenti DSA garantire nel piano, per seniority. Un colloquio da
-# sviluppatore contiene quasi sempre un esercizio di codice, che l'annuncio lo
+# Quanti argomenti DSA mandare a esercizio nel piano, per seniority. Un colloquio
+# da sviluppatore contiene quasi sempre un esercizio di codice, che l'annuncio lo
 # dica o no; i profili junior ne affrontano più dei senior, dove pesa il design.
+# È insieme un minimo garantito e un tetto: oltre la quota gli argomenti DSA
+# restano nel piano, ma come ripasso, per lasciare spazio al resto.
 DSA_QUOTA: dict[str, int] = {
     "intern": 3,
     "junior": 3,
@@ -135,10 +137,10 @@ class StudyPlanBuilder:
             gap_analysis = gap_analysis or self._heuristic_gaps(posting, request)
             summary = summary or self._heuristic_summary(posting, request)
 
-        self._ensure_anchors(priorities, rationales, posting)
+        esercizi_dsa = self._ensure_anchors(priorities, rationales, posting)
         self._ensure_weak_areas(priorities, rationales, request)
 
-        items = self._build_items(priorities, rationales, request)
+        items = self._build_items(priorities, rationales, request, esercizi_dsa)
         items = self._fit_to_budget(items, request)
         self._assign_days(items, request)
 
@@ -219,8 +221,11 @@ class StudyPlanBuilder:
 
     def _ensure_anchors(
         self, priorities: dict[str, int], rationales: dict[str, str], posting: JobPosting
-    ) -> None:
-        """Alcuni temi vanno nel piano a prescindere da cosa dice l'annuncio."""
+    ) -> set[str]:
+        """Alcuni temi vanno nel piano a prescindere da cosa dice l'annuncio.
+
+        Restituisce gli argomenti DSA che possono diventare esercizi di codice.
+        """
         anchors = {
             ANCHOR_COMPANY: (
                 5,
@@ -241,19 +246,24 @@ class StudyPlanBuilder:
                 priorities[topic_id] = max(priorities.get(topic_id, 0), priority)
                 rationales.setdefault(topic_id, why)
 
-        self._ensure_coding_practice(priorities, rationales, posting)
+        return self._ensure_coding_practice(priorities, rationales, posting)
 
     def _ensure_coding_practice(
         self,
         priorities: dict[str, int],
         rationales: dict[str, str],
         posting: JobPosting,
-    ) -> None:
-        """Garantisce che nel piano finisca almeno un esercizio di codice.
+    ) -> set[str]:
+        """Decide su quali argomenti DSA il piano fa scrivere codice.
 
-        Senza questo, un annuncio molto orientato all'architettura spingerebbe
-        fuori budget tutti i problemi DSA, e il candidato arriverebbe al live
-        coding senza averne risolto nemmeno uno.
+        Serve in due direzioni. Verso il basso: senza una garanzia, un annuncio
+        molto orientato all'architettura spingerebbe fuori budget tutti i problemi
+        DSA e il candidato arriverebbe al live coding senza averne risolto nemmeno
+        uno. Verso l'alto: senza un tetto, il punteggio dell'annuncio può far
+        emergere sei o sette argomenti DSA e riempire di esercizi anche il piano di
+        un senior, dove il tempo serve al design. Restituisce quindi l'insieme -
+        ampio quanto la quota - degli argomenti ammessi agli esercizi; gli altri
+        restano nel piano come ripasso.
         """
         quota = DSA_QUOTA.get(posting.seniority, 2)
         risolvibili = [
@@ -263,7 +273,7 @@ class StudyPlanBuilder:
             and self.kb.problems_by_topic.get(topic_id)
         ]
         if not risolvibili:
-            return
+            return set()
         # Prima quelli che l'annuncio ha già fatto emergere, poi l'ordine di default.
         ordinati = sorted(
             risolvibili,
@@ -272,12 +282,14 @@ class StudyPlanBuilder:
                 DSA_FALLBACK_ORDER.index(tid) if tid in DSA_FALLBACK_ORDER else 99,
             ),
         )
-        for topic_id in ordinati[:quota]:
+        ammessi = set(ordinati[:quota])
+        for topic_id in ammessi:
             priorities[topic_id] = max(priorities.get(topic_id, 0), 4)
             rationales.setdefault(
                 topic_id,
                 "Esercizio di codice: il colloquio tecnico ne prevede quasi sempre uno.",
             )
+        return ammessi
 
     def _ensure_weak_areas(
         self,
@@ -308,6 +320,7 @@ class StudyPlanBuilder:
         priorities: dict[str, int],
         rationales: dict[str, str],
         request: StudyPlanCreate,
+        esercizi_dsa: set[str],
     ) -> list[PlanItem]:
         items: list[PlanItem] = []
         ordered = sorted(priorities.items(), key=lambda kv: -kv[1])
@@ -317,8 +330,12 @@ class StudyPlanBuilder:
             rationale = rationales.get(topic_id, "")
             resources = [Resource(**r.model_dump()) for r in topic.resources]
 
-            if topic.track == "technical" and self.kb.problems_by_topic.get(topic_id):
-                # Argomenti DSA: si imparano scrivendo codice.
+            if (
+                topic.track == "technical"
+                and topic_id in esercizi_dsa
+                and self.kb.problems_by_topic.get(topic_id)
+            ):
+                # Argomenti DSA entro la quota: si imparano scrivendo codice.
                 for problem in self.kb.problems_for([topic_id])[:2]:
                     items.append(
                         PlanItem(

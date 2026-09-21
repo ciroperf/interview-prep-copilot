@@ -1,0 +1,1505 @@
+# KB dedicata a JavaScript e TypeScript. Fa parte del percorso "javascript".
+#
+# Taglio: i meccanismi che i colloqui chiedono davvero - coercizione, closure, this,
+# prototipi, event loop, tipi - con gli esempi che compaiono nei quiz e le trappole
+# che si incontrano in produzione.
+
+- id: js-01-tipi-coercizione
+  title: Tipi primitivi e coercizione
+  category: languages
+  track: knowledge
+  level: medium
+  tags: [javascript, tipi, coercizione, fondamentali]
+  estimated_minutes: 25
+  summary: >-
+    JavaScript ha sette primitivi e un solo tipo numerico a virgola mobile; la
+    coercizione implicita converte i valori quando gli operatori non combaciano, ed è la
+    sorgente della maggior parte dei quiz da colloquio e di parecchi bug reali.
+  deep_dive: |-
+    I primitivi sono `string`, `number`, `boolean`, `null`, `undefined`, `symbol`,
+    `bigint`; tutto il resto è oggetto, funzioni e array compresi. I primitivi sono
+    immutabili e confrontati per valore; gli oggetti per riferimento, il che spiega
+    perché `{a: 1} === {a: 1}` è falso.
+
+    La distinzione `null`/`undefined` va saputa: `undefined` significa "non assegnato" ed
+    è ciò che ottieni da una variabile dichiarata e non inizializzata, da un parametro
+    mancante o da una proprietà inesistente; `null` è un valore *assegnato
+    deliberatamente* per dire "nessun valore". Da qui un dettaglio da colloquio: i
+    valori di default dei parametri scattano su `undefined` ma non su `null`.
+
+    Su `==` e `===`: il primo applica le regole di conversione di ECMAScript, il secondo
+    no. La pratica corretta è usare sempre `===`, con un'eccezione idiomatica accettata:
+    `x == null` è un modo compatto e corretto di dire "è `null` oppure `undefined`". Il
+    resto - `[] == false` vero, `null == 0` falso ma `null >= 0` vero - non va imparato
+    a memoria: va evitato.
+
+    Sui numeri: esiste un solo tipo, IEEE 754 a doppia precisione, quindi `0.1 + 0.2 !==
+    0.3` come in quasi tutti i linguaggi, e gli interi sono esatti solo fino a
+    `Number.MAX_SAFE_INTEGER` (2^53 - 1). Le conseguenze pratiche sono due e vanno dette
+    a un colloquio: gli importi monetari si trattano in centesimi interi (o con una
+    libreria decimale), e gli id numerici a 64 bit provenienti da un backend vanno
+    trasportati come *stringhe*, altrimenti si corrompono silenziosamente in JSON. Per i
+    numeri davvero grandi c'è `BigInt`, che però non si mescola con `number` nelle
+    operazioni.
+
+    Altri due comportamenti che compaiono di continuo: `NaN !== NaN`, quindi per
+    verificarlo si usa `Number.isNaN` (non il vecchio `isNaN`, che converte prima); e
+    `typeof null === "object"`, un bug storico mai corretto per retrocompatibilità. Per
+    distinguere davvero i tipi: `Array.isArray`, `instanceof` per le classi,
+    `Object.prototype.toString.call(x)` per i casi limite.
+
+    Infine il capitolo *copie*: lo spread `{...oggetto}` e `Object.assign` sono
+    superficiali, quindi gli oggetti annidati restano condivisi. Per una copia profonda
+    oggi esiste `structuredClone`, standard e molto più corretto del vecchio
+    `JSON.parse(JSON.stringify(x))`, che perde `Date`, `Map`, `Set`, `undefined` e
+    va in errore sui riferimenti circolari.
+  key_points:
+    - "Sette primitivi (string, number, boolean, null, undefined, symbol, bigint); tutto il resto è oggetto"
+    - "Primitivi confrontati per valore, oggetti per riferimento: {a:1} === {a:1} è falso"
+    - "undefined = non assegnato, null = assenza deliberata. I default dei parametri scattano su undefined, non su null"
+    - "Usa sempre ===. L'unica eccezione idiomatica è `x == null`, che copre null e undefined insieme"
+    - "Un solo tipo numerico (IEEE 754): 0.1 + 0.2 !== 0.3 e gli interi sono esatti fino a 2^53 - 1"
+    - "Conseguenze pratiche: soldi in centesimi interi, id a 64 bit trasportati come stringhe"
+    - "NaN !== NaN: si verifica con Number.isNaN, non con il vecchio isNaN che converte prima"
+    - "typeof null === 'object' è un bug storico; per i tipi veri usa Array.isArray, instanceof, Object.prototype.toString.call"
+    - "Spread e Object.assign sono copie superficiali; structuredClone fa la copia profonda correttamente"
+    - "JSON.parse(JSON.stringify(x)) perde Date, Map, Set e undefined e fallisce sui cicli"
+  examples:
+    - title: I quiz classici, e la regola che li rende inutili
+      language: javascript
+      code: |-
+        0.1 + 0.2 === 0.3        // false  -> confronta con una tolleranza, o usa interi
+        NaN === NaN              // false  -> Number.isNaN(x)
+        typeof null              // "object"  (bug storico)
+        [] == false              // true   -> coercizione: [] -> "" -> 0 -> false
+        null == undefined        // true
+        null === undefined       // false
+        9007199254740993         // 9007199254740992: oltre MAX_SAFE_INTEGER si perde
+
+        // La regola pratica: usa ===, e i quiz smettono di essere rilevanti.
+        // L'unica eccezione idiomatica:
+        if (valore == null) { /* è null oppure undefined */ }
+      note: >-
+        A un colloquio la risposta forte non è recitare la tabella di conversione: è
+        dire perché non si usa `==` e quali sono le due o tre conseguenze pratiche
+        (soldi, id grandi, confronti fra float).
+    - title: Copie superficiali e profonde
+      language: javascript
+      code: |-
+        const utente = { nome: "Mario", indirizzo: { citta: "Napoli" }, nato: new Date() };
+
+        const copia = { ...utente };                 // SUPERFICIALE
+        copia.indirizzo.citta = "Roma";
+        utente.indirizzo.citta;                      // "Roma": stesso oggetto annidato
+
+        const json = JSON.parse(JSON.stringify(utente));   // perde il tipo Date
+        typeof json.nato;                            // "string"
+
+        const vera = structuredClone(utente);        // profonda, mantiene Date/Map/Set
+        vera.nato instanceof Date;                   // true
+      note: >-
+        `structuredClone` è disponibile nei browser moderni e in Node 17+: è la risposta
+        giusta alla domanda "come copio in profondità?", senza librerie.
+  trade_offs:
+    - option: number per gli importi
+      pros: Semplice, nessuna conversione
+      cons: Errori di arrotondamento accumulati, inaccettabile sui soldi
+      when: Mai su valori monetari
+    - option: Interi in centesimi
+      pros: Esatto fino a cifre enormi, nessuna dipendenza
+      cons: Conversione nella presentazione, attenzione alle divisioni
+      when: Il default per il denaro
+    - option: BigInt
+      pros: Interi arbitrariamente grandi ed esatti
+      cons: Non si mescola con number, non serializzabile in JSON direttamente
+      when: Id a 64 bit, crittografia, contatori enormi
+    - option: Libreria decimale (decimal.js)
+      pros: Aritmetica decimale corretta, arrotondamenti configurabili
+      cons: Dipendenza e overhead
+      when: Calcoli finanziari con percentuali e divisioni
+  numbers:
+    - "Number.MAX_SAFE_INTEGER = 2^53 - 1 = 9.007.199.254.740.991"
+    - "Un id a 64 bit (Snowflake, bigint di Postgres) NON entra in un number: va trasportato come stringa"
+    - "0.1 + 0.2 = 0.30000000000000004: la differenza è ~5.5e-17, ma basta a far fallire un ==="
+  interview_answer: >-
+    JavaScript ha sette primitivi e un solo tipo numerico a virgola mobile, e la
+    coercizione implicita converte i valori quando gli operatori non combaciano. La mia
+    regola è usare sempre il confronto stretto, con l'unica eccezione idiomatica di `x ==
+    null` per coprire null e undefined insieme: così le domande trabocchetto sulla tabella
+    di conversione diventano irrilevanti. I due punti che portano problemi veri in
+    produzione sono numerici: gli importi non vanno tenuti in floating point, quindi lavoro
+    in centesimi interi, e gli id a 64 bit che arrivano dal backend vanno trasportati come
+    stringhe, perché oltre 2^53 il numero si corrompe in silenzio quando fai il parse del
+    JSON. Sulle copie ricordo che lo spread è superficiale e che oggi per la copia profonda
+    c'è structuredClone, che a differenza del giro con JSON mantiene Date, Map e Set.
+  senior_signals:
+    - "Evita la coercizione invece di conoscerne la tabella a memoria"
+    - "Porta il problema degli id a 64 bit, che è un bug reale e silenzioso"
+    - "Conosce structuredClone e i limiti del giro con JSON"
+    - "Distingue null e undefined anche nel comportamento dei default"
+  pitfalls:
+    - "Usare == e affidarsi alla coercizione"
+    - "Tenere importi monetari in floating point"
+    - "Fare JSON.parse di id numerici a 64 bit: si corrompono oltre 2^53"
+    - "Copiare con spread pensando che sia profondo"
+    - "isNaN al posto di Number.isNaN: isNaN('abc') è true perché converte prima"
+  follow_ups:
+    - question: Perché 0.1 + 0.2 non fa 0.3, e cosa fai in pratica?
+      answer: >-
+        Perché i number sono IEEE 754 in base due e 0,1 e 0,2 non hanno rappresentazione
+        finita: la somma dà 0.30000000000000004. Non è una stranezza di JavaScript, vale
+        in quasi tutti i linguaggi. In pratica: per i soldi lavoro in centesimi interi e
+        converto solo nella presentazione; per confronti fra float uso una tolleranza
+        (`Math.abs(a - b) < Number.EPSILON * fattore`); per calcoli finanziari complessi
+        una libreria decimale.
+    - question: Come copi un oggetto annidato senza sorprese?
+      answer: >-
+        Con `structuredClone`, che è standard, gestisce Date, Map, Set, TypedArray e
+        anche i riferimenti circolari. Lo spread e `Object.assign` copiano solo il primo
+        livello, quindi gli oggetti annidati restano condivisi e modificarne uno modifica
+        entrambi. Il vecchio `JSON.parse(JSON.stringify(x))` funziona solo su dati
+        JSON-puri: perde i tipi e fallisce sui cicli. Non clona funzioni e nodi DOM:
+        in quei casi la copia profonda non ha senso e va ripensato il modello.
+    - question: Quando useresti BigInt?
+      answer: >-
+        Quando i valori superano 2^53 e devono restare esatti: identificatori a 64 bit,
+        contatori molto grandi, calcoli crittografici. Con due avvertenze pratiche: non
+        si può mescolare con `number` nelle operazioni senza conversione esplicita, e
+        `JSON.stringify` non lo serializza, quindi al confine va comunque trasformato in
+        stringa. Per i soli id, spesso la scelta più semplice resta trattarli come
+        stringhe opache.
+  related: [js-02-scope-closure-this, js-07-typescript, core-01-what-is-an-api]
+  resources:
+    - title: "MDN - JavaScript data types and data structures"
+      url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures"
+      kind: doc
+    - title: "javascript.info - Tipi e conversioni"
+      url: "https://javascript.info/types"
+      kind: article
+    - title: "lydiahallie/javascript-questions - quiz con spiegazione"
+      url: "https://github.com/lydiahallie/javascript-questions"
+      kind: repo
+
+- id: js-02-scope-closure-this
+  title: Scope, closure e this
+  category: languages
+  track: knowledge
+  level: medium
+  tags: [javascript, closure, this, scope]
+  estimated_minutes: 30
+  summary: >-
+    Le closure catturano le variabili dell'ambiente in cui una funzione è definita; `this`
+    invece non è catturato, è deciso da *come* la funzione viene chiamata - salvo nelle
+    arrow function, che lo ereditano lessicalmente.
+  deep_dive: |-
+    `var` ha ambito di funzione e viene *hoistata* inizializzata a `undefined`; `let` e
+    `const` hanno ambito di blocco e sono hoistate ma non inizializzate, quindi leggerle
+    prima della dichiarazione lancia un errore - è la *temporal dead zone*. Questa
+    differenza spiega il quiz più famoso di tutti: un ciclo `for (var i ...)` che
+    programma tre callback stampa `3` tre volte, perché esiste *una sola* `i` condivisa;
+    con `let` ne esiste una per iterazione e stampa `0, 1, 2`.
+
+    Una *closure* è una funzione insieme all'ambiente lessicale in cui è stata creata:
+    continua a vedere quelle variabili anche dopo che la funzione esterna è terminata. È
+    il meccanismo dietro i contatori privati, le factory di funzioni, la memoizzazione,
+    `debounce` e `throttle`. Ed è anche una causa comune di perdite di memoria: una
+    closure che cattura un oggetto grande - o un nodo del DOM - lo tiene vivo finché
+    esiste il riferimento alla funzione, tipicamente perché è registrata come listener e
+    nessuno la rimuove.
+
+    `this` è la parte che confonde di più perché in JavaScript *non* dipende da dove la
+    funzione è scritta ma da come è chiamata. Le regole, in ordine di precedenza: con
+    `new`, `this` è l'oggetto appena creato; con `call`, `apply` o `bind`, è quello
+    passato; con la chiamata come metodo (`oggetto.metodo()`), è l'oggetto prima del
+    punto; altrimenti è `undefined` in modalità strict (e l'oggetto globale fuori). Le
+    *arrow function* sono l'eccezione: non hanno un proprio `this`, lo prendono dallo
+    scope lessicale in cui sono definite, ed è per questo che sono la scelta giusta per i
+    callback dentro un metodo.
+
+    Da qui il problema classico del *metodo che perde il this*: passare `oggetto.metodo`
+    come callback lo separa dall'oggetto, e dentro il metodo `this` diventa `undefined`.
+    Le soluzioni sono tre: `bind` nel costruttore, una arrow function che lo richiama
+    (`() => this.metodo()`), oppure definire il metodo come campo di classe con una arrow
+    function.
+
+    Una nota sulle arrow function come metodi: proprio perché non hanno `this` proprio,
+    *non* vanno usate per definire metodi che devono accedere all'istanza tramite il
+    prototipo, né come costruttori (non si possono usare con `new`), né dove serve
+    l'oggetto `arguments`.
+  key_points:
+    - "var ha ambito di funzione ed è hoistata a undefined; let e const hanno ambito di blocco e una temporal dead zone"
+    - "Il quiz del ciclo: con var i callback vedono una sola variabile condivisa, con let una per iterazione"
+    - "Closure = funzione + ambiente lessicale in cui è stata creata: vede quelle variabili anche dopo il ritorno"
+    - "Le closure sono dietro contatori privati, factory, memoizzazione, debounce e throttle"
+    - "Sono anche una causa comune di perdite: una closure che cattura un nodo DOM lo tiene vivo finché esiste il listener"
+    - "this dipende da COME la funzione è chiamata: new > call/apply/bind > oggetto.metodo() > undefined in strict mode"
+    - "Le arrow function non hanno this proprio: lo ereditano lessicalmente. Perfette come callback dentro un metodo"
+    - "Passare oggetto.metodo come callback perde il this: serve bind, una arrow, o un campo di classe"
+    - "Le arrow non vanno usate come metodi che devono usare l'istanza dal prototipo, né come costruttori"
+  examples:
+    - title: Il quiz del ciclo, e perché conta davvero
+      language: javascript
+      code: |-
+        for (var i = 0; i < 3; i++) setTimeout(() => console.log(i), 0);
+        // 3, 3, 3   -> una sola `i`, condivisa; al momento del callback vale già 3
+
+        for (let i = 0; i < 3; i++) setTimeout(() => console.log(i), 0);
+        // 0, 1, 2   -> `let` crea una nuova associazione per iterazione
+
+        // Prima di let si otteneva lo stesso effetto con una IIFE:
+        for (var i = 0; i < 3; i++) (function (j) {
+          setTimeout(() => console.log(j), 0);
+        })(i);
+      note: >-
+        Non è solo un quiz: lo stesso errore appare con i gestori di eventi registrati in
+        un ciclo, dove tutti finiscono per riferirsi all'ultimo elemento.
+    - title: this perso, e le tre cure
+      language: javascript
+      code: |-
+        class Contatore {
+          conteggio = 0;
+          incrementa() { this.conteggio++; }          // metodo normale
+          decrementa = () => { this.conteggio--; };   // campo con arrow: this legato
+        }
+
+        const c = new Contatore();
+        bottone.addEventListener("click", c.incrementa);        // this === undefined
+        bottone.addEventListener("click", c.incrementa.bind(c)); // 1) bind
+        bottone.addEventListener("click", () => c.incrementa()); // 2) arrow che richiama
+        bottone.addEventListener("click", c.decrementa);         // 3) campo arrow: funziona
+      note: >-
+        La terza forma costa: il metodo diventa una proprietà per istanza invece di stare
+        sul prototipo, quindi con molte istanze si paga in memoria.
+    - title: Closure utili - debounce e memoizzazione
+      language: javascript
+      code: |-
+        function debounce(fn, ms) {
+          let timer;                       // catturata dalla closure, privata
+          return (...args) => {
+            clearTimeout(timer);
+            timer = setTimeout(() => fn(...args), ms);
+          };
+        }
+
+        function memoizza(fn) {
+          const cache = new Map();         // vive quanto la funzione restituita
+          return (x) => {
+            if (!cache.has(x)) cache.set(x, fn(x));
+            return cache.get(x);
+          };
+        }
+        // Attenzione: questa cache non ha limite. In un'applicazione longeva
+        // serve una dimensione massima o una WeakMap con chiavi oggetto.
+      note: >-
+        `debounce` aspetta la quiete, `throttle` limita la frequenza: si confondono di
+        continuo, ed è una domanda da colloquio frequente sul frontend.
+  trade_offs:
+    - option: Metodo sul prototipo + bind
+      pros: Un solo metodo condiviso fra tutte le istanze, memoria minima
+      cons: Serve ricordarsi il bind dove si passa come callback
+      when: Classi con molte istanze
+    - option: Campo di classe con arrow
+      pros: this sempre corretto, nessun bind da ricordare
+      cons: "Una funzione per istanza: più memoria, non sul prototipo"
+      when: Componenti e handler, poche istanze
+    - option: Funzioni e closure invece di classi
+      pros: Nessun this da gestire, stato privato naturale
+      cons: Stato duplicato per chiusura, meno familiare a chi arriva da linguaggi OOP
+      when: Stile funzionale, React moderno, moduli
+  numbers:
+    - "Un campo arrow per istanza significa una funzione per istanza: con decine di migliaia di oggetti si vede"
+    - "debounce tipico per una ricerca mentre si digita: 200-400 ms"
+  interview_answer: >-
+    Una closure è una funzione insieme all'ambiente in cui è stata definita: continua a
+    vedere quelle variabili anche dopo che la funzione esterna è terminata, ed è il
+    meccanismo dietro stato privato, memoizzazione, debounce e throttle. `this` invece
+    funziona in modo diverso da quasi tutti gli altri linguaggi: non è catturato, è deciso
+    da come la funzione viene chiamata - con new, con bind, come metodo di un oggetto, o
+    niente in strict mode. Le arrow function sono l'eccezione, perché non hanno un this
+    proprio e lo ereditano lessicalmente: per questo sono la scelta giusta per i callback
+    dentro un metodo. Il caso pratico che incontro più spesso è il metodo passato come
+    callback, che perde il this: lo risolvo con bind o con una arrow che lo richiama. E
+    tengo presente che le closure sono anche una causa classica di perdite di memoria,
+    quando catturano nodi del DOM e restano vive come listener mai rimossi.
+  senior_signals:
+    - "Spiega la differenza var/let a partire dal comportamento, non dalla regola"
+    - "Sa enunciare le regole di this in ordine di precedenza"
+    - "Collega le closure alle perdite di memoria nei listener"
+    - "Conosce il costo in memoria dei campi arrow rispetto ai metodi sul prototipo"
+  pitfalls:
+    - "Passare oggetto.metodo come callback e perdere il this"
+    - "Usare var in un ciclo con callback asincroni"
+    - "Arrow function usate come metodi che devono accedere all'istanza via prototipo"
+    - "Closure che catturano nodi del DOM in listener mai rimossi: perdita di memoria"
+    - "Cache dentro una closure senza limite di dimensione"
+  follow_ups:
+    - question: Cosa stampa un ciclo con var e setTimeout, e perché?
+      answer: >-
+        Stampa il valore finale ripetuto - tipicamente `3, 3, 3` - perché `var` ha ambito
+        di funzione: esiste una sola variabile condivisa da tutti i callback, e quando i
+        callback vengono eseguiti il ciclo è già terminato. Con `let`, che ha ambito di
+        blocco, viene creata una nuova associazione a ogni iterazione e ciascun callback
+        cattura la propria, quindi stampa `0, 1, 2`.
+    - question: Come si determina il valore di this in una funzione?
+      answer: >-
+        Dalla forma della chiamata, in questo ordine: se è invocata con `new`, `this` è
+        l'oggetto appena creato; se con `call`, `apply` o `bind`, è quello passato; se
+        come metodo di un oggetto, è l'oggetto prima del punto; altrimenti è `undefined`
+        in modalità strict. Le arrow function non partecipano a queste regole: non hanno
+        un `this` proprio e usano quello dello scope in cui sono state definite.
+    - question: Differenza fra debounce e throttle?
+      answer: >-
+        `debounce` rimanda l'esecuzione finché gli eventi non smettono di arrivare per un
+        certo tempo: perfetto per una ricerca mentre l'utente digita, perché vuoi
+        eseguire quando ha finito. `throttle` esegue al massimo una volta ogni intervallo,
+        a prescindere da quanti eventi arrivino: adatto a scroll e resize, dove vuoi
+        aggiornare regolarmente ma non a ogni pixel. La confusione nasce perché entrambi
+        riducono le esecuzioni, ma rispondono a esigenze diverse.
+  related: [js-01-tipi-coercizione, js-03-prototipi-classi, js-04-event-loop, js-08-performance-memoria]
+  resources:
+    - title: "MDN - Closures"
+      url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Closures"
+      kind: doc
+    - title: "getify/You-Dont-Know-JS - Scope & Closures"
+      url: "https://github.com/getify/You-Dont-Know-JS"
+      kind: repo
+    - title: "javascript.info - Variable scope, closure"
+      url: "https://javascript.info/closure"
+      kind: article
+
+- id: js-03-prototipi-classi
+  title: Prototipi, classi ed ereditarietà
+  category: languages
+  track: knowledge
+  level: medium
+  tags: [javascript, prototipi, classi, oop]
+  estimated_minutes: 25
+  summary: >-
+    L'ereditarietà in JavaScript non passa dalle classi ma dalla catena dei prototipi: la
+    sintassi `class` è una comodità costruita sopra lo stesso meccanismo, e conoscerlo
+    spiega `instanceof`, i metodi condivisi e il costo della memoria.
+  deep_dive: |-
+    Ogni oggetto ha un collegamento interno a un altro oggetto, il suo *prototipo*.
+    Quando si accede a una proprietà che l'oggetto non possiede, il motore risale la
+    catena finché la trova o arriva a `null`. Da qui discende tutto: i metodi definiti
+    su `Classe.prototype` esistono *una volta sola* e sono condivisi da tutte le
+    istanze, mentre le proprietà assegnate nel costruttore esistono per ciascuna. È
+    anche il motivo per cui aggiungere un metodo a un prototipo lo rende
+    immediatamente disponibile a tutti gli oggetti già creati.
+
+    La sintassi `class` introdotta in ES2015 è *zucchero sintattico*: dietro c'è ancora
+    la catena dei prototipi. Vale la pena saperlo perché spiega comportamenti che
+    altrimenti sembrano arbitrari - `instanceof` che controlla se un prototipo compare
+    nella catena, `super` che risale al prototipo del genitore, i metodi statici che
+    stanno sul costruttore e non sulle istanze. Le classi però aggiungono cose vere:
+    sono in strict mode, non sono hoistate utilizzabili (temporal dead zone), e dal
+    2022 supportano i *campi privati* con `#`, che sono privati davvero a livello di
+    linguaggio - a differenza della convenzione dell'underscore.
+
+    Distinguere proprietà proprie ed ereditate è una domanda frequente:
+    `Object.hasOwn(oggetto, chiave)` (o il vecchio `hasOwnProperty`) guarda solo
+    l'oggetto; `in` guarda tutta la catena. La differenza conta quando si itera: `for...in`
+    scorre anche le proprietà ereditate enumerabili, mentre `Object.keys` restituisce
+    solo quelle proprie - motivo per cui `Object.keys` (o `Object.entries`) è quasi
+    sempre la scelta giusta.
+
+    Sul design, la raccomandazione moderna è la stessa di altri linguaggi: *composizione
+    invece di ereditarietà*. Gerarchie profonde creano accoppiamento rigido e il classico
+    problema del "metodo che serve a metà dei sottotipi"; comporre oggetti e funzioni,
+    o usare mixin quando servono comportamenti trasversali, invecchia molto meglio. Le
+    classi restano ottime dove c'è un'identità con stato e invarianti da proteggere.
+
+    Un'ultima trappola nota: modificare i prototipi predefiniti (`Array.prototype`,
+    `Object.prototype`) - il cosiddetto *monkey patching* - rompe il codice altrui e le
+    librerie, perché cambia il comportamento globale del linguaggio. È accettabile solo
+    nei polyfill che implementano uno standard esistente.
+  key_points:
+    - "Ogni oggetto ha un prototipo: l'accesso a una proprietà risale la catena finché non la trova o arriva a null"
+    - "I metodi su Classe.prototype esistono una volta sola e sono condivisi; le proprietà del costruttore sono per istanza"
+    - "`class` è zucchero sintattico sui prototipi, ma aggiunge strict mode, TDZ e campi privati con #"
+    - "instanceof controlla se un prototipo compare nella catena; super risale al prototipo del genitore"
+    - "Object.hasOwn guarda solo l'oggetto, `in` guarda tutta la catena"
+    - "for...in scorre anche le proprietà ereditate enumerabili: usa Object.keys o Object.entries"
+    - "I campi privati con # sono privati davvero, a differenza della convenzione dell'underscore"
+    - "Composizione invece di ereditarietà: le gerarchie profonde invecchiano male"
+    - "Non modificare i prototipi predefiniti (monkey patching): rompe librerie e codice altrui"
+  examples:
+    - title: La catena, vista da vicino
+      language: javascript
+      code: |-
+        class Animale {
+          constructor(nome) { this.nome = nome; }      // proprietà PER ISTANZA
+          parla() { return `${this.nome} fa un verso`; } // metodo SUL PROTOTIPO
+        }
+        class Cane extends Animale {
+          parla() { return `${super.parla()}: bau`; }
+        }
+
+        const fido = new Cane("Fido");
+        Object.getPrototypeOf(fido) === Cane.prototype;             // true
+        Object.getPrototypeOf(Cane.prototype) === Animale.prototype; // true
+        fido instanceof Animale;                                     // true: risale la catena
+
+        Object.hasOwn(fido, "nome");     // true  (proprietà propria)
+        Object.hasOwn(fido, "parla");    // false (sta sul prototipo)
+        "parla" in fido;                 // true  (la catena la trova)
+      note: >-
+        Questa distinzione spiega perché `Object.keys(fido)` restituisce solo `["nome"]`:
+        i metodi non sono proprietà proprie dell'istanza.
+    - title: Campi privati veri e composizione
+      language: javascript
+      code: |-
+        class ContoCorrente {
+          #saldoCents = 0;                    // privato a livello di LINGUAGGIO
+          deposita(cents) {
+            if (cents <= 0) throw new RangeError("importo non valido");
+            this.#saldoCents += cents;
+          }
+          get saldo() { return this.#saldoCents / 100; }
+        }
+        const c = new ContoCorrente();
+        // c.#saldoCents;                     // SyntaxError, non accessibile da fuori
+
+        // Composizione invece di gerarchia: comportamenti aggiunti, non ereditati
+        const conLog = (fn, nome) => (...args) => {
+          console.time(nome); try { return fn(...args); } finally { console.timeEnd(nome); }
+        };
+        const calcolaConLog = conLog(calcola, "calcola");
+      note: >-
+        `#` non è una convenzione: il campo non compare in `Object.keys`, non è
+        raggiungibile per riflessione e il motore lo applica davvero.
+  trade_offs:
+    - option: class
+      pros: Sintassi familiare, campi privati, ottima per entità con stato e invarianti
+      cons: Invita a gerarchie profonde, `this` da gestire nei callback
+      when: Entità di dominio, oggetti con identità
+    - option: Funzioni e closure
+      pros: Nessun this, stato privato naturale, componibile
+      cons: Stato duplicato per istanza, meno introspezione
+      when: Utilità, hook, moduli, stile funzionale
+    - option: Composizione / mixin
+      pros: Comportamenti trasversali senza gerarchia, facile da combinare
+      cons: Origine dei metodi meno evidente se se ne abusa
+      when: Più comportamenti indipendenti sullo stesso oggetto
+    - option: Oggetti semplici + funzioni pure
+      pros: Serializzabili, testabili, nessuna sorpresa
+      cons: Nessuna incapsulazione degli invarianti
+      when: Dati che attraversano confini (DTO, stato di React, messaggi)
+  numbers:
+    - "Un metodo sul prototipo esiste una volta sola; un campo arrow esiste per ogni istanza"
+    - "La risalita della catena costa: catene molto profonde rallentano gli accessi, ma nella pratica il problema è la leggibilità"
+  interview_answer: >-
+    In JavaScript l'ereditarietà passa dalla catena dei prototipi: ogni oggetto ha un
+    prototipo, e quando accedo a una proprietà che non possiede il motore risale la catena
+    finché non la trova. La sintassi class è zucchero sopra questo meccanismo, e saperlo
+    spiega cose che altrimenti sembrano arbitrarie: instanceof controlla se un prototipo
+    compare nella catena, i metodi stanno sul prototipo e quindi esistono una volta sola
+    mentre le proprietà del costruttore esistono per istanza. Le classi però aggiungono
+    cose reali, prima fra tutte i campi privati con il cancelletto, che sono privati
+    davvero e non per convenzione. Sul design preferisco la composizione all'ereditarietà:
+    tengo le classi per le entità con stato e invarianti, e per il resto uso funzioni e
+    oggetti composti, che invecchiano meglio delle gerarchie.
+  senior_signals:
+    - "Spiega class come zucchero sui prototipi senza sminuire ciò che aggiunge"
+    - "Distingue proprietà proprie ed ereditate e sa quando conta (iterazione, serializzazione)"
+    - "Conosce i campi privati con # e la differenza dalla convenzione underscore"
+    - "Preferisce la composizione e sa dire dove le classi restano la scelta giusta"
+  pitfalls:
+    - "for...in su oggetti, che scorre anche le proprietà ereditate"
+    - "Gerarchie profonde di classi per riusare tre metodi"
+    - "Modificare Array.prototype o Object.prototype"
+    - "Confondere metodi statici (sul costruttore) e metodi di istanza (sul prototipo)"
+    - "Aspettarsi che l'underscore renda privato qualcosa"
+  follow_ups:
+    - question: Che differenza c'è fra una classe in JavaScript e una in Java?
+      answer: >-
+        In Java la classe è un tipo vero con verifica statica e l'ereditarietà è
+        nominale; in JavaScript la classe è una funzione costruttrice con un oggetto
+        prototipo, e l'ereditarietà è la catena dei prototipi risolta a runtime. In
+        pratica: in JavaScript posso aggiungere metodi al prototipo dopo la creazione
+        delle istanze e le vedono tutte, posso sostituire il prototipo, e non esiste
+        controllo statico dei tipi a meno di usare TypeScript.
+    - question: Quando conviene la composizione rispetto all'ereditarietà?
+      answer: >-
+        Quasi sempre, e in particolare quando i comportamenti sono trasversali e si
+        combinano in modi diversi: logging, retry, cache, serializzazione. L'ereditarietà
+        va bene per una relazione "è un" stabile e poco profonda; appena compaiono
+        sottotipi che devono disattivare metodi del genitore, la gerarchia è sbagliata. La
+        composizione ha anche un vantaggio pratico: si testa un pezzo alla volta.
+    - question: Cosa fa esattamente `new`?
+      answer: >-
+        Quattro cose: crea un oggetto vuoto, gli assegna come prototipo il `prototype`
+        della funzione costruttrice, esegue il costruttore con `this` legato a
+        quell'oggetto, e restituisce l'oggetto - a meno che il costruttore non
+        restituisca esplicitamente un altro oggetto. Sapere questi quattro passi permette
+        di rispondere a tutte le domande su `new`, comprese quelle sulle factory
+        function come alternativa.
+  related: [js-02-scope-closure-this, js-07-typescript, pat-09-gof-patterns]
+  resources:
+    - title: "MDN - Inheritance and the prototype chain"
+      url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Inheritance_and_the_prototype_chain"
+      kind: doc
+    - title: "javascript.info - Prototypes, inheritance"
+      url: "https://javascript.info/prototypes"
+      kind: article
+
+- id: js-04-event-loop
+  title: Event loop, microtask e asincronia
+  category: languages
+  track: knowledge
+  level: hard
+  tags: [javascript, event-loop, async, promise]
+  estimated_minutes: 35
+  summary: >-
+    JavaScript esegue su un solo thread e coordina l'asincronia con un event loop che
+    alterna task e microtask. Sapere in che ordine vengono svuotate le due code spiega
+    quasi tutte le domande difficili sull'asincronia.
+  deep_dive: |-
+    Il modello è: uno stack di chiamate, una coda di *task* (o macrotask) e una coda di
+    *microtask*. Il ciclo esegue un task, poi svuota *completamente* la coda dei
+    microtask, poi - nel browser - eventualmente renderizza, e passa al task successivo.
+    La conseguenza pratica più importante: i microtask hanno sempre la precedenza sui
+    task, quindi una promise risolta viene gestita *prima* di un `setTimeout(…, 0)`
+    programmato prima di lei.
+
+    Cosa finisce in quale coda: sono microtask le continuazioni delle promise (`.then`,
+    il codice dopo un `await`), `queueMicrotask` e i callback dei `MutationObserver`;
+    sono task `setTimeout`, `setInterval`, gli eventi del DOM, `setImmediate` in Node e
+    le operazioni di I/O. Da qui il quiz classico: `console.log` sincrono, poi le
+    promise, poi i timer.
+
+    C'è una trappola che vale la pena conoscere: i microtask vengono svuotati fino
+    all'esaurimento, quindi un microtask che ne programma un altro *all'infinito* blocca
+    il ciclo per sempre - niente rendering, niente eventi. È la starvation della coda dei
+    microtask, e non si può evitare con `queueMicrotask` ricorsivo; per spezzare il
+    lavoro servono i task (`setTimeout`), o meglio `scheduler.postTask` dove disponibile.
+
+    Nel browser, fra un task e l'altro il motore può renderizzare: per le animazioni si
+    usa `requestAnimationFrame`, che viene eseguito appena prima del disegno. Un lavoro
+    lungo nello stesso thread blocca *anche* il rendering e l'interazione: è la ragione
+    per cui un calcolo pesante va spezzato in blocchi o spostato in un Web Worker, che
+    gira su un thread separato e comunica per messaggi.
+
+    In Node il ciclo ha fasi distinte - timer, pending callback, poll, check, close - e
+    due particolarità che compaiono ai colloqui: `process.nextTick` ha una coda propria
+    che viene svuotata *prima* delle promise, e `setImmediate` corrisponde alla fase
+    check, quindi si comporta diversamente da `setTimeout(…, 0)` a seconda del contesto
+    da cui è chiamato.
+
+    L'ultima cosa da dire è la più importante per il lavoro reale: il singolo thread non
+    significa che non serva pensare alla concorrenza. Due funzioni asincrone possono
+    intrecciarsi su un `await` e osservare uno stato a metà - è l'equivalente delle race
+    condition, e si risolve con gli stessi strumenti concettuali: rendere atomiche le
+    sezioni critiche (in JS, il codice fra due await lo è già), serializzare con una
+    coda, o rendere idempotenti le operazioni.
+  key_points:
+    - "Un solo thread: stack di chiamate, coda dei task, coda dei microtask"
+    - "Ordine: un task, poi TUTTI i microtask, poi (nel browser) l'eventuale rendering, poi il task successivo"
+    - "Microtask: .then, il codice dopo await, queueMicrotask, MutationObserver"
+    - "Task: setTimeout, setInterval, eventi DOM, I/O, setImmediate in Node"
+    - "Una promise già risolta viene gestita prima di un setTimeout(…, 0) programmato prima"
+    - "Microtask ricorsivi all'infinito affamano il ciclo: niente rendering e niente eventi"
+    - "requestAnimationFrame viene eseguito appena prima del disegno: è il posto giusto per le animazioni"
+    - "Il lavoro pesante va spezzato in task o spostato in un Web Worker, che gira su un thread separato"
+    - "In Node il ciclo ha fasi (timer, poll, check); process.nextTick precede le promise e setImmediate sta nella fase check"
+    - "Un solo thread non elimina le race: due funzioni async possono intrecciarsi su un await e vedere stato a metà"
+  examples:
+    - title: L'ordine di esecuzione, spiegato riga per riga
+      language: javascript
+      code: |-
+        console.log("1");                                   // sincrono
+        setTimeout(() => console.log("2"), 0);              // TASK
+        Promise.resolve().then(() => console.log("3"));     // MICROTASK
+        queueMicrotask(() => console.log("4"));             // MICROTASK
+        (async () => {
+          console.log("5");                                 // sincrono fino al primo await
+          await null;
+          console.log("6");                                 // MICROTASK (dopo await)
+        })();
+        console.log("7");                                   // sincrono
+
+        // Output: 1, 5, 7, 3, 4, 6, 2
+        //   sincroni -> tutti i microtask nell'ordine di programmazione -> poi i task
+      note: >-
+        Se sai spiegare *perché* il 6 arriva dopo il 3 e il 4, e perché il 2 è ultimo, hai
+        risposto alla maggior parte delle domande sull'event loop.
+    - title: Bloccare il thread, e le due cure
+      language: javascript
+      code: |-
+        // BLOCCA TUTTO: niente rendering, niente click, per tutta la durata
+        function elabora(dati) { for (const x of dati) calcolaPesante(x); }
+
+        // 1) Spezzare in task: il browser può respirare fra un blocco e l'altro
+        async function elaboraAPezzi(dati, dimensione = 500) {
+          for (let i = 0; i < dati.length; i += dimensione) {
+            dati.slice(i, i + dimensione).forEach(calcolaPesante);
+            await new Promise((r) => setTimeout(r, 0));   // cede il controllo
+          }
+        }
+
+        // 2) Spostare su un altro thread: il lavoro non tocca più la UI
+        const worker = new Worker("./calcolo.js", { type: "module" });
+        worker.postMessage(dati);
+        worker.onmessage = (e) => aggiornaUI(e.data);
+      note: >-
+        Attenzione: `await null` non basta a sbloccare il rendering, perché resta un
+        microtask. Serve un task vero, cioè `setTimeout` o `scheduler.yield`.
+  trade_offs:
+    - option: Spezzare in task (setTimeout/scheduler)
+      pros: Nessuna infrastruttura, la UI resta reattiva
+      cons: Complessità nel codice, throughput più basso
+      when: Lavoro moderato, ancora accettabile sul thread principale
+    - option: Web Worker
+      pros: Thread separato, la UI non si ferma mai
+      cons: Comunicazione per messaggi, dati da copiare o trasferire
+      when: Calcoli pesanti, parsing di file grandi, crittografia
+    - option: Farlo sul server
+      pros: Nessun limite del browser, risultato cacheabile
+      cons: Latenza di rete, carico sul backend
+      when: Il risultato serve a più utenti o richiede dati che il client non ha
+  numbers:
+    - "Per restare a 60 fps il lavoro per frame deve stare sotto ~16 ms; sotto i 50 ms un'interazione è percepita come immediata"
+    - "Un task che dura più di 50 ms è un 'long task' e viene segnalato dagli strumenti di misura delle prestazioni"
+    - "Trasferire un ArrayBuffer a un Worker con transferable è a costo quasi zero; copiarlo no"
+  interview_answer: >-
+    JavaScript gira su un solo thread e coordina l'asincronia con l'event loop: esegue un
+    task, poi svuota completamente la coda dei microtask, e solo dopo - nel browser - può
+    renderizzare e passare al task successivo. La conseguenza pratica è che le
+    continuazioni delle promise e il codice dopo un await hanno sempre la precedenza su un
+    setTimeout, anche se il timer era stato programmato prima. Questo spiega anche il
+    problema tipico: un calcolo lungo non blocca solo le altre funzioni ma anche il
+    rendering e i click, perché è tutto lo stesso thread. Lo risolvo spezzando il lavoro in
+    task - e deve essere un task vero, non un microtask, altrimenti il browser non respira
+    comunque - oppure spostandolo in un Web Worker. E ricordo che il thread singolo non
+    elimina le race: due funzioni async possono intrecciarsi su un await e osservare uno
+    stato a metà.
+  senior_signals:
+    - "Sa che i microtask vengono svuotati completamente prima del prossimo task"
+    - "Distingue 'cedere con un microtask' da 'cedere con un task' e sa perché conta per il rendering"
+    - "Conosce le particolarità di Node (nextTick, setImmediate) senza confonderle con il browser"
+    - "Nota che l'intreccio sugli await può produrre race anche con un thread solo"
+  pitfalls:
+    - "Credere che setTimeout(fn, 0) esegua prima di una promise già risolta"
+    - "Cedere con `await null` sperando di sbloccare il rendering"
+    - "Microtask ricorsivi che affamano il ciclo"
+    - "Calcoli lunghi sul thread principale: UI congelata"
+    - "Presumere che un solo thread significhi nessuna race condition"
+  follow_ups:
+    - question: In che ordine escono console.log, setTimeout e una promise?
+      answer: >-
+        Prima tutto il codice sincrono, poi i microtask - quindi le continuazioni delle
+        promise e il codice dopo un `await` - e solo alla fine i task, fra cui i timer.
+        La ragione è che dopo ogni task il ciclo svuota *completamente* la coda dei
+        microtask prima di passare al task successivo. Per questo una promise già risolta
+        viene gestita prima di un `setTimeout(…, 0)` programmato anche molto prima.
+    - question: Come eviti che un calcolo pesante congeli l'interfaccia?
+      answer: >-
+        Due strade. Spezzarlo in blocchi cedendo il controllo con un *task* fra l'uno e
+        l'altro - `setTimeout(…, 0)`, o `scheduler.yield()` dove disponibile - in modo
+        che il browser possa renderizzare e gestire gli eventi; oppure spostarlo in un
+        Web Worker, che gira su un thread separato e comunica per messaggi. La prima è
+        semplice e va bene per carichi moderati; la seconda è l'unica che tiene davvero
+        la UI fluida su lavori pesanti.
+    - question: Che differenze ci sono fra l'event loop di Node e quello del browser?
+      answer: >-
+        Il modello è lo stesso, ma Node organizza i task in fasi - timer, pending
+        callback, poll, check, close - e aggiunge due code proprie: `process.nextTick`,
+        che viene svuotata prima ancora delle promise, e `setImmediate`, che corrisponde
+        alla fase check. Il browser in più ha il rendering fra i task e API come
+        `requestAnimationFrame`. In pratica, il ragionamento "sincrono, microtask, task"
+        vale in entrambi; i dettagli delle fasi contano quando si scrivono librerie.
+  related: [js-05-async-patterns, py-04-asyncio, js-08-performance-memoria]
+  resources:
+    - title: "MDN - The event loop"
+      url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Event_loop"
+      kind: doc
+    - title: "Jake Archibald - In The Loop (JSConf)"
+      url: "https://www.youtube.com/watch?v=cCOL7MC4Pl0"
+      kind: video
+    - title: "Node.js - Event Loop, Timers, and process.nextTick()"
+      url: "https://nodejs.org/en/learn/asynchronous-work/event-loop-timers-and-nexttick"
+      kind: doc
+
+- id: js-05-async-patterns
+  title: Promise, async/await e controllo della concorrenza
+  category: languages
+  track: technical
+  level: medium
+  tags: [javascript, promise, async, concorrenza]
+  estimated_minutes: 30
+  summary: >-
+    Le promise rappresentano un valore futuro; `async/await` le rende leggibili come
+    codice sincrono. I punti in cui si sbaglia sono sempre gli stessi: sequenza invece di
+    parallelismo, errori non catturati, nessuna cancellazione e nessun limite.
+  deep_dive: |-
+    Una promise ha tre stati - pending, fulfilled, rejected - ed è *immutabile* una volta
+    risolta. `async/await` è zucchero su `.then`, con una differenza di leggibilità che
+    cambia tutto: la gestione degli errori torna a essere `try/catch` e il flusso si
+    legge dall'alto in basso.
+
+    L'errore più comune è la *sequenza travestita da parallelismo*: tre `await` in fila
+    eseguono uno dopo l'altro, sommando le latenze. Quando le operazioni sono
+    indipendenti, vanno avviate insieme e attese insieme con un combinatore. I quattro
+    combinatori vanno conosciuti tutti: `Promise.all` fallisce al primo errore ed è
+    giusto quando servono tutti i risultati; `Promise.allSettled` attende tutte e
+    restituisce esiti misti, utile quando un fallimento parziale è accettabile;
+    `Promise.race` risolve con la prima che si completa, anche se è un errore - usato
+    per i timeout; `Promise.any` restituisce la prima che *riesce*, ignorando i
+    fallimenti finché ce n'è una buona.
+
+    Sulla gestione degli errori ci sono tre trappole. Una promise creata e non attesa
+    produce un *unhandled rejection*, che in Node recente termina il processo; per gli
+    effetti collaterali "fire and forget" serve almeno un `.catch`. Dentro un `forEach`,
+    `async` non fa quello che sembra: `forEach` ignora il valore restituito, quindi le
+    promise partono ma nessuno le attende - la forma corretta è un `for...of` con `await`
+    (sequenziale) o un `map` con `Promise.all` (concorrente). E un `try/catch` attorno a
+    una chiamata *non attesa* non cattura nulla, perché l'errore arriva dopo.
+
+    La *cancellazione* si fa con `AbortController`: si passa il suo `signal` a `fetch` o
+    a chi lo supporta, e si chiama `abort()` per interrompere. `AbortSignal.timeout(ms)`
+    (standard recente) crea direttamente un segnale che scade, ed è il modo più pulito
+    di mettere un limite di tempo a una richiesta. Senza cancellazione, una richiesta
+    abbandonata continua a occupare connessione e a produrre aggiornamenti fuori tempo -
+    da cui i bug in cui una risposta vecchia sovrascrive una nuova.
+
+    Infine il *limite di concorrenza*: `Promise.all` su diecimila elementi avvia
+    diecimila operazioni insieme, e di solito abbatte il servizio a valle prima ancora
+    del proprio. Serve un pool con concorrenza massima - poche righe a mano, oppure una
+    libreria come `p-limit` - che è esattamente lo stesso ragionamento del semaforo in
+    asyncio.
+  key_points:
+    - "Una promise ha tre stati ed è immutabile una volta risolta; async/await è zucchero su .then"
+    - "Tre await in fila sono sequenziali: sommano le latenze. Per la concorrenza servono i combinatori"
+    - "Promise.all: fallisce al primo errore. allSettled: attende tutte. race: la prima che si completa. any: la prima che riesce"
+    - "Una promise non attesa produce unhandled rejection: in Node recente termina il processo"
+    - "async dentro forEach non attende nulla: usa for...of con await, oppure map + Promise.all"
+    - "try/catch attorno a una chiamata non attesa non cattura nulla"
+    - "AbortController e AbortSignal.timeout(ms) per cancellazione e limiti di tempo"
+    - "Senza cancellazione, una risposta vecchia può sovrascrivere una nuova (race di rendering)"
+    - "Promise.all su migliaia di elementi apre migliaia di connessioni: serve un limite di concorrenza"
+  examples:
+    - title: Sequenza, concorrenza e i quattro combinatori
+      language: javascript
+      code: |-
+        // SEQUENZIALE: 3 x 100 ms = 300 ms
+        const a = await prendi("/a"); const b = await prendi("/b"); const c = await prendi("/c");
+
+        // CONCORRENTE: ~100 ms
+        const [x, y, z] = await Promise.all([prendi("/a"), prendi("/b"), prendi("/c")]);
+
+        // Quando un fallimento parziale è accettabile
+        const esiti = await Promise.allSettled(urls.map(prendi));
+        const buoni = esiti.filter((e) => e.status === "fulfilled").map((e) => e.value);
+
+        // Timeout: la prima che si completa vince (anche se è l'errore)
+        await Promise.race([prendi(url), new Promise((_, rej) =>
+          setTimeout(() => rej(new Error("timeout")), 3000))]);
+
+        // Il primo mirror che risponde bene, ignorando i fallimenti
+        const dati = await Promise.any(mirror.map(prendi));
+      note: >-
+        `all` è la scelta giusta quando servono tutti i risultati; se anche uno solo può
+        mancare senza compromettere la risposta, `allSettled` evita di buttare via il
+        lavoro riuscito.
+    - title: I tre errori che si vedono in ogni code review
+      language: javascript
+      code: |-
+        // 1) forEach + async: le promise partono, nessuno le attende
+        righe.forEach(async (r) => { await salva(r); });        // sbagliato
+        for (const r of righe) await salva(r);                  // sequenziale, corretto
+        await Promise.all(righe.map((r) => salva(r)));          // concorrente, corretto
+
+        // 2) try/catch attorno a una chiamata non attesa: non cattura niente
+        try { salva(r); } catch (e) { /* mai eseguito */ }      // manca await
+
+        // 3) fire and forget senza catch: unhandled rejection
+        inviaMetriche(evento);                                   // rischioso
+        inviaMetriche(evento).catch((e) => log.warn(e));         // corretto
+      note: >-
+        Il primo è anche il più insidioso: il codice *sembra* funzionare, ma la funzione
+        ritorna prima che le scritture siano finite.
+    - title: Cancellazione e limite di concorrenza
+      language: javascript
+      code: |-
+        // Timeout dichiarativo, standard
+        const risposta = await fetch(url, { signal: AbortSignal.timeout(3000) });
+
+        // Annullare la richiesta precedente quando l'utente digita ancora
+        let controller;
+        async function cerca(testo) {
+          controller?.abort();                       // niente risposte fuori tempo
+          controller = new AbortController();
+          const r = await fetch(`/cerca?q=${testo}`, { signal: controller.signal });
+          return r.json();
+        }
+
+        // Limite di concorrenza: 5 alla volta, non 10.000 insieme
+        async function conLimite(elementi, limite, fn) {
+          const risultati = []; const inCorso = new Set();
+          for (const el of elementi) {
+            const p = fn(el).finally(() => inCorso.delete(p));
+            inCorso.add(p); risultati.push(p);
+            if (inCorso.size >= limite) await Promise.race(inCorso);
+          }
+          return Promise.all(risultati);
+        }
+      note: >-
+        Annullare la richiesta precedente risolve anche il bug classico della ricerca:
+        una risposta lenta di due caratteri fa che arriva dopo e sovrascrive quella giusta.
+  trade_offs:
+    - option: Promise.all
+      pros: Massima concorrenza, codice compatto
+      cons: Fallisce al primo errore, nessun limite sul numero di operazioni
+      when: Poche operazioni indipendenti, tutte necessarie
+    - option: Promise.allSettled
+      pros: Nessun risultato buttato via, esiti espliciti
+      cons: Serve filtrare, gli errori vanno trattati a mano
+      when: Fallimenti parziali accettabili (dashboard, aggregazioni)
+    - option: Sequenza con for...of
+      pros: Ordine garantito, carico prevedibile, errori immediati
+      cons: Latenze sommate
+      when: Operazioni dipendenti, scritture che devono rispettare un ordine
+    - option: Pool con limite
+      pros: Concorrenza alta ma controllata, protegge i servizi a valle
+      cons: Qualche riga in più o una dipendenza
+      when: Centinaia o migliaia di operazioni
+  numbers:
+    - "Limite di concorrenza tipico verso un'API esterna: 5-20 richieste contemporanee"
+    - "Promise.all su 10.000 fetch apre 10.000 connessioni: i browser ne consentono poche per host, il resto si accoda"
+    - "AbortSignal.timeout è supportato dai browser moderni e da Node 17.3+"
+  interview_answer: >-
+    Le promise rappresentano un valore futuro e async/await le rende leggibili come codice
+    sincrono, con try/catch al posto delle catene di then. L'errore che vedo più spesso è la
+    sequenza travestita da parallelismo: tre await in fila sommano le latenze, mentre se le
+    operazioni sono indipendenti vanno avviate insieme con Promise.all - o con allSettled,
+    quando un fallimento parziale è accettabile e non voglio buttare via il lavoro riuscito.
+    Gli altri due classici sono async dentro forEach, che non attende nulla perché forEach
+    ignora il valore restituito, e le promise fire-and-forget senza catch, che in Node
+    recente fanno terminare il processo. Su richieste e timeout uso AbortController, e
+    quando le operazioni sono migliaia metto un limite di concorrenza, perché Promise.all su
+    diecimila elementi abbatte il servizio a valle prima del mio.
+  senior_signals:
+    - "Conosce tutti e quattro i combinatori e sa quando serve ciascuno"
+    - "Cita forEach + async come errore e ne spiega il perché"
+    - "Usa AbortController anche per evitare risposte fuori tempo, non solo per i timeout"
+    - "Mette un limite di concorrenza invece di lanciare tutto insieme"
+  pitfalls:
+    - "await in sequenza su operazioni indipendenti"
+    - "async dentro forEach"
+    - "Promise senza catch: unhandled rejection"
+    - "Nessun timeout: una richiesta appesa resta in volo finché il browser non decide"
+    - "Promise.all su collezioni enormi senza limite di concorrenza"
+  follow_ups:
+    - question: Differenza fra Promise.all, allSettled, race e any?
+      answer: >-
+        `all` risolve con tutti i risultati ma fallisce al primo errore, quindi si usa
+        quando servono tutti. `allSettled` attende tutte e restituisce per ciascuna esito
+        e valore o motivo: ideale quando un pezzo può mancare. `race` si risolve o
+        rifiuta con la prima che si completa, comunque vada: è il meccanismo dei timeout.
+        `any` restituisce la prima che *riesce* e rifiuta solo se falliscono tutte: adatta
+        a più mirror o a più fonti equivalenti.
+    - question: Come cancelli una richiesta HTTP in corso?
+      answer: >-
+        Con `AbortController`: si passa `controller.signal` a `fetch` e si chiama
+        `controller.abort()` quando serve; la promise viene rifiutata con un
+        `AbortError`. Per un semplice limite di tempo oggi basta
+        `AbortSignal.timeout(ms)`. Il caso d'uso più utile non è il timeout ma la
+        ricerca mentre si digita: annullare la richiesta precedente evita che una
+        risposta vecchia arrivi dopo e sovrascriva quella giusta.
+    - question: Perché `righe.forEach(async r => await salva(r))` non funziona?
+      answer: >-
+        Perché `forEach` non fa nulla del valore restituito dal callback: le funzioni
+        async restituiscono promise che nessuno attende, quindi il ciclo termina subito
+        mentre le scritture sono ancora in volo, e gli eventuali errori diventano
+        unhandled rejection. Le forme corrette sono `for (const r of righe) await
+        salva(r)` per l'esecuzione sequenziale, oppure `await Promise.all(righe.map(r =>
+        salva(r)))` per quella concorrente - con un limite, se le righe sono tante.
+  related: [js-04-event-loop, py-04-asyncio, rel-32-retries-timeouts-breakers]
+  resources:
+    - title: "MDN - Using promises"
+      url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Using_promises"
+      kind: doc
+    - title: "MDN - AbortController"
+      url: "https://developer.mozilla.org/en-US/docs/Web/API/AbortController"
+      kind: doc
+    - title: "sindresorhus/p-limit - concorrenza limitata"
+      url: "https://github.com/sindresorhus/p-limit"
+      kind: repo
+
+- id: js-06-moduli-bundling
+  title: Moduli, bundling e dimensione del bundle
+  category: languages
+  track: knowledge
+  level: medium
+  tags: [javascript, moduli, bundling, performance]
+  estimated_minutes: 25
+  summary: >-
+    ESM è lo standard e la sua natura statica è ciò che rende possibile il tree shaking;
+    CommonJS resta diffuso in Node. La dimensione del bundle non è un dettaglio estetico:
+    è il tempo che l'utente passa a guardare una pagina bianca.
+  deep_dive: |-
+    La differenza fra i due sistemi non è sintattica. In *CommonJS* `require` è una
+    chiamata di funzione risolta a runtime: si può mettere dentro un `if`, il valore
+    esportato può cambiare, e quindi un analizzatore non può sapere in anticipo cosa
+    viene usato. In *ESM* `import` è una dichiarazione statica, risolta prima
+    dell'esecuzione: il grafo delle dipendenze è noto a compilazione, e da qui derivano
+    il *tree shaking* (eliminare ciò che non è importato), gli import circolari gestiti
+    meglio, e il *top-level await*.
+
+    Il tree shaking funziona solo se il codice è "shakeable": moduli ESM, nessun effetto
+    collaterale all'import (o dichiarati con `sideEffects: false` nel package.json), e
+    import nominali invece di import di default di un oggetto intero. È il motivo per cui
+    `import { debounce } from "lodash-es"` elimina il resto della libreria mentre
+    `import _ from "lodash"` la porta dentro tutta.
+
+    Il secondo strumento è il *code splitting* con `import()` dinamico: il modulo viene
+    caricato solo quando serve, e il bundler ne fa un file separato. Le applicazioni
+    pagano quasi sempre pegno su due cose caricate subito e usate da pochi: le librerie
+    di grafici e gli editor di testo. Spostarle dietro un import dinamico è spesso il
+    singolo intervento con il miglior rapporto fra sforzo e risultato.
+
+    Per decidere cosa tagliare serve *misurare*: gli analizzatori del bundle
+    (`rollup-plugin-visualizer`, `webpack-bundle-analyzer`, `source-map-explorer`)
+    mostrano quanto pesa ciascuna dipendenza nel pacchetto finale, e quasi sempre
+    riservano sorprese - un formattatore di date che porta con sé tutte le lingue, un
+    polyfill non più necessario, la stessa libreria inclusa in due versioni.
+
+    Sul lato prestazioni vale la pena conoscere i numeri di riferimento: quello che conta
+    è il JavaScript *scaricato, analizzato ed eseguito* prima che la pagina diventi
+    interattiva. Su una rete mobile media qualche centinaio di kilobyte compressi fanno
+    una differenza percepibile, e il costo dell'analisi è proporzionale al codice, non
+    alla sua utilità. Da qui le regole pratiche: caricare per rotta, rimandare ciò che
+    non serve al primo schermo, e preferire librerie piccole o funzioni native quando
+    fanno lo stesso lavoro.
+  key_points:
+    - "ESM: import statico, grafo noto prima dell'esecuzione. CommonJS: require a runtime, dinamico"
+    - "Il tree shaking è possibile perché ESM è statico: CommonJS non lo permette in modo affidabile"
+    - "Perché funzioni: moduli ESM, nessun effetto collaterale all'import (sideEffects: false), import nominali"
+    - "import { x } from 'libreria-es' elimina il resto; import tutto da una libreria CJS no"
+    - "Code splitting con import() dinamico: il modulo diventa un file separato caricato su richiesta"
+    - "I candidati tipici: librerie di grafici, editor, mappe, tutto ciò che serve a pochi utenti"
+    - "Misurare con un analizzatore del bundle prima di ottimizzare: le sorprese sono la norma"
+    - "Il costo non è solo la rete: analisi ed esecuzione del JavaScript pesano, e sono proporzionali al codice spedito"
+    - "Top-level await esiste solo in ESM"
+  examples:
+    - title: Cosa entra nel bundle e cosa no
+      language: javascript
+      code: |-
+        // Porta dentro tutta la libreria: CommonJS, nessun tree shaking
+        import _ from "lodash";
+        _.debounce(fn, 200);
+
+        // Solo la funzione usata: modulo ESM + import nominale
+        import { debounce } from "lodash-es";
+
+        // Spesso non serve affatto una libreria
+        const debounce = (fn, ms) => { let t; return (...a) => {
+          clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+
+        // Code splitting: l'editor pesante arriva solo a chi lo apre
+        const apriEditor = async () => {
+          const { Editor } = await import("./editor-pesante.js");
+          new Editor(contenitore).monta();
+        };
+      note: >-
+        Il terzo blocco è la domanda che conviene farsi sempre: questa dipendenza mi sta
+        risparmiando cinque righe o cinquecento?
+    - title: Misurare prima di tagliare
+      language: bash
+      code: |-
+        # Vite / Rollup
+        npm i -D rollup-plugin-visualizer
+        #   plugins: [visualizer({ open: true, gzipSize: true })]
+
+        # Webpack
+        npx webpack-bundle-analyzer dist/stats.json
+
+        # Qualunque bundle con source map
+        npx source-map-explorer dist/assets/*.js
+      note: >-
+        Le due scoperte più frequenti: una libreria di date che include tutte le lingue,
+        e la stessa dipendenza presente in due versioni perché due pacchetti la vincolano
+        diversamente.
+  trade_offs:
+    - option: Bundle unico
+      pros: Una sola richiesta, semplicissimo
+      cons: L'utente scarica anche ciò che non userà mai
+      when: Applicazioni piccole, strumenti interni
+    - option: Code splitting per rotta
+      pros: Primo caricamento molto più leggero
+      cons: Qualche richiesta in più, configurazione, rischio di scatti nella navigazione
+      when: Il default per una SPA di dimensione reale
+    - option: Import dinamico su richiesta
+      pros: Il peso lo paga solo chi usa la funzione
+      cons: Latenza al primo uso, da mitigare con il prefetch
+      when: Funzionalità pesanti e poco usate
+  numbers:
+    - "Su rete mobile media, ogni 100 KB compressi di JavaScript aggiungono percepibilmente al tempo di interattività"
+    - "Il costo dell'analisi del JavaScript è proporzionale ai byte spediti: il codice non usato si paga comunque"
+    - "Regola pratica diffusa: il JavaScript critico per il primo schermo sotto i ~150-200 KB compressi"
+  interview_answer: >-
+    La differenza fondamentale è che ESM è statico: gli import si risolvono prima
+    dell'esecuzione, quindi il bundler conosce il grafo e può fare tree shaking, mentre con
+    CommonJS il require è una chiamata a runtime e quell'analisi non è affidabile. Nella
+    pratica questo significa importare in modo nominale da pacchetti ESM e dichiarare
+    l'assenza di effetti collaterali, altrimenti il tree shaking non elimina niente. Poi
+    uso il code splitting con import dinamico per tutto ciò che non serve al primo schermo -
+    grafici, editor, mappe - perché il costo non è solo la rete ma anche l'analisi e
+    l'esecuzione del JavaScript, che sono proporzionali ai byte spediti. E prima di tagliare
+    misuro con un analizzatore del bundle, perché le sorprese sono la norma: una libreria di
+    date con tutte le lingue, o la stessa dipendenza inclusa in due versioni.
+  senior_signals:
+    - "Spiega il tree shaking a partire dalla staticità di ESM, non come una magia del bundler"
+    - "Misura il bundle invece di tagliare a intuito"
+    - "Considera il costo di analisi ed esecuzione, non solo quello di rete"
+    - "Si chiede se la dipendenza valga il suo peso rispetto a poche righe native"
+  pitfalls:
+    - "Import di default da librerie CommonJS che vanificano il tree shaking"
+    - "Caricare subito librerie usate da una minoranza di utenti"
+    - "Nessuna misura del bundle: si ottimizza ciò che si immagina, non ciò che pesa"
+    - "Dipendenze duplicate in due versioni perché nessuno guarda l'albero"
+  follow_ups:
+    - question: Perché il tree shaking non funziona con CommonJS?
+      answer: >-
+        Perché `require` è una chiamata eseguita a runtime: può stare dentro una
+        condizione, il percorso può essere calcolato, e ciò che un modulo esporta può
+        cambiare durante l'esecuzione. Il bundler non può quindi dimostrare che una
+        parte non verrà mai usata. Con ESM gli import sono dichiarazioni statiche
+        risolte prima dell'esecuzione: il grafo è noto e ciò che non è raggiungibile può
+        essere eliminato in sicurezza.
+    - question: Come decidi cosa spostare in un chunk separato?
+      answer: >-
+        Guardo due cose insieme: quanto pesa e quanti utenti lo usano davvero.
+        Tipicamente escono grafici, editor, mappe, librerie di export PDF e pagine di
+        amministrazione. Le sposto dietro un import dinamico e, dove la latenza al primo
+        uso darebbe fastidio, aggiungo un prefetch quando è probabile che servano - per
+        esempio al passaggio del mouse sul pulsante che le apre.
+    - question: A cosa serve il campo sideEffects nel package.json?
+      answer: >-
+        Dichiara al bundler che importare un modulo non produce effetti osservabili
+        oltre alle sue esportazioni. Senza quella dichiarazione il bundler deve
+        conservare il modulo anche quando nessuna esportazione è usata, perché non può
+        escludere che registri un polyfill o modifichi un oggetto globale. Con
+        `"sideEffects": false` il codice non raggiungibile viene eliminato; se il
+        pacchetto importa fogli di stile si usa la forma a elenco, per esempio
+        `["*.css"]`, altrimenti gli stili spariscono dal risultato.
+    - question: Come tieni sotto controllo il peso del bundle nel tempo?
+      answer: >-
+        Con un budget verificato dalla CI invece che con un controllo manuale: la build
+        misura i chunk principali e fallisce se superano la soglia concordata. In questo
+        modo la crescita si nota nella pull request che la introduce, dove costa poco
+        discuterla, e non tre mesi dopo su un grafico delle prestazioni. Accanto al
+        budget tengo un analizzatore del bundle per capire *quale* dipendenza è
+        cresciuta, e genero le source map per poter leggere il codice minificato senza
+        pubblicarle agli utenti finali.
+  related: [js-07-typescript, js-08-performance-memoria, cache-24-cdn]
+  resources:
+    - title: "MDN - JavaScript modules"
+      url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules"
+      kind: doc
+    - title: "web.dev - Reduce JavaScript payloads with code splitting"
+      url: "https://web.dev/articles/reduce-javascript-payloads-with-code-splitting"
+      kind: article
+
+- id: js-07-typescript
+  title: TypeScript - tipi strutturali, narrowing e confini
+  category: languages
+  track: knowledge
+  level: medium
+  tags: [typescript, tipi, qualita]
+  estimated_minutes: 30
+  summary: >-
+    TypeScript aggiunge un sistema di tipi strutturale che sparisce a runtime: verifica la
+    coerenza del codice, non la forma dei dati che arrivano da fuori. Conoscere questo
+    confine è metà del valore che se ne ricava.
+  deep_dive: |-
+    I tipi di TypeScript sono *strutturali*: la compatibilità dipende dalla forma, non dal
+    nome. Un oggetto con i campi giusti soddisfa un'interfaccia senza dichiararlo, come i
+    Protocol di Python. È comodo, ma significa anche che due tipi concettualmente diversi
+    con la stessa forma sono intercambiabili - da cui l'uso dei *branded type* quando si
+    vuole impedirlo (un `UserId` che non deve essere scambiato con un `OrderId`).
+
+    I tipi vengono *cancellati* alla compilazione: a runtime non esiste nulla. Da qui la
+    regola più importante: TypeScript garantisce la coerenza interna del codice, non la
+    forma dei dati esterni. Un `await res.json()` restituisce `any` e, se lo si annota
+    come `Utente`, si sta solo dicendo al compilatore di fidarsi. Per i confini servono
+    validatori a runtime - Zod, Valibot, io-ts - che validano *e* deducono il tipo, così
+    la promessa statica e la realtà coincidono.
+
+    Sul *narrowing*: il compilatore restringe i tipi in base al flusso - `typeof`,
+    `instanceof`, `in`, confronti con letterali - e questa è la parte che rende
+    TypeScript piacevole invece che burocratico. Il pattern più utile è l'*unione
+    discriminata*: un campo letterale comune (`kind`, `type`, `status`) permette al
+    compilatore di sapere esattamente quale variante si sta maneggiando in ogni ramo, e
+    con un controllo di esaustività (`never`) di segnalare l'aggiunta di una variante non
+    gestita.
+
+    Sulle impostazioni: `strict: true` non è opzionale in un progetto serio, perché
+    accende `strictNullChecks`, che è ciò che intercetta la maggior parte dei bug reali.
+    `any` disattiva il controllo e si propaga; `unknown` è la sua versione sicura, perché
+    obbliga a restringere prima di usare. E il cast `as` è un'affermazione, non una
+    verifica: dire `dati as Utente` non rende i dati un utente, sposta solo la
+    responsabilità sul programmatore.
+
+    Due distinzioni che si chiedono spesso. `type` contro `interface`: quasi
+    intercambiabili per gli oggetti; `interface` supporta il merging dichiarativo ed è
+    idiomatica per le forme estendibili, `type` serve per unioni, intersezioni, tuple e
+    tipi condizionali. `enum` contro unione di letterali: gli enum generano codice a
+    runtime e hanno comportamenti particolari, mentre `as const` con un'unione di
+    stringhe è più leggero e si serializza naturalmente - oggi è la scelta più comune.
+  key_points:
+    - "Tipi strutturali: la compatibilità dipende dalla forma, non dal nome. I branded type servono quando questo non basta"
+    - "I tipi sono cancellati alla compilazione: a runtime non esiste nulla"
+    - "Il compilatore garantisce la coerenza del codice, non la forma dei dati esterni"
+    - "Ai confini servono validatori a runtime (Zod e simili) che validano e deducono il tipo"
+    - "Narrowing: typeof, instanceof, in e i confronti con letterali restringono il tipo lungo il flusso"
+    - "Unione discriminata + controllo di esaustività con never: aggiungere una variante fa fallire la compilazione dove manca"
+    - "strict: true (e quindi strictNullChecks) è ciò che rende utile TypeScript"
+    - "any disattiva i controlli e si propaga; unknown obbliga a restringere prima di usare"
+    - "`as` è un'affermazione, non una verifica: non valida nulla"
+    - "interface per le forme estendibili, type per unioni, intersezioni e tipi condizionali"
+    - "Unione di letterali (as const) è oggi preferita agli enum, che generano codice a runtime"
+  examples:
+    - title: Unione discriminata ed esaustività
+      language: typescript
+      code: |-
+        type Evento =
+          | { kind: "creato"; id: string; totaleCents: number }
+          | { kind: "pagato"; id: string; metodo: "carta" | "bonifico" }
+          | { kind: "annullato"; id: string; motivo: string };
+
+        function descrivi(e: Evento): string {
+          switch (e.kind) {
+            case "creato":   return `ordine ${e.id} da ${e.totaleCents / 100} EUR`;
+            case "pagato":   return `pagato con ${e.metodo}`;   // qui `metodo` esiste
+            case "annullato":return `annullato: ${e.motivo}`;
+            default: {
+              const mai: never = e;       // aggiungendo una variante, QUI fallisce la build
+              throw new Error(`evento non gestito: ${JSON.stringify(mai)}`);
+            }
+          }
+        }
+      note: >-
+        Il ramo `never` è la parte preziosa: trasforma "ho aggiunto un caso e ho
+        dimenticato di gestirlo" da bug in produzione a errore di compilazione.
+    - title: Il confine, dove i tipi non bastano
+      language: typescript
+      code: |-
+        // BUGIA: `as` non valida niente. Se l'API cambia, esplode a runtime.
+        const utente = (await res.json()) as Utente;
+
+        // VERITÀ: validazione a runtime, tipo dedotto dallo schema
+        import { z } from "zod";
+
+        const Utente = z.object({
+          id: z.string().uuid(),
+          email: z.string().email(),
+          ruolo: z.enum(["admin", "utente"]),
+          creatoIl: z.coerce.date(),
+        });
+        type Utente = z.infer<typeof Utente>;      // un'unica fonte di verità
+
+        const utente = Utente.parse(await res.json());   // errore chiaro se la forma è sbagliata
+      note: >-
+        `z.infer` evita la duplicazione fra schema e tipo: la forma è dichiarata una volta
+        sola e il tipo statico non può divergere dalla validazione.
+    - title: unknown, branded type e utility
+      language: typescript
+      code: |-
+        // unknown obbliga a restringere; any no
+        function gestisci(x: unknown) {
+          if (typeof x === "string") x.toUpperCase();    // ok dopo il narrowing
+          // x.toUpperCase();                            // errore senza narrowing
+        }
+
+        // Branded type: impedisce di scambiare due id strutturalmente identici
+        type UserId  = string & { readonly __brand: "UserId" };
+        type OrderId = string & { readonly __brand: "OrderId" };
+        declare function caricaUtente(id: UserId): Promise<Utente>;
+        // caricaUtente(ordineId);   // errore: i due tipi non sono intercambiabili
+
+        // Utility che compaiono ovunque
+        type Parziale = Partial<Utente>;
+        type SoloLettura = Readonly<Utente>;
+        type SenzaEmail = Omit<Utente, "email">;
+        type SoloChiavi = Pick<Utente, "id" | "ruolo">;
+      note: >-
+        I branded type costano una riga e prevengono una classe di bug che i test
+        raramente scoprono: passare l'identificatore sbagliato alla funzione giusta.
+  trade_offs:
+    - option: "strict: true"
+      pros: Intercetta i null, le firme incoerenti, i rami dimenticati
+      cons: Attrito iniziale su un progetto esistente
+      when: Sempre su progetti nuovi; per moduli su quelli esistenti
+    - option: Validatore a runtime (Zod)
+      pros: I dati esterni sono davvero della forma dichiarata, errori chiari
+      cons: Peso nel bundle, costo di validazione
+      when: Risposte API, form, configurazione, messaggi
+    - option: "`as` e fiducia"
+      pros: Zero costo, nessuna dipendenza
+      cons: "Nessuna garanzia: un cambio nell'API esplode a runtime"
+      when: Dati interni di cui controlli produzione e consumo
+    - option: enum
+      pros: Namespace, valori numerici automatici
+      cons: Genera codice a runtime, comportamenti particolari, meno serializzabile
+      when: Preferisci un'unione di letterali con as const
+  numbers:
+    - "strictNullChecks è l'opzione che, da sola, intercetta la quota maggiore di bug reali"
+    - "Zod aggiunge qualche decina di KB al bundle: da valutare sul client, quasi sempre giustificata sul server"
+  interview_answer: >-
+    TypeScript ha un sistema di tipi strutturale - conta la forma, non il nome - e i tipi
+    vengono cancellati alla compilazione, quindi a runtime non esiste nulla. Da lì viene la
+    cosa che tengo sempre presente: il compilatore garantisce la coerenza del mio codice,
+    non la forma dei dati che arrivano da fuori. Un `as Utente` su una risposta HTTP è solo
+    una promessa, quindi ai confini uso un validatore come Zod e ne deduco il tipo con
+    z.infer, così schema e tipo non possono divergere. Nel codice il costrutto che uso di
+    più è l'unione discriminata con controllo di esaustività: aggiungere una variante fa
+    fallire la compilazione esattamente nei punti che la dimenticano, che è il tipo di aiuto
+    per cui vale la pena avere i tipi. E tengo strict attivo, perché strictNullChecks da
+    sola intercetta la maggior parte dei bug veri.
+  senior_signals:
+    - "Distingue nettamente garanzia statica e validazione a runtime"
+    - "Usa unioni discriminate con never invece di catene di if"
+    - "Sa che `as` non valida e preferisce unknown ad any"
+    - "Conosce i branded type per i casi in cui la tipizzazione strutturale è troppo permissiva"
+  pitfalls:
+    - "Usare `as` per zittire il compilatore sui dati esterni"
+    - "any che si propaga e spegne i controlli a catena"
+    - "Credere che i tipi esistano a runtime"
+    - "enum usati per abitudine dove basterebbe un'unione di letterali"
+    - "strict disattivato 'per ora', e mai riattivato"
+  follow_ups:
+    - question: Differenza fra `unknown` e `any`?
+      answer: >-
+        `any` disattiva il controllo: puoi farci qualunque cosa e l'errore emerge a
+        runtime, e peggio ancora si propaga silenziosamente ai valori derivati.
+        `unknown` dice "non so cosa sia" ma obbliga a restringere - con `typeof`,
+        `instanceof` o un validatore - prima di poterlo usare. Per i dati esterni la
+        risposta corretta è `unknown` più validazione: è più scomodo, ed è esattamente
+        il punto.
+    - question: Come tipizzi la risposta di un'API senza mentire al compilatore?
+      answer: >-
+        Definendo uno schema con un validatore a runtime e deducendone il tipo, per
+        esempio con Zod e `z.infer`: c'è una sola fonte di verità, la validazione
+        avviene davvero e il tipo statico corrisponde. Se la risposta cambia forma, si
+        ottiene un errore chiaro al confine invece di un `undefined` che esplode tre
+        funzioni più in là. Il cast `as` lo uso solo su dati di cui controllo sia la
+        produzione sia il consumo.
+    - question: Quando usi `interface` e quando `type`?
+      answer: >-
+        Per le forme di oggetti sono quasi equivalenti. Uso `interface` quando la forma è
+        pensata per essere estesa o implementata, anche perché supporta il merging
+        dichiarativo - utile per estendere tipi di librerie. Uso `type` per tutto ciò che
+        una interface non può esprimere: unioni, intersezioni, tuple, tipi mappati e
+        condizionali. Nella pratica, l'importante è essere coerenti dentro il progetto.
+  related: [js-01-tipi-coercizione, py-05-tipi-e-typing, pat-04-dto-entity-model]
+  resources:
+    - title: "TypeScript Handbook"
+      url: "https://www.typescriptlang.org/docs/handbook/intro.html"
+      kind: doc
+    - title: "type-challenges - esercizi sul sistema di tipi"
+      url: "https://github.com/type-challenges/type-challenges"
+      kind: repo
+    - title: "Zod - validazione con inferenza dei tipi"
+      url: "https://github.com/colinhacks/zod"
+      kind: repo
+
+- id: js-08-performance-memoria
+  title: Prestazioni e memoria nel browser e in Node
+  category: languages
+  track: technical
+  level: hard
+  tags: [javascript, performance, memoria, browser]
+  estimated_minutes: 30
+  summary: >-
+    Le prestazioni percepite dipendono da quanto lavoro fa il thread principale e da
+    quante volte il browser deve ridisegnare; le perdite di memoria in JavaScript hanno
+    quasi sempre tre cause, e si trovano con gli strumenti giusti invece che a intuito.
+  deep_dive: |-
+    Nel browser il modello mentale utile è il *frame*: per restare a 60 fotogrammi al
+    secondo, tutto il lavoro di un frame deve stare in circa 16 millisecondi. Il ciclo di
+    rendering è: JavaScript, calcolo degli stili, layout, paint, composite. Modificare
+    proprietà geometriche - larghezza, posizione, margini - provoca un nuovo *layout*
+    (reflow), che è la fase più costosa; animare invece `transform` e `opacity` salta
+    layout e paint e resta sulla composizione, che il browser può fare sulla GPU.
+
+    Il *layout thrashing* merita un nome perché è la trappola più comune: leggere una
+    proprietà geometrica (`offsetHeight`, `getBoundingClientRect`) dopo aver scritto
+    costringe il browser a ricalcolare il layout *subito*, e in un ciclo questo si
+    ripete a ogni iterazione. La cura è separare le letture dalle scritture: prima si
+    legge tutto, poi si scrive tutto.
+
+    Sulle perdite di memoria, in JavaScript la garbage collection è automatica ma non
+    onnipotente: libera ciò che non è *raggiungibile*. Le tre cause ricorrenti sono
+    listener registrati e mai rimossi (soprattutto su oggetti globali come `window` o
+    `document`), timer `setInterval` mai fermati, e strutture che crescono senza limite -
+    cache, array di log, mappe di sessione. Tutte e tre hanno in comune un riferimento
+    che resta vivo e trattiene con sé l'intero grafo a cui punta: una closure che cattura
+    un nodo del DOM tiene vivo anche il nodo rimosso dalla pagina (*detached node*).
+
+    Gli strumenti risolvono in fretta ciò che l'intuito non trova. Nel browser: il
+    pannello Memory di DevTools, con lo *heap snapshot* per vedere cosa è vivo e i nodi
+    staccati, e l'*allocation timeline* per vedere cosa cresce; il pannello Performance
+    per i long task e il reflow. In Node: `--inspect` con i DevTools, gli heap snapshot
+    via `v8.writeHeapSnapshot()`, e `clinic.js` per un quadro complessivo. La tecnica
+    che funziona è sempre la stessa: due istantanee a distanza, si guarda cosa è
+    cresciuto e chi lo trattiene.
+
+    Due strutture aiutano per costruzione: `WeakMap` e `WeakSet` tengono riferimenti
+    deboli alle *chiavi*, quindi non impediscono la raccolta - ideali per associare
+    metadati a oggetti o nodi DOM senza trattenerli. E `AbortController` serve anche
+    qui: passare un `signal` a `addEventListener` permette di rimuovere tutti i listener
+    di un colpo, il che riduce drasticamente la probabilità di dimenticarne uno.
+
+    In Node, infine, la leva più grande sul consumo di memoria è lo *streaming*:
+    leggere un file da un gigabyte con `readFile` alloca un gigabyte, mentre una pipeline
+    di stream lavora a memoria costante. Lo stesso vale per le risposte HTTP di grandi
+    dimensioni.
+  key_points:
+    - "Per restare a 60 fps il lavoro per frame deve stare in ~16 ms; un task oltre i 50 ms è un long task"
+    - "Ciclo di rendering: JS, stili, layout, paint, composite. Animare transform e opacity salta layout e paint"
+    - "Layout thrashing: leggere una proprietà geometrica dopo aver scritto forza un reflow sincrono; separa letture e scritture"
+    - "Il GC libera ciò che non è raggiungibile: le perdite sono riferimenti che restano vivi"
+    - "Tre cause ricorrenti: listener mai rimossi, setInterval mai fermati, strutture che crescono senza limite"
+    - "Detached node: una closure che cattura un nodo rimosso lo tiene vivo insieme al suo sottoalbero"
+    - "WeakMap e WeakSet non trattengono le chiavi: ideali per metadati associati a oggetti o nodi DOM"
+    - "AbortController con addEventListener rimuove tutti i listener di un colpo"
+    - "Diagnosi: heap snapshot e allocation timeline nel browser, v8.writeHeapSnapshot e clinic.js in Node"
+    - "In Node lo streaming è la leva principale: readFile su un file enorme alloca tutto, una pipeline no"
+  examples:
+    - title: Layout thrashing, e la separazione che lo cura
+      language: javascript
+      code: |-
+        // MALE: legge dopo aver scritto, a ogni iterazione -> reflow sincrono per elemento
+        for (const el of elementi) {
+          el.style.width = `${el.offsetWidth + 10}px`;
+        }
+
+        // BENE: prima tutte le letture, poi tutte le scritture
+        const larghezze = elementi.map((el) => el.offsetWidth);     // lettura
+        elementi.forEach((el, i) => {                                // scrittura
+          el.style.width = `${larghezze[i] + 10}px`;
+        });
+
+        // Meglio ancora: animare ciò che non richiede layout
+        el.style.transform = "translateX(100px)";     // composite, niente reflow
+      note: >-
+        Con qualche centinaio di elementi la differenza fra le due versioni è fra
+        un'animazione fluida e una a scatti, a parità di logica.
+    - title: Le tre perdite classiche, e come non farle
+      language: javascript
+      code: |-
+        // 1) Listener mai rimosso (il caso peggiore: su window)
+        const controller = new AbortController();
+        window.addEventListener("resize", onResize, { signal: controller.signal });
+        // alla distruzione del componente:
+        controller.abort();                    // rimuove TUTTI i listener registrati col signal
+
+        // 2) Intervallo mai fermato
+        const id = setInterval(aggiorna, 1000);
+        // ... clearInterval(id) alla chiusura, sempre
+
+        // 3) Struttura che cresce senza limite
+        const cache = new Map();               // cresce per sempre
+        const meta = new WeakMap();            // non trattiene le chiavi: si svuota da sola
+        meta.set(nodoDom, { visite: 1 });      // quando il nodo muore, la voce sparisce
+      note: >-
+        Il `signal` su `addEventListener` è la difesa più efficace: elimina la classe di
+        bug "ho dimenticato un removeEventListener" invece di ridurne la probabilità.
+    - title: Node - memoria costante con gli stream
+      language: javascript
+      code: |-
+        import { pipeline } from "node:stream/promises";
+        import { createReadStream, createWriteStream } from "node:fs";
+        import { createGzip } from "node:zlib";
+
+        // MALE: un file da 2 GB diventa 2 GB in memoria
+        const dati = await readFile("grande.csv");
+
+        // BENE: memoria costante, backpressure gestita da pipeline
+        await pipeline(
+          createReadStream("grande.csv"),
+          trasformaRighe(),                  // Transform stream
+          createGzip(),
+          createWriteStream("grande.csv.gz"),
+        );
+      note: >-
+        `pipeline` gestisce anche la backpressure e la propagazione degli errori: farlo a
+        mano con `.pipe()` lascia scoperti proprio i casi difficili.
+  trade_offs:
+    - option: Animare transform/opacity
+      pros: Niente layout né paint, animazioni fluide anche su dispositivi modesti
+      cons: Non tutte le proprietà sono esprimibili così
+      when: Sempre che sia possibile
+    - option: Web Worker
+      pros: Toglie il lavoro dal thread principale, la UI resta reattiva
+      cons: Comunicazione per messaggi, dati da copiare o trasferire
+      when: Calcoli pesanti, parsing, crittografia
+    - option: Virtualizzazione delle liste
+      pros: "Si renderizzano solo gli elementi visibili: migliaia di righe restano fluide"
+      cons: Complessità, accessibilità e ricerca nella pagina da curare
+      when: Liste e tabelle molto lunghe
+    - option: Streaming (Node)
+      pros: Memoria costante, comincia a produrre subito
+      cons: Codice più articolato, errori da gestire lungo la pipeline
+      when: File e risposte di grandi dimensioni
+  numbers:
+    - "16 ms per frame a 60 fps; oltre 50 ms un task è considerato long task"
+    - "Un heap snapshot mostra i detached node: sono la prova diretta di un listener non rimosso"
+    - "readFile su un file da 2 GB alloca 2 GB; una pipeline di stream resta su pochi MB"
+  interview_answer: >-
+    Nel browser ragiono per frame: a 60 fps ho circa 16 millisecondi per tutto, quindi
+    guardo prima di tutto quanto lavoro sta sul thread principale e quante volte forzo un
+    nuovo layout. L'errore più comune è il layout thrashing, cioè leggere una proprietà
+    geometrica dopo aver scritto dentro un ciclo: si risolve separando tutte le letture da
+    tutte le scritture, e dove posso animo transform e opacity, che saltano layout e paint.
+    Sulle perdite di memoria le cause che trovo quasi sempre sono tre: listener mai rimossi,
+    intervalli mai fermati e strutture che crescono senza limite; le prime due le prevengo
+    passando un AbortSignal ad addEventListener e fermando tutto alla distruzione, per la
+    terza uso WeakMap dove i dati sono associati a oggetti. Per diagnosticare uso gli heap
+    snapshot confrontando due istantanee e cercando i nodi staccati, invece di indovinare.
+  senior_signals:
+    - "Ragiona per frame e conosce il ciclo stili-layout-paint-composite"
+    - "Nomina il layout thrashing e la separazione letture/scritture"
+    - "Elenca le cause tipiche delle perdite e le previene per costruzione (signal, WeakMap)"
+    - "In Node arriva subito allo streaming quando si parla di memoria"
+  pitfalls:
+    - "Animare proprietà che causano reflow invece di transform/opacity"
+    - "Leggere e scrivere geometria alternativamente dentro un ciclo"
+    - "Listener su window o document mai rimossi al cambio di pagina"
+    - "Cache in memoria senza limite in un'applicazione a pagina singola"
+    - "Caricare interi file in memoria in Node invece di usare gli stream"
+  follow_ups:
+    - question: Come trovi una perdita di memoria in una SPA?
+      answer: >-
+        Prendo un heap snapshot, faccio il percorso sospetto più volte - per esempio
+        entro e esco da una pagina dieci volte - forzo la raccolta e prendo un secondo
+        snapshot, poi confronto. Cerco due cose: oggetti della mia applicazione che
+        crescono a ogni ciclo e i detached node, cioè elementi del DOM non più in pagina
+        ma ancora raggiungibili. Da lì il pannello mostra chi li trattiene, e nella quasi
+        totalità dei casi è un listener, un timer o una struttura globale.
+    - question: Perché animare `left` è peggio che animare `transform`?
+      answer: >-
+        Perché `left` è una proprietà geometrica: cambiarla invalida il layout, quindi il
+        browser deve ricalcolare posizioni e dimensioni, ridipingere e ricomporre, a ogni
+        frame. `transform` e `opacity` agiscono nella fase di composizione, che il
+        browser può eseguire separatamente e accelerare sulla GPU, saltando layout e
+        paint. Su dispositivi modesti è esattamente la differenza fra fluido e a scatti.
+    - question: Come gestisci una lista di diecimila elementi?
+      answer: >-
+        Non renderizzandola tutta: uso la virtualizzazione, disegnando solo le righe
+        visibili più un margine, e riciclando i nodi durante lo scorrimento. In
+        alternativa, o in aggiunta, pagino i dati con un cursore lato server. Attenzione
+        però all'accessibilità e alla ricerca nella pagina, che con la virtualizzazione
+        vanno gestite esplicitamente: è il costo nascosto di questa tecnica.
+  related: [js-04-event-loop, js-06-moduli-bundling, py-06-idiomi-performance, cache-24-cdn]
+  resources:
+    - title: "web.dev - Rendering performance"
+      url: "https://web.dev/articles/rendering-performance"
+      kind: article
+    - title: "Chrome DevTools - Memory problems"
+      url: "https://developer.chrome.com/docs/devtools/memory-problems"
+      kind: doc
+    - title: "Node.js - Stream API"
+      url: "https://nodejs.org/api/stream.html"
+      kind: doc

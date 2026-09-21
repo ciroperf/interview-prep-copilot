@@ -66,6 +66,62 @@ async def get_topic(topic_id: str, kb: KnowledgeDep) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Percorsi sui macroargomenti
+# ---------------------------------------------------------------------------
+
+
+@router.get("/packs")
+async def list_packs(kb: KnowledgeDep) -> dict:
+    """Elenco dei percorsi, con il tempo di studio che ciascuno richiede."""
+    return {
+        "packs": [
+            {
+                "id": pack.id,
+                "title": pack.title,
+                "subtitle": pack.subtitle,
+                "summary": pack.summary,
+                "level": pack.level,
+                "tags": pack.tags,
+                "topic_count": len(pack.topic_ids),
+                "source_count": len(pack.sources),
+                "estimated_minutes": sum(
+                    kb.topics[t].estimated_minutes for t in pack.topic_ids if t in kb.topics
+                ),
+            }
+            for pack in sorted(kb.packs.values(), key=lambda p: p.title)
+        ]
+    }
+
+
+@router.get("/packs/{pack_id}")
+async def get_pack(pack_id: str, kb: KnowledgeDep) -> dict:
+    """Il percorso con i suoi argomenti nell'ordine in cui vanno affrontati."""
+    pack = kb.packs.get(pack_id)
+    if pack is None:
+        raise HTTPException(status_code=404, detail="Percorso non trovato")
+    topics = [kb.topics[t] for t in pack.topic_ids if t in kb.topics]
+    return {
+        "pack": pack.model_dump(),
+        "estimated_minutes": sum(t.estimated_minutes for t in topics),
+        "topics": [
+            {
+                "id": t.id,
+                "title": t.title,
+                "category": t.category,
+                "track": t.track,
+                "level": t.level,
+                "tags": t.tags,
+                "summary": t.summary,
+                "estimated_minutes": t.estimated_minutes,
+                "question_count": len(kb.questions_by_topic.get(t.id, [])),
+                "problem_count": len(kb.problems_by_topic.get(t.id, [])),
+            }
+            for t in topics
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Ampliamento del catalogo a partire dagli annunci
 # ---------------------------------------------------------------------------
 
