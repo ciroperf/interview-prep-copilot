@@ -1,0 +1,222 @@
+# Domande sugli argomenti di system design in profondita' (sd-03 ... sd-12).
+# Le opzioni vengono mescolate a runtime: la posizione qui non conta.
+- id: q-sd-03-a
+  topic_id: sd-03-consistency-models
+  difficulty: hard
+  prompt: "Qual e' la formulazione corretta del teorema CAP?"
+  options:
+    - "Di consistenza, disponibilita' e tolleranza al partizionamento se ne possono scegliere due"
+    - "Durante un partizionamento di rete bisogna scegliere fra consistenza e disponibilita'; fuori dal partizionamento il teorema non dice nulla"
+    - "Un sistema distribuito non puo' mai essere sia consistente sia disponibile"
+    - "La tolleranza al partizionamento si ottiene rinunciando sia alla consistenza sia alla disponibilita'"
+  answer_index: 1
+  explanation: "La tolleranza al partizionamento non e' opzionale in un sistema distribuito reale, quindi non e' un termine della scelta. CAP vincola solo il comportamento durante un partizionamento; il compromesso che si paga il resto del tempo, fra latenza e consistenza, e' quello che aggiunge PACELC."
+- id: q-sd-03-b
+  topic_id: sd-03-consistency-models
+  difficulty: hard
+  prompt: "Con N = 3 copie, W = 2 e R = 2, che cosa garantisce il quorum?"
+  options:
+    - "Che le scritture concorrenti vengano ordinate fra loro"
+    - "Che l'insieme dei nodi letti e quello dei nodi scritti si intersechino, quindi la lettura veda l'ultima scrittura confermata"
+    - "Che ogni scrittura sia replicata su tutti e tre i nodi prima di rispondere"
+    - "Che il sistema resti disponibile anche con due nodi su tre irraggiungibili"
+  answer_index: 1
+  explanation: "R + W > N garantisce l'intersezione per il principio dei cassetti, quindi almeno un nodo letto ha l'ultima scrittura. Non garantisce pero' l'ordinamento: due scritture concorrenti possono comunque divergere e serve una politica di risoluzione."
+- id: q-sd-04-a
+  topic_id: sd-04-consensus-leader-election
+  difficulty: hard
+  prompt: "Perche' i cluster di consenso si dimensionano con un numero dispari di nodi?"
+  options:
+    - "Perche' con un numero pari l'algoritmo di elezione non termina"
+    - "Perche' passare da dispari a pari aumenta la maggioranza richiesta senza aumentare i guasti tollerati"
+    - "Perche' il numero dispari permette di dimezzare il traffico di replica"
+    - "Perche' con un numero pari non si possono usare i termini monotoni"
+  answer_index: 1
+  explanation: "Con 2f+1 nodi si tollerano f guasti: 3 nodi ne tollerano 1, e anche 4 ne tollerano 1, ma con 4 la maggioranza sale a 3. Il nodo in piu' aggiunge coordinazione e costo senza aggiungere tolleranza."
+- id: q-sd-04-b
+  topic_id: sd-04-consensus-leader-election
+  difficulty: hard
+  prompt: "Un processo acquisisce un lock con TTL, va in pausa per una GC piu' lunga del TTL, il cluster elegge un altro leader e il primo si risveglia e scrive. Che cosa lo avrebbe impedito?"
+  options:
+    - "Un TTL piu' lungo sul lock"
+    - "Un fencing token monotono che la risorsa scritta verifica, rifiutando i token inferiori al massimo gia' visto"
+    - "Un controllo lato client che verifichi la validita' del lock prima di scrivere"
+    - "Un numero maggiore di nodi nel cluster di consenso"
+  answer_index: 1
+  explanation: "Il consenso ha funzionato correttamente: il danno lo fa il client che non sa di essere in ritardo, quindi nessun controllo lato client puo' aiutarlo. Solo la risorsa che subisce la scrittura puo' rifiutare un token vecchio."
+- id: q-sd-05-a
+  topic_id: sd-05-consistent-hashing
+  difficulty: medium
+  prompt: "Che cosa succede alle chiavi di una cache partizionata con hash(chiave) % N quando si passa da 4 a 5 nodi?"
+  options:
+    - "Si sposta circa un quinto delle chiavi"
+    - "Si sposta quasi ogni chiave, perche' cambia il divisore: la cache si svuota in blocco e il traffico si riversa sul database"
+    - "Non si sposta nulla finche' non scade il TTL"
+    - "Si spostano solo le chiavi del nodo aggiunto"
+  answer_index: 1
+  explanation: "Con il modulo la posizione di una chiave dipende dal numero di nodi, quindi si spostano in media (1 - 1/N) delle chiavi. E' il motivo per cui si usa il consistent hashing, dove se ne sposta circa K/N."
+- id: q-sd-05-b
+  topic_id: sd-05-consistent-hashing
+  difficulty: hard
+  prompt: "Una singola chiave riceve il 40% del traffico. Che cosa risolve il consistent hashing con nodi virtuali?"
+  options:
+    - "Il problema, distribuendo le richieste di quella chiave su piu' nodi"
+    - "Niente: l'anello distribuisce le chiavi, non il traffico, e quella chiave resta su un nodo solo"
+    - "Il problema, purche' si aumenti il numero di nodi virtuali"
+    - "Il problema, perche' i nodi virtuali replicano automaticamente le chiavi calde"
+  answer_index: 1
+  explanation: "I nodi virtuali livellano la distribuzione delle chiavi e spargono il carico di un nodo caduto, ma una chiave e' sempre una chiave e sta su un nodo. Contro gli hotspot servono replica della chiave, key salting o una cache locale davanti."
+- id: q-sd-06-a
+  topic_id: sd-06-feed-fanout
+  difficulty: hard
+  prompt: "Qual e' il limite del fan-out on write puro per un feed sociale?"
+  options:
+    - "La lettura diventa proporzionale al numero di account seguiti"
+    - "Un account con milioni di follower genera milioni di inserimenti per ogni post"
+    - "Non e' possibile ordinare la timeline cronologicamente"
+    - "Richiede consistenza forte su tutte le timeline"
+  answer_index: 1
+  explanation: "E' il celebrity problem. La soluzione usata in pratica e' ibrida: push per la maggior parte degli utenti, pull per i pochi account oltre una soglia di follower, con unione al momento della lettura."
+- id: q-sd-06-b
+  topic_id: sd-06-feed-fanout
+  difficulty: medium
+  prompt: "Perche' su un feed la paginazione con LIMIT e OFFSET e' scorretta?"
+  options:
+    - "Perche' OFFSET non e' supportato dalle timeline materializzate"
+    - "Perche' fra una pagina e l'altra arrivano elementi nuovi che spostano le posizioni, quindi alcuni elementi vengono duplicati e altri saltati"
+    - "Perche' OFFSET impedisce l'uso degli indici sulla data"
+    - "Perche' il numero totale di elementi non e' calcolabile"
+  answer_index: 1
+  explanation: "Serve un cursore basato sull'ultimo elemento visto, tipicamente la coppia timestamp e id: l'id rompe i pareggi fra elementi con lo stesso istante e rende l'ordinamento stabile."
+- id: q-sd-07-a
+  topic_id: sd-07-full-text-search
+  difficulty: medium
+  prompt: "Perche' LIKE '%parola%' non puo' sfruttare un indice B-tree?"
+  options:
+    - "Perche' i B-tree non indicizzano le colonne di testo"
+    - "Perche' il B-tree e' ordinato a partire dal primo carattere, quindi aiuta solo le ricerche per prefisso"
+    - "Perche' il carattere jolly disattiva l'ottimizzatore delle query"
+    - "Perche' LIKE richiede sempre una scansione dell'indice invece che della tabella"
+  answer_index: 1
+  explanation: "Con il jolly solo a destra, LIKE 'parola%', l'indice si usa perche' e' una ricerca per prefisso. Con il jolly a sinistra nessun ordinamento aiuta, e servono un indice trigram o un vero indice full-text."
+- id: q-sd-07-b
+  topic_id: sd-07-full-text-search
+  difficulty: hard
+  prompt: "La ricerca full-text non restituisce risultati per termini che sono sicuramente presenti nei documenti, e nei log non compare alcun errore. Qual e' la causa piu' probabile?"
+  options:
+    - "L'indice non e' stato ancora ricostruito dopo l'ultimo riavvio"
+    - "La catena di analisi applicata in fase di query e' diversa da quella usata in indicizzazione, quindi si cerca una chiave che l'indice non contiene"
+    - "Il punteggio BM25 dei documenti e' troppo basso perche' compaiano"
+    - "Le stopword del motore includono i termini cercati"
+  answer_index: 1
+  explanation: "Tokenizzazione, normalizzazione, stopword e stemming devono essere identici da entrambe le parti. E' un errore silenzioso per costruzione: non c'e' nulla da segnalare, semplicemente la chiave cercata non esiste nell'indice."
+- id: q-sd-08-a
+  topic_id: sd-08-multi-region
+  difficulty: hard
+  prompt: "Il requisito e' che i dati dei cittadini europei non escano dall'Unione. Che architettura serve?"
+  options:
+    - "Replica attiva verso una seconda regione europea"
+    - "Partizionamento geografico: ogni regione tiene i propri dati e non li replica altrove"
+    - "Active-active fra Europa e Stati Uniti con risoluzione dei conflitti"
+    - "Consenso sincrono cross-region per garantire la consistenza dei dati replicati"
+  answer_index: 1
+  explanation: "Il requisito normativo chiede l'opposto della replica. La parte difficile non e' il database ma tutto il resto: log, metriche, backup e cache sono i posti da cui i dati personali escono dalla regione senza che nessuno se ne accorga."
+- id: q-sd-08-b
+  topic_id: sd-08-multi-region
+  difficulty: medium
+  prompt: "Che cosa descrivono RPO e RTO?"
+  options:
+    - "Il numero di repliche e il numero di regioni di un sistema"
+    - "Quanti dati si e' disposti a perdere e quanto tempo si e' disposti a restare fermi"
+    - "La latenza di replica e quella di lettura"
+    - "Il tempo di promozione del leader e quello di propagazione del DNS"
+  answer_index: 1
+  explanation: "Sono vincoli da farsi dare dal business, non scelte tecniche: un RPO di zero impone replica sincrona e quindi latenza su ogni scrittura, mentre un RPO di qualche minuto si copre a costo molto minore."
+- id: q-sd-09-a
+  topic_id: sd-09-object-storage-upload
+  difficulty: medium
+  prompt: "Perche' si usa un URL prefirmato invece di far passare l'upload dall'applicazione?"
+  options:
+    - "Perche' l'object storage comprime i file automaticamente"
+    - "Perche' i byte non occupano i worker applicativi per tutta la durata del trasferimento e la banda smette di essere un problema di scaling"
+    - "Perche' permette di validare il contenuto prima che venga scritto"
+    - "Perche' consente di evitare del tutto l'autenticazione dell'utente"
+  answer_index: 1
+  explanation: "L'applicazione autorizza e firma, i byte vanno diretti allo storage. La contropartita e' che la validazione non puo' piu' avvenire durante l'upload e va fatta dopo, reagendo all'evento di oggetto creato."
+- id: q-sd-09-b
+  topic_id: sd-09-object-storage-upload
+  difficulty: hard
+  prompt: "Come si determina in modo affidabile il tipo di un file caricato da un utente?"
+  options:
+    - "Dall'estensione del nome del file"
+    - "Dai magic bytes letti lato server, ignorando estensione e content type dichiarati dal client"
+    - "Dal Content-Type dell'intestazione HTTP inviata dal client"
+    - "Dalla dimensione del file confrontata con i formati attesi"
+  answer_index: 1
+  explanation: "Estensione e content type sono dichiarazioni del client e non validazioni. Un file HTML dichiarato come image/png, servito da un dominio che condivide i cookie con l'applicazione, diventa una XSS sul dominio principale."
+- id: q-sd-10-a
+  topic_id: sd-10-batch-vs-streaming
+  difficulty: hard
+  prompt: "Qual e' il vantaggio principale del batch rispetto allo streaming?"
+  options:
+    - "Ha sempre latenza minore su grandi volumi"
+    - "E' rieseguibile: se la logica era sbagliata si corregge e si rilancia sullo stesso input, ottenendo un risultato riproducibile"
+    - "Non richiede di conservare i dati di ingresso"
+    - "Gestisce nativamente gli eventi in ritardo"
+  answer_index: 1
+  explanation: "In streaming correggere una logica sbagliata significa ricalcolare uno stato accumulato nel tempo, il che richiede di aver conservato il log degli eventi e di saperlo rielaborare. Quando la latenza non e' un requisito, il batch resta la scelta piu' sana."
+- id: q-sd-10-b
+  topic_id: sd-10-batch-vs-streaming
+  difficulty: hard
+  prompt: "In una pipeline streaming, a che cosa serve un watermark?"
+  options:
+    - "A marcare gli eventi duplicati perche' vengano scartati"
+    - "A dichiarare fino a che punto nel tempo dell'evento il sistema si considera completo, cosi' da poter chiudere ed emettere le finestre"
+    - "A sincronizzare gli orologi dei nodi della pipeline"
+    - "A limitare il numero di eventi elaborati al secondo"
+  answer_index: 1
+  explanation: "La tolleranza del watermark e' il compromesso esplicito fra correttezza e latenza. Cio' che arriva dopo e' un late event, e va deciso se scartarlo o riaprire la finestra correggendo un risultato gia' pubblicato."
+- id: q-sd-11-a
+  topic_id: sd-11-realtime-connections
+  difficulty: medium
+  prompt: "Per inviare notifiche dal server al browser, senza che il client debba mandare messaggi, quale tecnologia e' piu' indicata?"
+  options:
+    - "WebSocket, perche' e' l'unica con latenza accettabile"
+    - "Server-Sent Events, che ha riconnessione automatica e ripresa dall'ultimo evento gia' nel protocollo e viaggia su HTTP normale"
+    - "Long polling, perche' e' l'unico compatibile con i proxy"
+    - "WebRTC, perche' e' progettato per il tempo reale"
+  answer_index: 1
+  explanation: "WebSocket serve quando il client scrive con la stessa frequenza con cui legge. Usarlo per un flusso unidirezionale significa reimplementare a mano la riconnessione e la ripresa che SSE offre gia'."
+- id: q-sd-11-b
+  topic_id: sd-11-realtime-connections
+  difficulty: hard
+  prompt: "In una chat, perche' non basta un backplane pub/sub per consegnare i messaggi?"
+  options:
+    - "Perche' il pub/sub non garantisce l'ordinamento dei messaggi"
+    - "Perche' il pub/sub non persiste: chi e' disconnesso anche solo per pochi secondi perde il messaggio per sempre"
+    - "Perche' il pub/sub non supporta piu' di un nodo sottoscrittore per canale"
+    - "Perche' il pub/sub introduce una latenza incompatibile con il tempo reale"
+  answer_index: 1
+  explanation: "Il messaggio va prima persistito con un numero di sequenza per conversazione; alla riconnessione il client chiede tutto cio' che segue l'ultimo che ha. Il push in tempo reale e' un'ottimizzazione sopra quel recupero, non il meccanismo di consegna."
+- id: q-sd-12-a
+  topic_id: sd-12-probabilistic-structures
+  difficulty: hard
+  prompt: "Quali risposte puo' dare un Bloom filter?"
+  options:
+    - "Solo 'si'' oppure 'no', entrambe con una piccola probabilita' di errore"
+    - "'Sicuramente non presente' oppure 'forse presente': non esistono falsi negativi"
+    - "'Sicuramente presente' oppure 'forse assente': non esistono falsi positivi"
+    - "Un numero che stima quante volte l'elemento e' stato inserito"
+  answer_index: 1
+  explanation: "L'inserimento accende bit e non li spegne mai, quindi un elemento inserito trovera' sempre tutti i suoi bit accesi. E' questa asimmetria a rendere il filtro utile davanti a una risorsa costosa: il falso positivo costa solo un accesso inutile."
+- id: q-sd-12-b
+  topic_id: sd-12-probabilistic-structures
+  difficulty: hard
+  prompt: "Qual e' la proprieta' di HyperLogLog piu' utile in un sistema distribuito?"
+  options:
+    - "Permette di elencare gli elementi distinti osservati"
+    - "Due strutture si possono unire, quindi ogni nodo tiene la propria e il totale globale e' l'unione, senza spostare i dati"
+    - "Garantisce un conteggio esatto con memoria costante"
+    - "Permette di cancellare elementi gia' conteggiati"
+  answer_index: 1
+  explanation: "In Redis occupa 12 KB con un errore standard intorno allo 0,8%. Non dice quali sono gli elementi, solo quanti: per un numero che finisce in una fattura serve comunque un conteggio esatto."

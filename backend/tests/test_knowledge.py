@@ -105,7 +105,11 @@ def test_lo_stack_degli_annunci_tipici_trova_l_argomento_giusto(kb):
         "python": "eng-06",
         "git": "eng-02",
         "observability": "rel-38",
-        "docker": "eng-03",
+        "docker": "plat-01",
+        "kubernetes": "plat-02",
+        "terraform": "plat-03",
+        "elasticsearch": "sd-07",
+        "websocket": "sd-11",
         "kafka": "dist-30",
     }
     for termine, prefisso in attesi.items():

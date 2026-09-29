@@ -1,0 +1,166 @@
+# Domande su piattaforma e infrastruttura (plat-01 ... plat-05).
+- id: q-plat-01-a
+  topic_id: plat-01-container
+  difficulty: medium
+  prompt: "Qual e' la differenza fondamentale fra un container e una macchina virtuale?"
+  options:
+    - "Il container usa meno memoria perche' comprime il filesystem"
+    - "Il container e' un processo sul kernel dell'host limitato da namespace e cgroup, mentre la VM emula hardware ed esegue un kernel proprio"
+    - "Il container non puo' esporre porte di rete verso l'esterno"
+    - "La VM condivide il kernel dell'host, il container no"
+  answer_index: 1
+  explanation: "Da qui discende tutto: avvio in millisecondi perche' non c'e' un kernel da avviare, ma kernel condiviso, quindi un container non e' un confine di sicurezza sufficiente per eseguire codice non fidato."
+- id: q-plat-01-b
+  topic_id: plat-01-container
+  difficulty: medium
+  prompt: "Perche' in un Dockerfile conviene copiare il file delle dipendenze e installarle prima di copiare il codice sorgente?"
+  options:
+    - "Perche' altrimenti il gestore di pacchetti non trova il file"
+    - "Perche' ogni livello invalida la cache di quelli successivi, e il codice cambia a ogni commit mentre le dipendenze quasi mai"
+    - "Perche' riduce la dimensione finale dell'immagine"
+    - "Perche' permette di eseguire l'installazione come utente non privilegiato"
+  answer_index: 1
+  explanation: "Copiando tutto il sorgente per primo, qualunque modifica invalida il livello dell'installazione e le dipendenze vengono reinstallate a ogni build. E' la differenza fra una build da pochi secondi e una da minuti."
+- id: q-plat-01-c
+  topic_id: plat-01-container
+  difficulty: hard
+  prompt: "Un servizio in container perde richieste a ogni deploy, con errori intermittenti difficili da riprodurre. Qual e' la causa piu' probabile?"
+  options:
+    - "L'immagine e' troppo grande e il pull non fa in tempo a completarsi"
+    - "Il processo non gestisce SIGTERM, quindi dopo il grace period riceve SIGKILL e le richieste in volo vengono troncate"
+    - "Il container gira come root e il kernel lo termina"
+    - "I log vengono scritti su stdout invece che su file"
+  answer_index: 1
+  explanation: "Un arresto ordinato smette di accettare nuove connessioni, completa quelle in corso e chiude i pool. Va anche tolto prima il readiness probe, cosi' il bilanciatore smette di inviare traffico mentre il processo finisce."
+- id: q-plat-02-a
+  topic_id: plat-02-kubernetes
+  difficulty: hard
+  prompt: "Qual e' la differenza pratica fra liveness probe e readiness probe?"
+  options:
+    - "La liveness viene eseguita solo all'avvio, la readiness di continuo"
+    - "Se fallisce la liveness il container viene riavviato; se fallisce la readiness il Pod esce dal bilanciamento senza essere riavviato"
+    - "La liveness verifica le dipendenze esterne, la readiness solo il processo"
+    - "Sono equivalenti: si usa l'una o l'altra indifferentemente"
+  answer_index: 1
+  explanation: "Il criterio per assegnare un controllo e' chiedersi se riavviare risolverebbe. Un deadlock del processo si', un database irraggiungibile no: per questo le dipendenze esterne vanno nella readiness."
+- id: q-plat-02-b
+  topic_id: plat-02-kubernetes
+  difficulty: hard
+  prompt: "Perche' non bisogna mai interrogare il database dentro la liveness probe?"
+  options:
+    - "Perche' la probe ha un timeout troppo breve per una query"
+    - "Perche' se il database rallenta la probe fallisce su tutti i Pod insieme e Kubernetes li riavvia tutti, togliendo capacita' proprio durante il problema"
+    - "Perche' le probe non possono aprire connessioni di rete"
+    - "Perche' il traffico delle probe sovraccaricherebbe il database"
+  answer_index: 1
+  explanation: "Si trasforma un rallentamento in un'interruzione, e i Pod appena riavviati ritrovano lo stesso database lento e vengono riavviati ancora. Quel controllo appartiene alla readiness, dove l'effetto e' solo uscire dal bilanciamento."
+- id: q-plat-02-c
+  topic_id: plat-02-kubernetes
+  difficulty: medium
+  prompt: "Che differenza c'e' fra superare il limit di CPU e superare quello di memoria?"
+  options:
+    - "In entrambi i casi il container viene terminato immediatamente"
+    - "Oltre il limit di CPU il processo viene rallentato (throttling), oltre quello di memoria viene terminato (OOMKill)"
+    - "Oltre il limit di CPU il Pod viene sfrattato, oltre quello di memoria viene solo segnalato"
+    - "In entrambi i casi lo scheduler sposta il Pod su un altro nodo"
+  answer_index: 1
+  explanation: "Per questo i due limiti si trattano in modo diverso: quello di memoria protegge i vicini da una perdita di memoria, mentre un limit di CPU aggressivo produce latenze difficili da diagnosticare quando la macchina avrebbe cicli liberi."
+- id: q-plat-03-a
+  topic_id: plat-03-iac
+  difficulty: medium
+  prompt: "A che cosa serve il file di stato di Terraform?"
+  options:
+    - "A memorizzare le credenziali di accesso al cloud"
+    - "A tenere la mappa fra i blocchi del codice e le risorse reali, indispensabile per calcolare la differenza da applicare"
+    - "A conservare lo storico di tutte le modifiche applicate"
+    - "A definire l'ordine in cui le risorse vengono create"
+  answer_index: 1
+  explanation: "Perderlo significa avere risorse orfane: esistono nel cloud ma lo strumento non sa piu' di averle create e al successivo apply prova a ricrearle. Contiene anche valori sensibili in chiaro, quindi va trattato come un segreto."
+- id: q-plat-03-b
+  topic_id: plat-03-iac
+  difficulty: hard
+  prompt: "Perche' lo stato remoto ha bisogno del locking?"
+  options:
+    - "Per impedire la lettura dello stato a chi non ha i permessi"
+    - "Per impedire che due apply concorrenti si sovrascrivano producendo uno stato incoerente"
+    - "Per garantire che lo stato sia cifrato a riposo"
+    - "Per permettere il ritorno a una versione precedente dello stato"
+  answer_index: 1
+  explanation: "Lo stato remoto risolve la condivisione, il versionamento permette di tornare indietro e la cifratura protegge i segreti: sono tre proprieta' distinte, e il locking e' quella che serve quando piu' persone o una pipeline lavorano sullo stesso ambiente."
+- id: q-plat-03-c
+  topic_id: plat-03-iac
+  difficulty: medium
+  prompt: "In un piano Terraform compare 'forces replacement' su uno storage account. Che cosa significa?"
+  options:
+    - "Che la risorsa verra' aggiornata sul posto senza interruzioni"
+    - "Che la risorsa verra' distrutta e ricreata, quindi i dati che contiene andranno persi"
+    - "Che occorre eseguire un import prima di poter procedere"
+    - "Che il provider va aggiornato a una versione piu' recente"
+  answer_index: 1
+  explanation: "Alcuni attributi sono immutabili e cambiarli comporta distruzione e ricreazione. Da qui l'abitudine di leggere la riga 'to destroy' del piano, applicare un piano salvato e mettere prevent_destroy sulle risorse con stato."
+- id: q-plat-04-a
+  topic_id: plat-04-ci-cd
+  difficulty: hard
+  prompt: "Perche' si costruisce l'artefatto una volta sola e si promuove lo stesso digest fra gli ambienti?"
+  options:
+    - "Per ridurre il tempo totale della pipeline"
+    - "Perche' due build dallo stesso sorgente possono differire (immagine di base, dipendenze transitive), quindi ricostruire per ambiente significa rilasciare qualcosa che non e' stato verificato"
+    - "Perche' il registro delle immagini non accetta piu' versioni con lo stesso tag"
+    - "Perche' la configurazione deve essere compilata dentro l'artefatto"
+  answer_index: 1
+  explanation: "Il corollario e' che la configurazione deve essere esterna: se l'URL dell'ambiente sta nell'immagine, si e' costretti a ricostruire e si perde la garanzia che cio' che va in produzione sia cio' che e' stato testato."
+- id: q-plat-04-b
+  topic_id: plat-04-ci-cd
+  difficulty: medium
+  prompt: "Perche' gli stadi rapidi di una pipeline (lint, tipi) vanno messi prima dei test di integrazione?"
+  options:
+    - "Perche' i test di integrazione richiedono che il lint sia passato"
+    - "Perche' la velocita' del riscontro decide se la pipeline viene attesa o aggirata: un errore banale non deve costare venti minuti"
+    - "Perche' gli stadi rapidi consumano meno risorse di calcolo"
+    - "Perche' l'ordine determina quali stadi possono girare in parallelo"
+  answer_index: 1
+  explanation: "Conta l'ordine piu' della durata totale: se lo stadio lento dura venti minuti va bene, purche' l'errore di formattazione sia stato intercettato in trenta secondi."
+- id: q-plat-04-c
+  topic_id: plat-04-ci-cd
+  difficulty: hard
+  prompt: "Come si danno a una pipeline i permessi sul cloud senza conservare una chiave statica?"
+  options:
+    - "Cifrando la chiave nei segreti del repository"
+    - "Con la federazione OIDC: la CI presenta un token firmato che descrive repository, ramo e ambiente, e il cloud rilascia credenziali a scadenza breve"
+    - "Ruotando la chiave automaticamente a ogni esecuzione"
+    - "Limitando la chiave a un solo indirizzo IP di origine"
+  answer_index: 1
+  explanation: "Non esiste alcun segreto permanente da rubare o da dimenticare in un log, e il permesso e' legato al contesto dell'esecuzione: una pipeline su un ramo diverso non ottiene nulla. Il ruolo va poi limitato al gruppo di risorse su cui deve agire."
+- id: q-plat-05-a
+  topic_id: plat-05-config-segreti
+  difficulty: medium
+  prompt: "Qual e' il criterio per decidere se un valore e' configurazione o puo' stare nel codice?"
+  options:
+    - "Se e' una stringa e' configurazione, se e' un numero puo' stare nel codice"
+    - "Se cambia fra un ambiente e l'altro e' configurazione, altrimenti sta meglio nel codice dove e' piu' leggibile"
+    - "Se e' sensibile e' configurazione, altrimenti no"
+    - "Tutto cio' che e' modificabile dall'utente e' configurazione"
+  answer_index: 1
+  explanation: "Il criterio deriva dalla promozione dell'artefatto: se l'URL del database e' compilato dentro l'immagine, quell'immagine e' legata a un ambiente e non si puo' promuovere in produzione cio' che si e' testato in staging."
+- id: q-plat-05-b
+  topic_id: plat-05-config-segreti
+  difficulty: hard
+  prompt: "Una password e' stata committata sei mesi fa e poi rimossa con un commit successivo. Qual e' l'azione corretta?"
+  options:
+    - "Riscrivere lo storico del repository per eliminarne ogni traccia"
+    - "Considerarla compromessa dal momento del push e ruotarla: il repository puo' essere stato clonato, copiato in cache di CI o in un fork"
+    - "Nulla: il commit di rimozione e' sufficiente"
+    - "Renderla privata limitando l'accesso al repository"
+  answer_index: 1
+  explanation: "Riscrivere lo storico e' utile per l'igiene ma non e' una bonifica e non va mai considerato il rimedio. Dopo la rotazione conviene aggiungere una scansione dei segreti nel primo stadio della pipeline, e chiedersi se quel segreto puo' essere eliminato del tutto con un'identita' gestita."
+- id: q-plat-05-c
+  topic_id: plat-05-config-segreti
+  difficulty: hard
+  prompt: "Qual e' il modo piu' robusto di proteggere la credenziale che un servizio in cloud usa per parlare con il proprio database?"
+  options:
+    - "Conservarla in un gestore di segreti con rotazione automatica"
+    - "Non avere la credenziale: usare un'identita' gestita che ottiene un token a scadenza breve, cosi' non c'e' nulla da custodire ne' da ruotare"
+    - "Iniettarla come variabile d'ambiente cifrata dall'orchestratore"
+    - "Generarla a ogni avvio del processo e tenerla solo in memoria"
+  answer_index: 1
+  explanation: "Un gestore di segreti e' un buon gradino, ma resta un segreto a lunga vita che qualcuno deve ruotare. Con un'identita' gestita il problema si elimina invece di spostarlo: un segreto che non esiste non puo' essere rubato ne' dimenticato in un log."

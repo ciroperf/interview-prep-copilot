@@ -27,7 +27,7 @@ hai davvero a disposizione.
 * **Ti dà un percorso** — 11 percorsi sui macroargomenti (i linguaggi, i dati,
   i sistemi distribuiti, l'architettura…) con gli argomenti in ordine di studio
   e le fonti da cui approfondire, ognuna motivata.
-* **Ti interroga** — 146 domande a risposta multipla sul catalogo, con le
+* **Ti interroga** — 181 domande a risposta multipla sul catalogo, con le
   opzioni mescolate a ogni esecuzione e la spiegazione di ogni errore.
 * **Ti fa scrivere codice** — 14 problemi in stile colloquio con test, hint
   progressivi e revisione della soluzione.
@@ -39,7 +39,7 @@ hai davvero a disposizione.
 
 ## Contenuti
 
-**105 argomenti, 13 percorsi di studio, 146 domande, 14 problemi di coding.**
+**120 argomenti, 14 percorsi di studio, 181 domande, 14 problemi di coding.**
 
 I 40 concetti backend fondamentali (API e HTTP, database, caching, sistemi
 distribuiti, affidabilità), 12 argomenti sui **pattern di strutturazione del
@@ -47,8 +47,13 @@ codice** (layered, repository, service layer, DTO, dependency injection,
 esagonale, DDD, unit of work, GoF, organizzazione del progetto, CQRS, gestione
 degli errori), 14 di algoritmi e strutture dati, 15 dedicati ai **linguaggi**
 (Python e JavaScript/TypeScript), 6 al **frontend** (React, Angular, CSS,
-prestazioni percepite, testing dei componenti) e 6 a **Java e Spring Boot**,
-più system design, comportamentale e pratiche di ingegneria.
+prestazioni percepite, testing dei componenti) e 6 a **Java e Spring Boot**.
+**12 di system design**, dal metodo del colloquio ai meccanismi su cui si va a
+fondo — consistenza e CAP/PACELC, consenso, consistent hashing, fan-out dei feed,
+ricerca full-text, multi-region, batch contro streaming, WebSocket, strutture
+probabilistiche — e **5 di piattaforma** (container, Kubernetes, infrastruttura
+come codice, CI/CD, configurazione e segreti). Più comportamentale e pratiche di
+ingegneria.
 
 Ogni argomento ha una sintesi, la spiegazione lunga, i punti chiave, esempi
 commentati, una tabella di trade-off, numeri da citare, gli errori tipici, i
@@ -59,7 +64,7 @@ dare a voce, in prima persona, con i compromessi espliciti.
 ### Percorsi
 
 Un linguaggio, i dati o l'affidabilità non stanno in una scheda sola. I
-**13 percorsi** (`backend/app/content/packs.yaml`) mettono gli argomenti in
+**14 percorsi** (`backend/app/content/packs.yaml`) mettono gli argomenti in
 ordine di studio e aggiungono le fonti da cui approfondire — documentazione
 ufficiale, libri di riferimento e repository di studio noti — ognuna con il
 motivo per cui vale il tempo che costa.
@@ -72,12 +77,13 @@ motivo per cui vale il tempo che costa.
 | Sistemi distribuiti e affidabilità | 15 | difficile |
 | Architettura del codice | 12 | media |
 | Algoritmi e strutture dati | 14 | media |
-| System design | 11 | difficile |
+| System design | 21 | difficile |
 | Python da colloquio | 8 | media |
 | JavaScript e TypeScript da colloquio | 9 | media |
 | Pratica dell'ingegneria | 5 | media |
 | Frontend - React, Angular e CSS | 6 | media |
 | Java e Spring Boot | 6 | media |
+| Piattaforma e infrastruttura | 7 | media |
 | Colloquio, azienda e offerta | 3 | facile |
 
 ## Funziona anche senza AI
