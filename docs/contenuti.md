@@ -14,13 +14,14 @@ generato benissimo, ma se dietro non c'è materiale serio non serve a niente.
 | `reliability` | 10 | Semantiche di consegna, retry e circuit breaker, race condition, lock distribuiti, eventi, saga, degrado, observability, deploy, picchi |
 | `patterns` | 12 | Livelli, repository, service layer, DTO, DI, esagonale, DDD, unit of work, GoF, struttura del progetto, CQRS, gestione errori |
 | `dsa` | 14 | Complessità, array, hash map, stringhe, ricerca binaria, liste, stack, alberi, grafi, heap, DP, sliding window, backtracking, ordinamento |
-| `system-design` | 2 | Metodo per il colloquio, design ricorrenti |
+| `system-design` | 12 | Metodo per il colloquio e design ricorrenti, poi i meccanismi: consistenza e CAP/PACELC, consenso ed elezione del leader, consistent hashing e chiavi calde, feed e fan-out, ricerca full-text, multi-region, upload e object storage, batch contro streaming, WebSocket e presenza, strutture probabilistiche |
 | `behavioral` + `company` | 3 | Metodo STAR, ricerca sull'azienda, negoziazione |
 | `engineering` | 5 | Testing, git, cloud, sicurezza applicativa, qualità del codice |
 | `languages` | 23 | Due schede introduttive, i percorsi dedicati a Python (7) e a JavaScript/TypeScript (8), più Java e Spring Boot (6) |
 | `frontend` | 6 | React (rendering e stato), Angular, CSS e layout, prestazioni percepite, testing dei componenti |
+| `platform` | 5 | Container e immagini, Kubernetes, infrastruttura come codice, CI/CD, configurazione e segreti |
 
-Totale: **105 argomenti, 13 percorsi, 146 domande a risposta multipla, 14
+Totale: **120 argomenti, 14 percorsi, 181 domande a risposta multipla, 14
 problemi di coding**.
 
 Le prime cinque categorie ricalcano esattamente la checklist dei 40 concetti

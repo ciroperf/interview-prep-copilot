@@ -148,6 +148,7 @@ export const CATEGORY_LABEL: Record<string, string> = {
   languages: 'Linguaggi',
   patterns: 'Architettura del codice',
   frontend: 'Frontend e interfacce',
+  platform: 'Piattaforma e infrastruttura',
 }
 
 export function categoryLabel(id: string): string {

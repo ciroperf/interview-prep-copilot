@@ -206,7 +206,7 @@ def test_lacune_del_catalogo_sull_annuncio(client):
     assert response.status_code == 200
     body = response.json()
     per_termine = {g["term"]: g for g in body["gaps"]}
-    assert per_termine["Kubernetes"]["covered"] is False
+    assert per_termine["Redis"]["covered"] is False
     assert per_termine["Kafka"]["covered"] is True
     assert body["missing"] >= 1
 

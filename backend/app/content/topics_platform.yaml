@@ -1,0 +1,1077 @@
+# Piattaforma e infrastruttura: cio' che gli annunci chiedono sotto "DevOps" e che
+# il catalogo copriva solo di striscio con eng-03-cloud-basics.
+- id: plat-01-container
+  title: Container Docker e immagini, cosa sono davvero
+  category: platform
+  track: technical
+  level: medium
+  tags: [docker, container, immagini, deploy, linux]
+  estimated_minutes: 35
+  summary: >-
+    Un container non e' una macchina virtuale leggera: e' un processo Linux normale a cui
+    il kernel ha ristretto la vista. Da questa differenza discendono il peso, la velocita'
+    di avvio, il modello di sicurezza e quasi tutte le domande da colloquio.
+  deep_dive: |-
+    La confusione piu' comune e' con le macchine virtuali. Una VM emula l'hardware ed esegue
+    un kernel proprio: e' isolata davvero, pesa gigabyte e impiega decine di secondi ad
+    avviarsi. Un container e' un processo che gira sul kernel dell'host, con due meccanismi
+    del kernel a limitarlo: i namespace, che decidono cosa vede - il proprio albero dei
+    processi, la propria rete, il proprio filesystem - e i cgroup, che decidono quanto puo'
+    consumare di CPU e memoria. Non c'e' emulazione, quindi l'avvio e' quello di un processo
+    e il peso e' quello dei file che porta con se'. La conseguenza che conta al colloquio e'
+    che il kernel e' condiviso: una vulnerabilita' che permette di uscire dal container
+    arriva direttamente all'host, ed e' per questo che i container non sono considerati un
+    confine di sicurezza sufficiente per eseguire codice non fidato.
+
+    L'immagine e' una pila di livelli in sola lettura, ciascuno risultato di
+    un'istruzione del Dockerfile. Il container aggiunge sopra un livello scrivibile che
+    vive quanto il container. Due proprieta' derivano da qui. La prima e' la condivisione:
+    dieci container dalla stessa immagine non occupano dieci volte lo spazio, perche' i
+    livelli in sola lettura sono gli stessi file. La seconda e' la cache di build: se un
+    livello non cambia, tutti quelli precedenti restano validi, ed e' il motivo per cui
+    l'ordine delle istruzioni nel Dockerfile determina la velocita' delle build. Copiare
+    prima il file delle dipendenze e installarle, e solo dopo copiare il codice sorgente, fa
+    la differenza fra una build da dieci secondi e una da tre minuti, perche' il codice
+    cambia a ogni commit e le dipendenze quasi mai.
+
+    La dimensione dell'immagine si governa con la build multi-stage: uno stage compila, con
+    tutti gli strumenti che servono, e lo stage finale copia solo l'artefatto in
+    un'immagine di base minima. Compilatori, intestazioni di sviluppo e cache dei pacchetti
+    restano fuori, e con loro gran parte della superficie di attacco. Il livello successivo
+    e' scegliere una base piu' piccola: le varianti slim, Alpine - che pero' usa musl al
+    posto di glibc e puo' rompere pacchetti compilati - o le immagini distroless, che non
+    contengono nemmeno una shell.
+
+    Il modo in cui il processo si comporta dentro il container e' l'altra meta' del
+    discorso. Un container esegue un processo principale con PID 1, e PID 1 ha una
+    responsabilita' speciale: raccogliere i processi figli orfani e gestire i segnali. Un
+    processo applicativo che ignora SIGTERM non viene terminato con grazia e, scaduto il
+    periodo di attesa, riceve SIGKILL: connessioni troncate e richieste perse a ogni
+    deploy. Gestire SIGTERM chiudendo il server in modo ordinato e' uno dei dettagli che
+    separa un'immagine funzionante da una utilizzabile in produzione. Allo stesso modo i
+    log vanno su stdout e stderr, non su file dentro il container, perche' il filesystem
+    scrivibile sparisce e nessuno andra' a leggerlo; la configurazione arriva da variabili
+    d'ambiente, perche' la stessa immagine deve poter girare in tutti gli ambienti senza
+    essere ricostruita; e il processo non gira come root, perche' non c'e' motivo e perche'
+    riduce il danno di una evasione.
+  key_points:
+    - "Container = processo Linux con namespace (cosa vede) e cgroup (quanto consuma), non una VM leggera"
+    - "Il kernel e' condiviso: un container non e' un confine di sicurezza per eseguire codice non fidato"
+    - "L'immagine e' una pila di livelli in sola lettura, condivisi fra i container che ne derivano"
+    - "L'ordine delle istruzioni governa la cache di build: dipendenze prima, codice dopo"
+    - "Build multi-stage: si compila in uno stage e si copia solo l'artefatto in un'immagine minima"
+    - "PID 1 deve gestire SIGTERM: senza, ogni deploy tronca le connessioni in corso"
+    - "Log su stdout, configurazione da variabili d'ambiente, processo non root"
+    - "La stessa immagine deve girare in tutti gli ambienti: se va ricostruita per ambiente, non si sta testando cio' che si rilascia"
+  examples:
+    - title: Lo stesso Dockerfile, prima e dopo
+      language: dockerfile
+      code: |
+        # PRIMA: 1,2 GB, rebuild completa a ogni commit
+        FROM python:3.12
+        COPY . /app                    # <- il codice cambia sempre:
+        WORKDIR /app                   #    invalida tutto quello che segue
+        RUN pip install -r requirements.txt
+        CMD python -m uvicorn app.main:app --host 0.0.0.0
+
+        # DOPO: ~180 MB, rebuild di 5 secondi se il codice non tocca le dipendenze
+        FROM python:3.12-slim AS build
+        WORKDIR /app
+        COPY requirements.txt .        # <- cambia di rado: il livello resta in cache
+        RUN pip install --prefix=/install -r requirements.txt
+
+        FROM python:3.12-slim
+        RUN useradd -m app
+        COPY --from=build /install /usr/local
+        COPY --chown=app:app . /app
+        WORKDIR /app
+        USER app                       # non root
+        CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0"]
+      note: >-
+        La forma esec di CMD, con la lista invece della stringa, e' necessaria perche' il
+        processo riceva davvero i segnali: con la forma stringa il comando gira sotto una
+        shell che diventa PID 1 e non inoltra SIGTERM.
+    - title: Perche' SIGTERM non gestito rompe i deploy
+      language: text
+      code: |
+        DEPLOY con SIGTERM ignorato
+          orchestratore: SIGTERM al container
+          processo: lo ignora, continua a servire
+          orchestratore: attende il grace period (default 30 s)
+          orchestratore: SIGKILL
+          -> le richieste in volo muoiono: 502 per gli utenti,
+             a ogni deploy, in modo intermittente e difficile da riprodurre
+
+        DEPLOY con arresto ordinato
+          orchestratore: SIGTERM
+          processo: smette di accettare nuove connessioni
+                    completa quelle in corso (entro un timeout)
+                    chiude pool del database e consumer delle code
+                    esce con codice 0
+          -> nessuna richiesta persa
+
+        Il readiness probe va tolto PRIMA: cosi' il bilanciatore smette di
+        mandare traffico mentre il processo finisce quello che ha.
+      note: >-
+        E' il difetto piu' frequente nelle immagini scritte in fretta, e si manifesta come
+        errori sporadici in produzione che nessuno collega al deploy.
+  trade_offs:
+    - option: Immagine di base completa (python:3.12, node:22)
+      pros: Tutto presente, nessuna sorpresa di compilazione, debug comodo
+      cons: Centinaia di MB, superficie di attacco ampia, pull lenti
+      when: Sviluppo locale, o quando il tempo di messa a punto conta piu' della dimensione
+    - option: Variante slim
+      pros: Una frazione della dimensione mantenendo glibc e gli strumenti essenziali
+      cons: Qualche pacchetto di sistema da aggiungere a mano
+      when: Default ragionevole per la produzione nella maggioranza dei casi
+    - option: Alpine
+      pros: Immagini piccolissime
+      cons: "musl al posto di glibc: alcune ruote Python precompilate non funzionano e la compilazione rallenta le build"
+      when: Binari statici (Go, Rust), meno indicata per Python con dipendenze native
+    - option: Distroless
+      pros: Superficie minima, nessuna shell da sfruttare
+      cons: Debug scomodo, serve una strategia alternativa per ispezionare
+      when: Servizi in produzione con requisiti di sicurezza stringenti e pipeline matura
+  numbers:
+    - "Avvio: container in decine o centinaia di millisecondi, macchina virtuale in decine di secondi"
+    - "Grace period di default prima del SIGKILL: 30 secondi in Docker e in Kubernetes"
+    - "Una multi-stage ben fatta porta tipicamente un'immagine Python da oltre 1 GB a 150-250 MB"
+  interview_answer: >-
+    Un container non e' una macchina virtuale leggera: e' un processo Linux normale a cui il
+    kernel ha ristretto la vista con i namespace e i consumi con i cgroup. Da lì viene tutto:
+    parte in millisecondi perche' non c'e' un kernel da avviare, ma il kernel e' condiviso con
+    l'host, quindi non lo considero un confine di sicurezza per eseguire codice non fidato.
+    L'immagine e' una pila di livelli in sola lettura, e siccome un livello invalida quelli
+    successivi metto le dipendenze prima del codice, che cambia a ogni commit. Per la dimensione
+    uso una build multi-stage, cosi' compilatori e cache restano fuori dall'immagine finale
+    insieme a buona parte della superficie di attacco. Le tre cose che curo sempre sono la
+    gestione di SIGTERM, perche' senza arresto ordinato ogni deploy tronca le richieste in volo,
+    i log su stdout invece che su file dentro il container, e il processo che non gira come root.
+  senior_signals:
+    - "Spiega la differenza con le VM partendo da namespace e cgroup, non dal peso"
+    - "Ne trae la conseguenza sulla sicurezza: kernel condiviso, non adatto a codice non fidato"
+    - "Ordina il Dockerfile per la cache e sa spiegare quale livello invalida cosa"
+    - "Parla di SIGTERM e di arresto ordinato senza che glielo si chieda"
+    - "Sa perche' la forma esec di CMD conta per la propagazione dei segnali"
+    - "Conosce il compromesso di Alpine (musl contro glibc) invece di consigliarla per abitudine"
+  pitfalls:
+    - "Trattare i container come sandbox di sicurezza per eseguire codice arbitrario degli utenti"
+    - "COPY di tutto il progetto prima di installare le dipendenze: la cache non serve piu' a niente"
+    - "Non gestire SIGTERM e avere errori intermittenti a ogni deploy senza collegarli fra loro"
+    - "Scrivere i log su file dentro il container, dove nessuno li leggera' e il filesystem sparisce"
+    - "Ricostruire un'immagine diversa per ogni ambiente: si rilascia qualcosa che non e' stato testato"
+    - "Girare come root senza motivo, e mettere segreti dentro l'immagine dove restano nei livelli"
+  follow_ups:
+    - question: Che differenza c'e' fra un container e una macchina virtuale, in pratica?
+      answer: >-
+        La VM emula hardware e ha un kernel proprio, quindi l'isolamento e' forte e il costo
+        pure: gigabyte di immagine e decine di secondi di avvio. Il container e' un processo
+        sul kernel dell'host, limitato da namespace e cgroup: parte in millisecondi e pesa
+        quanto i file che porta. In pratica scelgo i container per densita' e velocita' di
+        rilascio, e la VM quando serve isolamento vero - per esempio per eseguire codice di
+        terze parti - oppure un kernel diverso. Esistono vie di mezzo come gVisor e Firecracker,
+        che danno isolamento maggiore mantenendo tempi di avvio bassi, ed e' cio' su cui girano
+        i servizi serverless dei cloud.
+    - question: Perche' l'ordine delle istruzioni nel Dockerfile cambia i tempi di build?
+      answer: >-
+        Perche' ogni istruzione produce un livello e la cache e' valida solo finche' tutti i
+        livelli precedenti sono invariati. Se copio tutto il sorgente prima di installare le
+        dipendenze, qualunque modifica a un file invalida il livello del COPY e quindi anche
+        l'installazione, che viene rifatta da zero a ogni commit. Copiando prima il solo file
+        delle dipendenze e installandole, quel livello resta valido finche' le dipendenze non
+        cambiano, cioe' quasi sempre, e la build si riduce alla copia del codice. Lo stesso
+        vale per l'ordine dei COPY successivi: prima cio' che cambia di rado, dopo cio' che
+        cambia sempre.
+    - question: Come si mettono i segreti in un container?
+      answer: >-
+        Non dentro l'immagine, mai: le istruzioni restano nei livelli e chiunque abbia
+        l'immagine puo' estrarli, anche se un livello successivo cancella il file. Nemmeno
+        come ARG di build, per lo stesso motivo. Si passano a runtime, come variabili
+        d'ambiente iniettate dall'orchestratore o, meglio, come file montati da un gestore di
+        segreti, che permette rotazione e revoca senza ricostruire nulla. In cloud la forma
+        piu' pulita e' non avere il segreto affatto: una managed identity o un ruolo associato
+        al carico di lavoro ottiene un token a scadenza breve, e non c'e' niente da custodire.
+    - question: Che cosa guardi in un'immagine prima di mandarla in produzione?
+      answer: >-
+        Cinque cose in sequenza. Che non giri come root. Che non contenga segreti, verificando
+        i livelli e non solo il filesystem finale. Che la dimensione sia ragionevole, come
+        indizio del fatto che non si porti dietro l'ambiente di compilazione. Che il processo
+        principale gestisca SIGTERM e che CMD sia in forma esec. E che una scansione delle
+        vulnerabilita' sulla base non riporti problemi critici noti, il che nella pratica
+        significa soprattutto tenere aggiornata l'immagine di base, perche' e' da lì che
+        arriva la quasi totalita' dei CVE.
+  related: [plat-02-kubernetes, plat-04-ci-cd, eng-03-cloud-basics, rel-39-deployments, eng-04-security]
+  resources:
+    - title: "Docker - Best practices for writing Dockerfiles"
+      url: https://docs.docker.com/build/building/best-practices/
+      kind: doc
+    - title: "Google - Distroless container images"
+      url: https://github.com/GoogleContainerTools/distroless
+      kind: repo
+    - title: "The Twelve-Factor App"
+      url: https://12factor.net/
+      kind: article
+
+- id: plat-02-kubernetes
+  title: Kubernetes, il modello che sta sotto
+  category: platform
+  track: technical
+  level: hard
+  tags: [kubernetes, orchestrazione, deploy, scaling, devops]
+  estimated_minutes: 45
+  summary: >-
+    Kubernetes si capisce quando si smette di vederlo come un insieme di comandi e si vede
+    il ciclo che lo governa: dichiari lo stato desiderato, un controllore confronta di
+    continuo con quello reale e agisce per colmare la differenza.
+  deep_dive: |-
+    Il concetto che spiega tutto il resto e' la riconciliazione. Non si danno ordini - avvia
+    tre copie - si dichiara uno stato: voglio tre repliche di questa immagine. Un
+    controllore osserva di continuo la differenza fra desiderato e reale e agisce per
+    annullarla. Se un nodo muore, il numero di repliche scende, il controllore se ne accorge
+    e ne crea altre altrove. Non c'e' nessuno che esegue un piano: c'e' un ciclo che non
+    smette mai di correggere. E' anche il motivo per cui le modifiche fatte a mano su un
+    oggetto gestito vengono riassorbite, e per cui GitOps - il repository come unica
+    dichiarazione dello stato desiderato - e' la conseguenza naturale di questo modello.
+
+    Gli oggetti che servono per parlarne sono pochi. Il Pod e' l'unita' schedulabile: uno o
+    piu' container che condividono rete e volumi, e sono quasi sempre effimeri. Il
+    Deployment gestisce un insieme di Pod identici e, soprattutto, governa il rilascio di
+    una versione nuova sostituendoli gradualmente. Il Service da' un indirizzo stabile e un
+    bilanciamento verso un insieme di Pod che cambiano di continuo, ed e' la risposta alla
+    domanda "come faccio a chiamare qualcosa che ha un indirizzo diverso ogni volta".
+    L'Ingress espone verso l'esterno con instradamento per nome e percorso. ConfigMap e
+    Secret tengono configurazione e credenziali fuori dall'immagine.
+
+    Il punto in cui la maggior parte dei problemi reali nasce sono le probe e le risorse.
+    La liveness probe dice se il processo e' vivo: se fallisce, il container viene
+    riavviato. La readiness probe dice se e' pronto a ricevere traffico: se fallisce, il Pod
+    viene tolto dal Service ma non riavviato. Confonderle e' l'errore classico, e la forma
+    peggiore e' una liveness probe che interroga il database: quando il database rallenta,
+    Kubernetes riavvia tutti i Pod, togliendo capacita' proprio mentre serve e trasformando
+    un problema in un'interruzione. La regola e' che la liveness deve verificare solo il
+    processo, e le dipendenze esterne stanno nella readiness.
+
+    Requests e limits sono l'altra meta'. La request e' cio' che lo scheduler riserva e usa
+    per decidere dove mettere il Pod; il limit e' il tetto. Per la CPU, superare il limit
+    significa throttling, cioe' rallentamento; per la memoria significa OOMKill, cioe'
+    terminazione immediata. Ne segue una regola pratica che vale la pena dire al colloquio:
+    il limit di memoria va impostato con attenzione perche' e' fatale, mentre limitare
+    aggressivamente la CPU produce latenze inspiegabili e spesso conviene non metterlo
+    affatto, lasciando che sia la request a garantire il minimo. Chi non imposta nulla si
+    ritrova nodi saturi e Pod sfrattati in ordine imprevedibile.
+
+    Sul dimensionamento automatico vanno distinti due livelli: l'HorizontalPodAutoscaler
+    aggiunge repliche in base a metriche, il Cluster Autoscaler aggiunge nodi quando i Pod
+    non trovano posto. Senza il secondo, il primo produce Pod in stato Pending che nessuno
+    schedula. E per gli aggiornamenti, il rolling update sostituisce i Pod gradualmente
+    rispettando i vincoli di disponibilita': funziona bene solo se l'applicazione tollera
+    due versioni contemporaneamente, il che e' una proprieta' del codice e delle migrazioni
+    del database, non una impostazione di Kubernetes.
+  key_points:
+    - "Il modello e' dichiarativo e a riconciliazione: si dichiara lo stato desiderato, un controllore colma la differenza di continuo"
+    - "Le modifiche manuali su oggetti gestiti vengono riassorbite: da qui GitOps come conseguenza naturale"
+    - "Pod effimero, Deployment per il rilascio graduale, Service per l'indirizzo stabile, Ingress per l'esterno"
+    - "Liveness riavvia, readiness toglie dal bilanciamento: confonderle e' l'errore piu' costoso"
+    - "Mai mettere una dipendenza esterna nella liveness: un database lento farebbe riavviare tutti i Pod insieme"
+    - "Request e' cio' che lo scheduler riserva, limit e' il tetto: superare la memoria uccide, superare la CPU rallenta"
+    - "HPA aggiunge Pod, Cluster Autoscaler aggiunge nodi: senza il secondo i Pod restano Pending"
+    - "Il rolling update presuppone che due versioni convivano: e' una proprieta' del codice e delle migrazioni, non di Kubernetes"
+  examples:
+    - title: La liveness probe che causa l'interruzione
+      language: yaml
+      code: |
+        # SBAGLIATO: la liveness dipende dal database
+        livenessProbe:
+          httpGet: { path: /health/full, port: 8000 }   # interroga il DB
+        # il database rallenta -> la probe fallisce su TUTTI i Pod
+        # -> Kubernetes li riavvia tutti -> si perde capacita' durante il problema
+        # -> i Pod nuovi ripartono, ritrovano il DB lento, vengono riavviati ancora
+
+        # CORRETTO: liveness sul solo processo, readiness sulle dipendenze
+        livenessProbe:
+          httpGet: { path: /health/live, port: 8000 }   # risponde sempre se il processo vive
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          failureThreshold: 3
+        readinessProbe:
+          httpGet: { path: /health/ready, port: 8000 }  # verifica DB e dipendenze
+          periodSeconds: 5
+        # il DB rallenta -> i Pod escono dal Service ma restano vivi
+        # -> quando il DB torna, rientrano senza riavvii ne' cold start
+      note: >-
+        La domanda da farsi per ogni controllo e' "riavviare il processo risolverebbe questo
+        problema?". Se la risposta e' no, quel controllo non appartiene alla liveness.
+    - title: Requests, limits e cosa succede quando si superano
+      language: text
+      code: |
+        resources:
+          requests: { cpu: 100m, memory: 256Mi }   # riservato, usato per schedulare
+          limits: "  {            memory: 512Mi }   # tetto"
+
+        CPU oltre il limit    -> throttling: il processo rallenta
+                                 sintomo: latenze alte senza errori,
+                                 difficilissime da diagnosticare
+        MEMORIA oltre il limit -> OOMKill: il container muore all'istante
+                                 sintomo: riavvii, exit code 137
+
+        PERCHE' QUI NON C'E' IL LIMIT DI CPU
+          la request garantisce gia' il minimo sotto contesa;
+          il limit sulla CPU aggiunge solo throttling quando la macchina
+          avrebbe cicli liberi. Il limit di memoria invece serve,
+          perche' senza un Pod puo' consumare tutto il nodo.
+
+        request troppo bassa -> lo scheduler stipa troppi Pod sul nodo
+        request troppo alta  -> nodi mezzi vuoti, si paga aria
+      note: >-
+        Le request si tarano guardando l'uso reale al percentile 90-95 su qualche giorno,
+        non a intuito: e' il lavoro che separa un cluster costoso da uno dimensionato.
+  trade_offs:
+    - option: Kubernetes gestito (AKS, EKS, GKE)
+      pros: Modello uniforme fra cloud, ecosistema enorme, scaling e self-healing pronti
+      cons: Curva di apprendimento ripida, molte parti mobili, costo operativo reale
+      when: Molti servizi, un team che lo sappia gestire, o un requisito di portabilita'
+    - option: Piattaforma serverless per container (Cloud Run, Container Apps)
+      pros: Scale-to-zero, nessun cluster da gestire, deploy in un comando
+      cons: Meno controllo, vincoli del fornitore, meno adatta ai carichi stateful
+      when: "Pochi servizi, traffico variabile, team piccolo: e' la scelta giusta piu' spesso di quanto si dica"
+    - option: VM con un gestore di processi
+      pros: Semplicita' massima, nessuna astrazione da imparare, debug diretto
+      cons: Rilascio, scaling e recupero dai guasti sono da costruire a mano
+      when: Un servizio, traffico prevedibile, o vincoli che escludono i container
+  numbers:
+    - "Grace period di default alla terminazione di un Pod: 30 secondi prima del SIGKILL"
+    - "Exit code 137 significa SIGKILL, tipicamente OOMKill: e' il primo numero da riconoscere in un riavvio"
+    - "Le request si tarano sul percentile 90-95 dell'uso osservato, non sul picco assoluto ne' sulla media"
+  interview_answer: >-
+    Il modo in cui ragiono su Kubernetes e' la riconciliazione: non gli dico di fare qualcosa, gli
+    dichiaro lo stato che voglio, e un controllore confronta di continuo desiderato e reale e
+    corregge la differenza. Se un nodo muore, le repliche scendono sotto il numero dichiarato e
+    lui ne ricrea altrove, senza che nessuno esegua un piano. Da qui viene anche il fatto che le
+    modifiche a mano vengono riassorbite, ed e' il motivo per cui GitOps e' la conseguenza
+    naturale del modello. Gli oggetti che uso sono pochi: Pod effimeri, Deployment per il rilascio
+    graduale, Service per avere un indirizzo stabile davanti a Pod che cambiano sempre. Le due
+    cose su cui vedo sbagliare piu' spesso sono le probe e le risorse. La liveness riavvia e la
+    readiness toglie dal bilanciamento, quindi non metto mai una dipendenza esterna nella
+    liveness: se il database rallenta, riavvierei tutti i Pod e trasformerei un rallentamento in
+    un'interruzione. E sulle risorse ricordo che superare il limite di memoria uccide il container
+    mentre superare quello di CPU lo rallenta soltanto, quindi li tratto in modo diverso.
+  senior_signals:
+    - "Spiega la riconciliazione prima degli oggetti, e ne deduce GitOps"
+    - "Distingue liveness e readiness con la domanda 'riavviare risolverebbe?'"
+    - "Sa che una dipendenza esterna nella liveness trasforma un rallentamento in un'interruzione"
+    - "Conosce la differenza di conseguenze fra limit di CPU (throttling) e di memoria (OOMKill)"
+    - "Sa che l'HPA senza Cluster Autoscaler produce Pod in Pending"
+    - "Dice che il rolling update richiede la convivenza di due versioni, e collega la cosa alle migrazioni del database"
+  pitfalls:
+    - "Mettere il controllo del database nella liveness probe e causare riavvii a catena sotto carico"
+    - "Non impostare requests: lo scheduler non sa dimensionare e i nodi si saturano in modo imprevedibile"
+    - "Impostare un limit di CPU aggressivo e passare giorni a cercare latenze che sono throttling"
+    - "Modificare le risorse a mano con kubectl edit e stupirsi che tornino come prima"
+    - "Fare rolling update di un'applicazione che non tollera due versioni contemporanee"
+    - "Introdurre Kubernetes per tre servizi quando una piattaforma gestita per container basterebbe"
+  follow_ups:
+    - question: Qual e' la differenza pratica fra liveness e readiness probe?
+      answer: >-
+        La liveness risponde a "questo processo e' irrimediabilmente bloccato?" e la sua
+        conseguenza e' il riavvio; la readiness risponde a "puo' servire traffico adesso?" e
+        la sua conseguenza e' l'uscita dal bilanciamento, senza riavvio. Il criterio per
+        assegnare un controllo e' chiedersi se riavviare risolverebbe: un deadlock del
+        processo si', un database irraggiungibile no. Da qui la regola che le dipendenze
+        esterne vanno nella readiness. Serve anche una startup probe per le applicazioni con
+        avvio lento, altrimenti la liveness le uccide prima che finiscano di partire, in un
+        ciclo che sembra un crash ma e' solo una probe impaziente.
+    - question: Che succede se non imposti requests e limits?
+      answer: >-
+        Senza request lo scheduler assume un consumo trascurabile e stipa i Pod sul nodo,
+        finche' la memoria reale finisce e il kernel comincia a uccidere processi in un ordine
+        che dipende dalla classe di qualita' del servizio: i Pod senza request sono i primi a
+        essere sfrattati. Senza limit di memoria, un singolo Pod con una perdita di memoria
+        puo' portarsi giu' il nodo e con esso tutti i vicini. In pratica imposto sempre le
+        request, che sono la vera dichiarazione di quanto serve, imposto il limit di memoria
+        come protezione dai vicini rumorosi, e sul limit di CPU sono molto piu' cauto, perche'
+        produce throttling silenzioso.
+    - question: Come gestisci una migrazione di database con un rolling update?
+      answer: >-
+        Separando la migrazione dal rilascio del codice, in modo che ogni stato intermedio sia
+        valido con entrambe le versioni. E' lo schema expand-migrate-contract: prima si
+        aggiunge la nuova colonna in modo retrocompatibile e si rilascia il codice che scrive
+        su entrambe ma legge dalla vecchia; poi si riempie la nuova con i dati storici; poi si
+        rilascia il codice che legge dalla nuova; solo alla fine, quando nessuna versione in
+        esecuzione usa piu' la vecchia, la si rimuove. Ogni passo e' un rilascio a se'. Una
+        migrazione distruttiva fatta insieme al deploy rompe i Pod della versione vecchia che
+        stanno ancora servendo traffico, ed e' esattamente cio' che il rolling update
+        garantisce esistano.
+    - question: Quando NON useresti Kubernetes?
+      answer: >-
+        Quando il costo di gestirlo supera il problema che risolve. Con pochi servizi, un team
+        piccolo e nessun requisito di portabilita', una piattaforma gestita per container
+        offre rilascio, scaling e recupero dai guasti senza un cluster da mantenere, aggiornare
+        e diagnosticare, e spesso con scale-to-zero che Kubernetes non da' senza componenti
+        aggiuntivi. Kubernetes si giustifica quando i servizi sono molti, quando servono
+        politiche uniformi fra ambienti diversi, o quando si vuole ridurre il legame con un
+        singolo fornitore. Introdurlo per tre servizi e' una scelta che si paga in ore di
+        operazioni, non in bolletta.
+  related: [plat-01-container, plat-03-iac, rel-39-deployments, plat-04-ci-cd, rel-38-observability]
+  resources:
+    - title: "Kubernetes - Concepts"
+      url: https://kubernetes.io/docs/concepts/
+      kind: doc
+    - title: "Kubernetes - Configure Liveness, Readiness and Startup Probes"
+      url: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+      kind: doc
+    - title: "Google - Kubernetes best practices (serie)"
+      url: https://cloud.google.com/blog/products/containers-kubernetes/kubernetes-best-practices-resource-requests-and-limits
+      kind: article
+
+- id: plat-03-iac
+  title: Infrastructure as Code con Terraform, stato e derive
+  category: platform
+  track: technical
+  level: medium
+  tags: [terraform, iac, infrastruttura, stato, devops]
+  estimated_minutes: 40
+  summary: >-
+    Descrivere l'infrastruttura in file versionati risolve il problema di sapere com'e'
+    fatta. Ne crea uno nuovo, che e' il vero argomento del colloquio: lo stato, cioe' la
+    mappa fra il codice e le risorse reali, e cosa succede quando le due cose divergono.
+  deep_dive: |-
+    Il punto di partenza e' la differenza fra imperativo e dichiarativo. Uno script che
+    esegue comandi crea risorse, ma rieseguirlo da' un risultato diverso da quello della
+    prima volta: o fallisce perche' esistono gia', o ne crea altre. Un file dichiarativo
+    descrive il risultato voluto, e lo strumento calcola la differenza fra quel risultato e
+    cio' che esiste, producendo un piano. Rieseguirlo quando nulla e' cambiato non fa
+    niente: e' l'idempotenza, ed e' la proprieta' che rende l'infrastruttura verificabile.
+
+    Per calcolare quella differenza serve sapere quali risorse reali corrispondono a quali
+    blocchi del codice, e questo e' lo stato. E' un file, e nel momento in cui piu' persone
+    o una pipeline lavorano sullo stesso ambiente diventa l'oggetto piu' delicato del
+    sistema. Tenerlo sul portatile di qualcuno significa che nessun altro puo' applicare
+    modifiche e che un disco rotto rende orfane le risorse: esistono in cloud, ma lo
+    strumento non sa piu' di averle create e al successivo apply prova a ricrearle. Da qui
+    lo stato remoto, su uno storage condiviso, con il versionamento attivo per poter tornare
+    indietro e soprattutto con il locking, che impedisce a due apply concorrenti di
+    sovrascriversi. Lo stato contiene anche, in chiaro, i valori delle risorse create,
+    comprese password generate e chiavi: va trattato come un segreto, cifrato a riposo e con
+    accesso ristretto.
+
+    La deriva e' la differenza fra cio' che il codice dice e cio' che esiste davvero,
+    prodotta da qualcuno che ha toccato una risorsa dalla console. Il piano la rivela: alla
+    prossima esecuzione compaiono modifiche che nessuno ha scritto. La risposta giusta non
+    e' vietare la console, che in emergenza serve, ma rendere il piano un'abitudine e
+    riportare a codice cio' che si e' cambiato a mano. Nei casi opposti esistono due
+    strumenti da conoscere: l'import, per prendere in gestione una risorsa creata fuori, e
+    la rimozione dallo stato, per smettere di gestirne una senza distruggerla.
+
+    La parte che distingue chi ha usato questi strumenti in produzione riguarda le
+    operazioni distruttive. Certe modifiche non si applicano sul posto: cambiare il nome di
+    un database, o un attributo immutabile, comporta distruggere e ricreare. Il piano lo
+    dice, in mezzo a decine di righe, e chi non lo legge scopre in un secondo momento di aver
+    cancellato dei dati. Da qui tre abitudini: leggere il piano sempre, e in particolare
+    contare le distruzioni; applicare un piano salvato invece di ricalcolarlo, cosi' cio' che
+    si approva e' cio' che viene eseguito; e proteggere le risorse con stato dalla
+    distruzione accidentale. In pipeline, il modello sano e' che il piano giri
+    automaticamente sulla pull request come commento leggibile, e che l'applicazione richieda
+    un'approvazione umana.
+
+    Sulla struttura del codice valgono gli stessi criteri del software applicativo, con una
+    differenza: il raggio del danno e' maggiore. Si separano gli ambienti in stati distinti,
+    perche' un file di stato unico per sviluppo e produzione significa che un errore in
+    sviluppo puo' toccare la produzione. Si estrae in moduli cio' che si ripete, senza
+    astrarre troppo presto. E le versioni dei provider si bloccano, perche' un aggiornamento
+    minore puo' cambiare il piano di risorse che nessuno ha toccato.
+  key_points:
+    - "Dichiarativo contro imperativo: lo strumento calcola la differenza e produce un piano, e rieseguirlo a vuoto non fa nulla"
+    - "Lo stato e' la mappa fra codice e risorse reali: perderlo significa avere risorse orfane che l'apply prova a ricreare"
+    - "Stato remoto con versionamento e locking: senza locking due apply concorrenti si sovrascrivono"
+    - "Lo stato contiene segreti in chiaro: va cifrato e con accesso ristretto come qualunque credenziale"
+    - "Deriva: modifiche fatte dalla console che il piano rivela. Si riportano a codice, non si vieta la console"
+    - "Import per prendere in gestione risorse esistenti, rimozione dallo stato per smettere di gestirle senza distruggerle"
+    - "Alcuni cambiamenti comportano distruzione e ricreazione: leggere il piano e contare le distruzioni"
+    - "Applicare un piano salvato, non ricalcolato: si esegue esattamente cio' che e' stato approvato"
+    - "Ambienti in stati separati e versioni dei provider bloccate"
+  examples:
+    - title: La riga del piano che va letta prima di dire di si'
+      language: text
+      code: |
+        Terraform will perform the following actions:
+
+          # azurerm_storage_account.this must be replaced
+        -/+ resource "azurerm_storage_account" "this" {
+              ~ name = "stapp01" -> "stapp02"   # forces replacement
+            }
+
+        Plan: 1 to add, 0 to change, 1 to destroy.
+                                     ^^^^^^^^^^^
+                     la sola riga che conta davvero in questo piano
+
+        "forces replacement" su una risorsa con dati = perdita di dati.
+        Su uno storage account, un database, un disco: sempre.
+
+        DIFESE
+          lifecycle { prevent_destroy = true }    sulle risorse con stato
+          terraform plan -out=tfplan              poi apply tfplan
+          il piano come commento sulla pull request, approvazione umana
+      note: >-
+        Applicare un piano salvato invece di rilanciare apply e' la differenza fra eseguire
+        cio' che si e' letto ed eseguire cio' che lo strumento ricalcola nel frattempo, con
+        lo stato magari gia' cambiato da qualcun altro.
+    - title: Perche' lo stato va condiviso e bloccato
+      language: text
+      code: |
+        STATO LOCALE
+          Anna ha terraform.tfstate sul portatile
+          Bruno clona il repository e lancia apply
+          -> il suo stato e' vuoto: "creo 18 risorse"
+          -> ne esistono gia' 18, i nomi collidono, l'apply fallisce a meta'
+          -> ora ci sono risorse a meta' e due stati entrambi sbagliati
+
+        STATO REMOTO CON LOCK
+          backend "azurerm" { ... use_azuread_auth = true }
+          Anna lancia apply -> prende il lock
+          Bruno lancia apply -> "state blocked by anna@..., attendo"
+          -> sequenza garantita, uno stato solo, versionato
+
+        Se il lock resta appeso (processo ucciso), c'e' force-unlock:
+        si usa dopo aver verificato che nessun apply sia davvero in corso,
+        mai per abitudine.
+      note: >-
+        Il versionamento sullo storage dello stato e' l'ultima rete: uno stato corrotto o
+        troncato si recupera prendendo la versione precedente, ed e' una delle poche cose
+        che rende un incidente su Terraform riparabile in minuti invece che in giorni.
+  trade_offs:
+    - option: Terraform o OpenTofu
+      pros: Multi-cloud, ecosistema di provider enorme, piano leggibile, competenza diffusa
+      cons: Stato da gestire, HCL non e' un linguaggio di programmazione, deriva sempre possibile
+      when: Default per infrastruttura su piu' fornitori o quando la competenza c'e' gia'
+    - option: Strumenti nativi del fornitore (Bicep, CloudFormation)
+      pros: Nessuno stato da gestire, integrazione stretta, supporto immediato dei servizi nuovi
+      cons: Legati a un solo cloud, meno portabili come competenza
+      when: Un solo cloud e nessuna intenzione di cambiarlo
+    - option: IaC con linguaggi generali (Pulumi, CDK)
+      pros: Cicli, condizioni, tipi e test con gli strumenti del linguaggio
+      cons: E' facile scrivere infrastruttura troppo dinamica e quindi illeggibile nel piano
+      when: Team di sviluppo forte, infrastruttura con molta logica di generazione
+    - option: Console e clic
+      pros: Immediato, nessuna curva di apprendimento
+      cons: Niente storico, niente revisione, nessuna riproducibilita', deriva garantita
+      when: Esplorazione e prototipi usa e getta, mai per qualcosa che deve durare
+  numbers:
+    - "Le versioni dei provider vanno bloccate: un aggiornamento minore puo' cambiare il piano di risorse che nessuno ha toccato"
+    - "Ambienti separati significa file di stato separati: un solo stato per sviluppo e produzione mette la produzione a rischio di ogni esperimento"
+    - "La riga 'to destroy' del piano e' quella da leggere per prima: le altre due si possono scorrere"
+  interview_answer: >-
+    Il vantaggio dichiarativo e' che descrivo il risultato e lo strumento calcola la differenza,
+    quindi rieseguire a vuoto non fa niente e l'infrastruttura diventa verificabile e
+    riproducibile. Il problema che si compra e' lo stato, cioe' la mappa fra il codice e le
+    risorse reali: se sta sul portatile di qualcuno, nessun altro puo' applicare e un disco rotto
+    lascia risorse orfane che al prossimo apply lo strumento prova a ricreare. Quindi stato
+    remoto, con versionamento per poter tornare indietro e con il locking per impedire due apply
+    concorrenti, e trattato come un segreto perche' contiene password e chiavi in chiaro. La cosa
+    che curo di piu' in pratica e' leggere il piano, e in particolare la riga delle distruzioni:
+    certi cambiamenti comportano distruggere e ricreare, e su un database significa perdere dati.
+    Per questo applico un piano salvato invece di ricalcolarlo, cosi' eseguo esattamente quello
+    che ho approvato, e metto la protezione dalla distruzione sulle risorse con stato.
+  senior_signals:
+    - "Parla dello stato come del problema principale, non come di un dettaglio di configurazione"
+    - "Sa che lo stato contiene segreti in chiaro e lo tratta di conseguenza"
+    - "Cita il locking, non solo lo stato remoto"
+    - "Legge il piano contando le distruzioni e conosce 'forces replacement'"
+    - "Applica un piano salvato invece di rilanciare apply"
+    - "Gestisce la deriva riportandola a codice invece di vietare l'accesso alla console"
+  pitfalls:
+    - "Tenere lo stato in locale o, peggio, committarlo nel repository con i segreti dentro"
+    - "Stato remoto senza locking: due apply contemporanei producono uno stato incoerente"
+    - "Applicare senza leggere il piano e scoprire dopo che una risorsa con dati e' stata ricreata"
+    - "Un unico stato per tutti gli ambienti: un errore in sviluppo tocca la produzione"
+    - "Non bloccare le versioni dei provider e trovarsi piani diversi da una settimana all'altra"
+    - "Passare -var sulla riga di comando per valori permanenti: il prossimo apply senza flag li riporta al default"
+  follow_ups:
+    - question: Perche' lo stato non puo' stare nel repository?
+      answer: >-
+        Per tre motivi che si sommano. Contiene valori sensibili in chiaro, comprese le
+        password generate e le chiavi restituite dalle risorse, quindi committarlo significa
+        pubblicare segreti nello storico di git, da dove non si tolgono piu'. Cambia a ogni
+        apply, quindi due persone che lavorano insieme producono conflitti su un file che non
+        e' pensato per essere unito a mano. E non offre alcun blocco, quindi non protegge da
+        due esecuzioni concorrenti. Lo stato va su uno storage condiviso con versionamento,
+        cifratura e locking, che sono esattamente le tre cose che git non da'.
+    - question: Che cosa fai se qualcuno modifica una risorsa dalla console?
+      answer: >-
+        Prima la vedo, perche' il piano successivo la mostra come una differenza che nessuno
+        ha scritto. Poi decido in quale direzione riconciliare. Se la modifica era giusta, la
+        porto nel codice e riapplico, cosi' il piano torna pulito e la modifica sopravvive al
+        prossimo apply. Se era sbagliata o temporanea, lascio che l'apply la riporti allo
+        stato dichiarato. Quello che non faccio e' vietare la console: in emergenza serve, e
+        un divieto assoluto porta solo a farlo di nascosto. La pratica sana e' eseguire il
+        piano regolarmente, anche senza modifiche, per accorgersi della deriva quando e'
+        piccola.
+    - question: Come gestisci piu' ambienti senza duplicare tutto?
+      answer: >-
+        Estraendo in un modulo la definizione comune e istanziandolo per ambiente con
+        parametri diversi, tenendo stati separati. La separazione degli stati e' la parte non
+        negoziabile: e' cio' che garantisce che un errore in sviluppo non possa toccare la
+        produzione, mentre workspace diversi sullo stesso backend danno una separazione piu'
+        debole e la stessa configurazione per tutti. Sul fattorizzare sarei prudente:
+        conviene accettare un po' di duplicazione all'inizio ed estrarre il modulo quando il
+        pattern e' chiaro, perche' un modulo troppo parametrizzato diventa illeggibile nel
+        piano, che e' il momento in cui la leggibilita' conta di piu'.
+    - question: Come si prende in gestione un'infrastruttura creata a mano?
+      answer: >-
+        Con l'import, gradualmente e partendo da cio' che e' meno rischioso. Si scrive il
+        blocco di configurazione che descrive la risorsa esistente, la si importa nello
+        stato, e poi si lancia il piano: se il piano non e' vuoto, significa che la
+        configurazione scritta non corrisponde alla realta' e va corretta finche' non lo
+        diventa. Il piano vuoto e' il criterio di successo. Le versioni recenti permettono
+        blocchi di import dichiarativi, che rendono l'operazione revisionabile in una pull
+        request invece che eseguita a mano. La tentazione da evitare e' importare tutto
+        insieme: si fa risorsa per risorsa, verificando il piano a ogni passo.
+  related: [plat-02-kubernetes, plat-04-ci-cd, eng-03-cloud-basics, plat-05-config-segreti, eng-02-git]
+  resources:
+    - title: "Terraform - State e backend remoti"
+      url: https://developer.hashicorp.com/terraform/language/state
+      kind: doc
+    - title: "Google Cloud - Best practices for using Terraform"
+      url: https://cloud.google.com/docs/terraform/best-practices-for-terraform
+      kind: doc
+    - title: "OpenTofu"
+      url: https://opentofu.org/
+      kind: doc
+
+- id: plat-04-ci-cd
+  title: CI/CD, dalla pipeline al rilascio senza fermo
+  category: platform
+  track: technical
+  level: medium
+  tags: [ci-cd, pipeline, deploy, automazione, devops]
+  estimated_minutes: 35
+  summary: >-
+    Una pipeline non serve a lanciare i test automaticamente: serve a rendere il rilascio un
+    evento noioso. Il criterio con cui si giudica non e' quanto e' completa, ma quanto in
+    fretta dice la verita' e quanto e' facile tornare indietro.
+  deep_dive: |-
+    Vanno distinte tre cose che spesso si chiamano con la stessa sigla. L'integrazione
+    continua e' la pratica di integrare spesso su un ramo condiviso, con una verifica
+    automatica a ogni integrazione: il suo scopo e' che i conflitti e le rotture si scoprano
+    in ore invece che in settimane. La consegna continua e' avere sempre un artefatto
+    pronto da rilasciare, con l'ultimo passo manuale. Il rilascio continuo toglie anche
+    quello. Sono scelte organizzative prima che tecniche, e la terza richiede una fiducia
+    nei test che va guadagnata.
+
+    La proprieta' piu' importante di una pipeline e' la velocita' del riscontro, perche'
+    determina se le persone la useranno o la aggireranno. Una verifica che impiega quaranta
+    minuti non viene attesa: si continua a lavorare, si accumulano commit, e quando fallisce
+    non e' chiaro quale sia la causa. La struttura che funziona e' a stadi: prima i controlli
+    che durano secondi - formattazione, lint, tipi - poi i test unitari, poi quelli di
+    integrazione, infine i test di sistema. Chi rompe una regola di formattazione lo sa in
+    trenta secondi, non dopo mezz'ora. Gli stadi indipendenti girano in parallelo, e la
+    cache delle dipendenze fa il resto.
+
+    Il secondo principio e' costruire l'artefatto una volta sola e promuoverlo. La stessa
+    immagine, con lo stesso digest, attraversa gli ambienti: cio' che si e' verificato in
+    staging e' esattamente cio' che va in produzione. Ricostruire per ogni ambiente significa
+    rilasciare qualcosa che non e' mai stato provato, anche a parita' di sorgente, perche'
+    cambiano dipendenze transitive e immagini di base. Ne consegue che la configurazione non
+    puo' stare nell'artefatto: arriva dall'ambiente.
+
+    Il terzo e' il ritorno indietro. Un deploy si giudica anche da quanto e' rapido
+    annullarlo. Il modo piu' semplice e' che le versioni precedenti restino disponibili e
+    che tornare a una sia un'operazione di un comando, senza ricostruzioni. Le due strategie
+    classiche sono il blu-verde, dove si tiene in piedi un ambiente completo con la versione
+    nuova e si sposta il traffico in blocco, con ritorno immediato ma doppia infrastruttura,
+    e il rilascio progressivo, dove la versione nuova riceve una quota crescente di traffico
+    mentre si osservano le metriche. Il progressivo e' piu' economico e riduce il raggio di
+    un guasto, ma richiede osservabilita' buona e una definizione automatica di "sta andando
+    male", altrimenti la decisione resta a chi guarda un grafico.
+
+    Il vincolo che rende tutto questo possibile e' la retrocompatibilita'. Durante qualunque
+    rilascio graduale convivono due versioni: lo schema del database, i formati dei messaggi
+    e i contratti delle API devono reggerlo. Le migrazioni si fanno in passi
+    retrocompatibili separati dal rilascio del codice, e le funzionalita' rischiose si
+    separano dal deploy con i feature flag, che permettono di spegnere una funzione senza
+    tornare indietro con il codice. Infine le credenziali della pipeline: sono fra le piu'
+    appetibili di un'organizzazione, e la forma corretta oggi e' la federazione OIDC, in cui
+    il sistema di CI ottiene un token a scadenza breve dal cloud senza che esista una chiave
+    permanente da rubare o da ruotare.
+  key_points:
+    - "Integrazione, consegna e rilascio continui sono tre cose diverse, e la differenza e' organizzativa prima che tecnica"
+    - "La velocita' del riscontro decide se la pipeline viene usata o aggirata: stadi rapidi prima, lenti dopo"
+    - "Costruire l'artefatto una volta e promuoverlo: stesso digest in tutti gli ambienti"
+    - "Se l'artefatto si ricostruisce per ambiente, si rilascia qualcosa che non e' stato verificato"
+    - "La configurazione arriva dall'ambiente, non dall'immagine"
+    - "Un deploy si giudica anche da quanto e' rapido annullarlo: le versioni precedenti restano disponibili"
+    - "Blu-verde: ritorno immediato, doppia infrastruttura. Progressivo: piu' economico, richiede osservabilita'"
+    - "Il rilascio graduale impone la retrocompatibilita' di schema, messaggi e API fra due versioni"
+    - "Credenziali della pipeline via federazione OIDC: token a scadenza breve, nessun segreto permanente"
+  examples:
+    - title: Una pipeline ordinata per velocita' del riscontro
+      language: yaml
+      code: |
+        # stadio 1 - secondi: fallisce subito su cio' che e' banale
+        - lint e formattazione
+        - controllo dei tipi
+        - scansione dei segreti nel diff
+
+        # stadio 2 - 1-3 minuti: in parallelo
+        - test unitari (con cache delle dipendenze)
+        - build dell'immagine (cache dei livelli)
+
+        # stadio 3 - 5-15 minuti: solo se i precedenti passano
+        - test di integrazione con servizi reali in container
+        - scansione delle vulnerabilita' dell'immagine
+
+        # stadio 4 - solo su main
+        - push dell'immagine con tag = sha del commit
+        - deploy in staging, test di fumo
+        - [approvazione]  -> deploy in produzione con LO STESSO digest
+
+        Il tag e' lo sha del commit, non "latest": una revisione in
+        produzione deve essere riconducibile al codice che l'ha prodotta.
+      note: >-
+        Se lo stadio 3 dura venti minuti va bene, purche' l'errore banale sia stato
+        intercettato dallo stadio 1 in trenta secondi. E' l'ordine a contare, piu' della
+        durata totale.
+    - title: Costruire una volta, promuovere il digest
+      language: text
+      code: |
+        SBAGLIATO: build per ambiente
+          staging     docker build -> immagine A  (testata)
+          produzione  docker build -> immagine B  (mai vista prima)
+          stesso sorgente, ma base image aggiornata nel frattempo,
+          dipendenza transitiva con una versione nuova...
+          -> si rilascia in produzione qualcosa che non e' stato verificato
+
+        CORRETTO: build una volta, promozione per digest
+          build   -> ghcr.io/org/api@sha256:9f2b...  (immutabile)
+          staging -> deploy sha256:9f2b...  test di fumo OK
+          prod    -> deploy sha256:9f2b...  lo stesso identico artefatto
+
+          la configurazione (URL, credenziali, feature flag) arriva
+          dall'ambiente: l'immagine non sa dove sta girando
+
+        RITORNO INDIETRO
+          prod -> deploy sha256:1c7e...  (la precedente, ancora nel registro)
+          nessuna ricostruzione, secondi invece di minuti
+      note: >-
+        Il digest e' preferibile al tag anche quando il tag e' lo sha del commit, perche' un
+        tag puo' essere spostato mentre il digest identifica i byte.
+  trade_offs:
+    - option: Rilascio blu-verde
+      pros: Ritorno indietro immediato, verifica completa prima di spostare il traffico
+      cons: Doppia infrastruttura durante il rilascio, migrazioni di dati piu' complesse
+      when: Rilasci rari e importanti, o quando il ritorno indietro deve essere istantaneo
+    - option: Rilascio progressivo (canary)
+      pros: Raggio del guasto limitato a una quota di utenti, costo di infrastruttura contenuto
+      cons: Richiede osservabilita' per fascia e criteri automatici di interruzione
+      when: Rilasci frequenti con metriche affidabili e traffico sufficiente a dare segnale
+    - option: Rolling update semplice
+      pros: Nessuna infrastruttura aggiuntiva, integrato negli orchestratori
+      cons: Nessun controllo fine sull'esposizione, ritorno indietro tramite un altro rilascio
+      when: Default per servizi interni o con impatto contenuto
+    - option: Feature flag
+      pros: Separano il rilascio del codice dall'attivazione, spegnimento immediato senza deploy
+      cons: Debito se non si rimuovono, moltiplicano i percorsi da testare
+      when: Funzionalita' rischiose o che vanno attivate per fasce di utenti
+  numbers:
+    - "Sotto i 10 minuti la pipeline viene attesa, sopra i 20 viene aggirata: e' la soglia pratica su cui vale la pena lavorare"
+    - "Il tag dell'immagine deve essere lo sha del commit o il digest, mai latest: una revisione va ricondotta al codice"
+    - "Con la federazione OIDC il token dura minuti, contro una chiave statica che resta valida finche' qualcuno non la ruota"
+  interview_answer: >-
+    Per me una pipeline serve a rendere il rilascio noioso, e la giudico su due cose: quanto in
+    fretta dice la verita' e quanto e' facile tornare indietro. Sulla velocita' la struttura per
+    stadi: prima lint, tipi e scansione dei segreti che durano secondi, poi i test unitari, poi
+    l'integrazione, perche' se un errore di formattazione lo scopro dopo mezz'ora la pipeline
+    viene aggirata. Poi costruisco l'artefatto una volta sola e promuovo lo stesso digest da
+    staging a produzione: ricostruire per ambiente significa rilasciare qualcosa che non e' mai
+    stato provato, anche a parita' di sorgente, perche' cambiano base image e dipendenze
+    transitive. Di conseguenza la configurazione arriva dall'ambiente e non sta nell'immagine.
+    Sul ritorno indietro tengo le versioni precedenti nel registro, cosi' tornare e' un deploy di
+    un digest e non una ricostruzione. E siccome durante un rilascio graduale convivono due
+    versioni, tratto le migrazioni di schema come passi retrocompatibili separati dal deploy del
+    codice.
+  senior_signals:
+    - "Ordina gli stadi per velocita' del riscontro e spiega perche' conta piu' della durata totale"
+    - "Insiste sul costruire una volta e promuovere lo stesso digest"
+    - "Collega il rilascio graduale alla retrocompatibilita' di schema e contratti"
+    - "Giudica un deploy anche dal tempo di ritorno indietro"
+    - "Usa la federazione OIDC invece di chiavi statiche nei segreti della pipeline"
+    - "Distingue feature flag e deploy come due decisioni separate"
+  pitfalls:
+    - "Ricostruire l'immagine per ogni ambiente e rilasciare in produzione un artefatto mai verificato"
+    - "Taggare con latest: nessuna revisione e' riconducibile al codice che l'ha prodotta"
+    - "Mettere i test lenti all'inizio e far aspettare venti minuti per un errore di lint"
+    - "Chiavi cloud statiche nei segreti del repository invece della federazione OIDC"
+    - "Migrazioni distruttive applicate insieme al deploy, mentre la versione vecchia sta ancora servendo"
+    - "Accumulare feature flag e non rimuoverli mai: ogni flag raddoppia i percorsi da provare"
+    - "Test instabili tollerati: dopo il terzo rilancio a caso nessuno crede piu' a un fallimento"
+  follow_ups:
+    - question: Perche' non ricostruire l'immagine per ogni ambiente?
+      answer: >-
+        Perche' due build dallo stesso sorgente non producono lo stesso risultato. Fra una e
+        l'altra possono cambiare l'immagine di base, una dipendenza transitiva non bloccata, un
+        pacchetto di sistema. Quindi cio' che si e' testato in staging non e' cio' che finisce
+        in produzione, e la differenza e' invisibile perche' il commit e' lo stesso. Costruendo
+        una volta e promuovendo il digest, l'artefatto e' letteralmente identico byte per byte, e
+        i test in staging valgono anche per la produzione. Il corollario e' che la
+        configurazione deve essere esterna, altrimenti si e' costretti a ricostruire.
+    - question: Come gestisci una migrazione di database in continuous deployment?
+      answer: >-
+        Con passi retrocompatibili, separati dal rilascio del codice. Lo schema expand e
+        contract: prima si aggiunge la struttura nuova senza toccare la vecchia e si rilascia;
+        poi il codice scrive su entrambe e legge dalla vecchia; poi si riempiono i dati storici;
+        poi il codice legge dalla nuova; solo alla fine, quando nessuna versione in esecuzione
+        usa piu' la vecchia, la si rimuove. Ogni passo e' sicuro da solo e reversibile. Il
+        vincolo da tenere presente e' che durante ogni rilascio graduale convivono due versioni
+        del codice sullo stesso database, quindi una migrazione distruttiva applicata insieme al
+        deploy rompe la versione che sta ancora servendo traffico.
+    - question: Quando conviene il canary e quando il blu-verde?
+      answer: >-
+        Il canary conviene quando il traffico e' abbastanza da dare segnale statistico in
+        minuti e quando esiste osservabilita' per fascia, cioe' la possibilita' di confrontare
+        errori e latenza fra la versione nuova e quella vecchia: senza quel confronto non e' un
+        canary, e' un rilascio parziale con piu' passaggi. Il blu-verde conviene quando il
+        ritorno indietro deve essere istantaneo e totale, quando il traffico e' poco e un
+        campione non direbbe nulla, o quando la verifica prima del passaggio e' un test di
+        accettazione completo piu' che una misura. Il costo e' il doppio dell'infrastruttura
+        per la durata del rilascio, e la complicazione dei dati condivisi fra i due ambienti.
+    - question: Come dai a una pipeline i permessi sul cloud senza metterci una chiave?
+      answer: >-
+        Con la federazione OIDC. Il sistema di CI emette un token firmato che descrive
+        l'esecuzione - quale repository, quale ramo, quale ambiente - e il cloud e' configurato
+        per fidarsi di quell'emittente a condizione che il soggetto corrisponda esattamente a un
+        valore atteso, per esempio quel repository su quell'ambiente. In cambio rilascia
+        credenziali a scadenza breve. Cosi' non esiste alcun segreto permanente da rubare, da
+        ruotare o da dimenticare in un log, e il permesso e' legato al contesto dell'esecuzione:
+        una pipeline su un ramo diverso non ottiene nulla. Il ruolo associato va poi limitato al
+        gruppo di risorse su cui deve agire, non all'intera sottoscrizione.
+  related: [plat-01-container, plat-03-iac, rel-39-deployments, eng-01-testing, plat-05-config-segreti]
+  resources:
+    - title: "Google - DORA, i quattro indicatori chiave"
+      url: https://dora.dev/guides/dora-metrics-four-keys/
+      kind: article
+    - title: "Martin Fowler - Continuous Integration"
+      url: https://martinfowler.com/articles/continuousIntegration.html
+      kind: article
+    - title: "GitHub Actions - OpenID Connect verso i cloud"
+      url: https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect
+      kind: doc
+
+- id: plat-05-config-segreti
+  title: Configurazione e segreti, dal file .env alla federazione
+  category: platform
+  track: technical
+  level: medium
+  tags: [configurazione, segreti, sicurezza, 12factor, devops]
+  estimated_minutes: 30
+  summary: >-
+    La configurazione e' cio' che cambia fra un ambiente e l'altro, e i segreti sono la
+    parte di configurazione che non deve comparire da nessuna parte. Separare bene le due
+    cose decide se lo stesso artefatto puo' girare ovunque e quanto costa una fuga.
+  deep_dive: |-
+    La regola di partenza e' che la configurazione che varia per ambiente sta fuori dal
+    codice. Non perche' i file di configurazione siano sbagliati, ma perche' se l'URL del
+    database e' compilato dentro l'artefatto, quell'artefatto e' legato a un ambiente, e
+    promuovere in produzione cio' che si e' testato in staging diventa impossibile. Il
+    criterio pratico e' semplice: se un valore cambia fra staging e produzione, e'
+    configurazione; se e' uguale ovunque, puo' stare nel codice ed e' piu' leggibile lì che
+    in una variabile.
+
+    Le variabili d'ambiente sono il veicolo classico e hanno limiti reali che vale la pena
+    saper nominare: sono stringhe, quindi ogni valore va convalidato e convertito; sono
+    piatte, quindi la struttura si simula con prefissi; e sono visibili nell'elenco dei
+    processi e in molti strumenti di diagnosi, quindi per i segreti sono la soluzione
+    peggiore fra quelle accettabili. Il pattern sano nel codice e' leggere e convalidare la
+    configurazione in un unico punto all'avvio, con tipi espliciti e valori predefiniti
+    sicuri, e fallire subito se manca qualcosa di obbligatorio. Un servizio che parte con
+    una configurazione incompleta e si rompe alla prima richiesta e' peggio di uno che
+    rifiuta di partire.
+
+    Sui segreti la scala va percorsa in ordine. Il gradino zero, da non fare mai, e' il
+    segreto nel repository: una volta committato resta nello storico anche dopo la
+    cancellazione, quindi va considerato compromesso e ruotato, non rimosso. Il primo
+    gradino e' un file .env fuori dal controllo di versione, accettabile solo in sviluppo
+    locale. Il secondo sono i segreti della piattaforma, cioe' quelli dell'orchestratore o
+    del sistema di CI, che sono cifrati a riposo e con accesso controllato. Il terzo e' un
+    gestore dedicato, che aggiunge rotazione, versionamento e traccia degli accessi, cosi'
+    che dopo un incidente si possa sapere chi ha letto cosa. Il quarto e' non avere il
+    segreto affatto.
+
+    Quest'ultimo punto e' quello che al colloquio fa la differenza, perche' oggi e' la
+    risposta corretta piu' spesso di quanto si creda. Con un'identita' gestita, il carico di
+    lavoro ottiene dalla piattaforma un token a scadenza breve per parlare con il database o
+    con lo storage, e non esiste nessuna credenziale da custodire, ruotare o perdere.
+    Simmetricamente, una pipeline che si autentica con federazione OIDC non ha chiavi. Il
+    ragionamento generale e' che il modo migliore di proteggere un segreto e' fare in modo
+    che non esista: un segreto a lunga vita e' un debito che qualcuno prima o poi dovra'
+    pagare.
+
+    Restano due pratiche che si dimenticano. La prima e' la rotazione: va progettata prima
+    che serva, perche' ruotare una credenziale su un sistema che ammette un solo valore alla
+    volta impone un fermo, mentre un sistema che ne accetta due durante la transizione ruota
+    senza interruzioni. La seconda e' evitare che i segreti finiscano dove nessuno li cerca:
+    nei log applicativi quando si registra un oggetto di configurazione intero, nei messaggi
+    di errore, nelle tracce di eccezione inviate a un servizio esterno, nello stato di
+    Terraform. Una scansione automatica dei segreti sul diff, eseguita nel primo stadio
+    della pipeline, intercetta la maggior parte degli incidenti quando costano ancora poco.
+  key_points:
+    - "Se un valore cambia fra staging e produzione e' configurazione: dentro l'artefatto lega l'artefatto a un ambiente"
+    - "Le variabili d'ambiente sono stringhe piatte e visibili: vanno convalidate, e per i segreti sono il minimo sindacale"
+    - "Leggere e convalidare la configurazione in un solo punto all'avvio, e fallire subito se manca l'obbligatorio"
+    - "Un segreto committato resta nello storico: va ruotato, non cancellato"
+    - "La scala dei segreti: .env locale, segreti di piattaforma, gestore dedicato con rotazione e tracciamento"
+    - "Il gradino migliore e' non avere il segreto: identita' gestita e token a scadenza breve"
+    - "La rotazione va progettata prima che serva: servono due credenziali valide insieme per ruotare senza fermo"
+    - "I segreti sfuggono nei log, nelle tracce di eccezione e nello stato di Terraform"
+  examples:
+    - title: Configurazione convalidata in un punto solo
+      language: python
+      code: |
+        from pydantic_settings import BaseSettings
+
+        class Settings(BaseSettings):
+            # obbligatorio: senza, il servizio non parte
+            database_url: str
+            # predefinito sicuro: in dubbio, la scelta prudente
+            debug: bool = False
+            enable_code_execution: bool = False
+            # segreto: nessun valore predefinito che sembri funzionante
+            access_code: str = ""
+
+            class Config:
+                env_file = ".env"   # solo in sviluppo locale
+
+        settings = Settings()       # solleva all'avvio se manca database_url
+
+        # PERCHE' ALL'AVVIO
+        # os.environ["DATABASE_URL"] sparso nel codice significa
+        # scoprire la configurazione mancante alla prima richiesta che
+        # tocca quel ramo, magari in produzione, magari di notte.
+      note: >-
+        I valori predefiniti devono essere quelli sicuri: debug spento, funzioni rischiose
+        disattivate. Un default comodo e' un default che prima o poi finisce in produzione.
+    - title: La scala dei segreti, dal peggio al meglio
+      language: text
+      code: |
+        0  password nel repository
+           -> resta nello storico per sempre: RUOTARE, non cancellare
+
+        1  file .env fuori dal versionamento
+           -> accettabile solo sulla macchina dello sviluppatore
+
+        2  segreti della piattaforma (orchestratore, CI)
+           -> cifrati a riposo, accesso controllato
+           -> ma restano valori statici che qualcuno deve ruotare
+
+        3  gestore dedicato (Key Vault, Secrets Manager)
+           -> rotazione, versionamento, traccia di chi ha letto cosa
+
+        4  NESSUN SEGRETO
+           managed identity  -> token a scadenza breve per DB e storage
+           federazione OIDC  -> la pipeline non ha chiavi
+           -> niente da rubare, da ruotare o da dimenticare in un log
+
+        La domanda da fare a un'architettura: "quali segreti a lunga
+        vita esistono, e chi li ruota?" Se la risposta e' "nessuno",
+        sono un incidente in attesa.
+      note: >-
+        Il gradino 4 non e' sempre raggiungibile - un'API di terze parti spesso vuole una
+        chiave - ma va raggiunto ovunque sia possibile, perche' riduce il problema invece di
+        spostarlo.
+  trade_offs:
+    - option: Variabili d'ambiente
+      pros: Universali, supportate da ogni piattaforma, semplici da iniettare
+      cons: Stringhe piatte da convalidare, visibili nei processi e nelle diagnostiche
+      when: Configurazione non sensibile, e come veicolo minimo per i segreti quando non c'e' altro
+    - option: File di configurazione montati
+      pros: Struttura annidata, tipi, si aggiornano senza riavviare se l'applicazione ricarica
+      cons: Un meccanismo di montaggio in piu', e vanno comunque tenuti fuori dall'immagine
+      when: Configurazione articolata, o segreti montati da un gestore come file
+    - option: Gestore di segreti dedicato
+      pros: Rotazione, versionamento, traccia degli accessi, revoca puntuale
+      cons: Una dipendenza in piu' sul percorso di avvio, costo e latenza al primo accesso
+      when: Segreti che vanno ruotati o il cui accesso va dimostrato a un auditor
+    - option: Identita' gestita senza segreti
+      pros: Nessuna credenziale da custodire, token a scadenza breve, revoca immediata
+      cons: Disponibile solo verso servizi della stessa piattaforma
+      when: "Sempre, per tutto cio' che sta dentro il cloud: database, storage, code, servizi AI"
+  numbers:
+    - "Un segreto committato va considerato compromesso dal momento del push: la riscrittura dello storico non e' una bonifica"
+    - "Un token di identita' gestita dura tipicamente meno di un'ora e si rinnova da solo, contro una chiave statica valida finche' non la si ruota"
+    - "La scansione dei segreti costa secondi nel primo stadio della pipeline ed evita la quasi totalita' degli incidenti banali"
+  interview_answer: >-
+    Separo configurazione e segreti con un criterio semplice: se un valore cambia fra staging e
+    produzione e' configurazione e sta fuori dall'artefatto, altrimenti non potrei promuovere in
+    produzione la stessa immagine che ho testato. Nel codice la leggo e la convalido in un punto
+    solo all'avvio, con tipi espliciti e default sicuri, e faccio fallire il servizio se manca
+    qualcosa di obbligatorio: meglio non partire che rompersi alla prima richiesta che tocca quel
+    ramo. Sui segreti ragiono a gradini: mai nel repository, perche' una volta committati restano
+    nello storico e vanno ruotati e non cancellati; in sviluppo un .env fuori dal versionamento;
+    in produzione un gestore dedicato che dia rotazione e tracciamento. Ma il gradino che cerco
+    sempre e' non avere il segreto: con una managed identity il servizio ottiene un token a
+    scadenza breve per parlare con database e storage, e con la federazione OIDC la pipeline non
+    ha chiavi. Un segreto a lunga vita e' un debito che qualcuno prima o poi paga.
+  senior_signals:
+    - "Formula il criterio di separazione in termini di promozione dell'artefatto fra ambienti"
+    - "Convalida la configurazione all'avvio e fa fallire il servizio se manca l'obbligatorio"
+    - "Sa che un segreto committato va ruotato, e non crede che riscrivere lo storico basti"
+    - "Punta all'assenza del segreto (identita' gestita, OIDC) invece di limitarsi a custodirlo meglio"
+    - "Progetta la rotazione prima che serva, sapendo che richiede due credenziali valide insieme"
+    - "Ricorda i posti in cui i segreti sfuggono: log, tracce di eccezione, stato di Terraform"
+  pitfalls:
+    - "Committare un .env e poi 'risolvere' cancellandolo in un commit successivo"
+    - "Compilare gli URL degli ambienti dentro l'artefatto e non poter piu' promuovere la stessa immagine"
+    - "Leggere le variabili d'ambiente sparse nel codice invece che in un punto convalidato all'avvio"
+    - "Default comodi invece che sicuri: debug acceso, funzioni rischiose attive"
+    - "Registrare nei log l'oggetto di configurazione intero, segreti compresi"
+    - "Non prevedere la rotazione e doverla fare con un fermo, di corsa, dopo un incidente"
+  follow_ups:
+    - question: Che cosa fai se scopri una password committata sei mesi fa?
+      answer: >-
+        La ruoto immediatamente: dal momento del push va considerata compromessa, perche' il
+        repository e' stato clonato, indicizzato, copiato in cache di CI e forse in un fork.
+        Riscrivere lo storico e' utile per l'igiene ma non e' una bonifica e non va mai
+        considerato il rimedio. Dopo la rotazione cerco gli usi di quella credenziale per
+        capire cosa poteva fare e controllo i log di accesso per il periodo, poi introduco la
+        scansione automatica dei segreti nel primo stadio della pipeline perche' non succeda
+        di nuovo. E colgo l'occasione per chiedermi se quel segreto puo' essere eliminato del
+        tutto sostituendolo con un'identita' gestita.
+    - question: Perche' convalidare la configurazione all'avvio e non quando serve?
+      answer: >-
+        Perche' un errore di configurazione scoperto tardi e' un errore scoperto in
+        produzione. Se leggo una variabile dentro la funzione che manda le email, la sua
+        assenza si manifesta al primo invio, che magari avviene di notte e su un percorso poco
+        battuto; se la leggo e la convalido all'avvio, il servizio non parte, il deploy
+        fallisce e il rilascio non prosegue. E' lo stesso principio del fallire presto
+        applicato al ciclo di vita del processo. In piu' avere un unico punto di lettura rende
+        la configurazione documentata dal codice: si apre un file e si vede tutto cio' che il
+        servizio si aspetta, con tipi e valori predefiniti.
+    - question: Come ruoti una credenziale senza fermo del servizio?
+      answer: >-
+        Facendo in modo che due credenziali siano valide contemporaneamente durante la
+        transizione. Si crea la nuova, si aggiorna la configurazione dei consumatori, si
+        verifica che tutti la stiano usando - e per verificarlo serve poterlo osservare, quindi
+        una metrica o un log per credenziale - e solo allora si revoca la vecchia. Se il
+        sistema ammette una sola credenziale attiva, la rotazione impone un fermo, ed e' una
+        cosa da scoprire quando si progetta, non durante un incidente. Molti servizi gestiti
+        offrono per questo due chiavi, primaria e secondaria, proprio per permettere la
+        rotazione alternata.
+    - question: Quando le variabili d'ambiente non bastano?
+      answer: >-
+        Quando la configurazione ha struttura, quando deve cambiare senza riavviare, o quando
+        i valori sono sensibili. Le variabili sono stringhe piatte, quindi una configurazione
+        annidata va simulata con prefissi e diventa illeggibile; sono fissate all'avvio del
+        processo, quindi ogni modifica richiede un riavvio; e sono visibili nell'elenco dei
+        processi e in molti strumenti di diagnosi, quindi per un segreto sono meno indicate di
+        un file montato con permessi ristretti, che il gestore di segreti puo' anche
+        aggiornare da sotto. Per i feature flag, poi, servono proprio un meccanismo dinamico e
+        un servizio dedicato, perche' il punto e' cambiarli senza rilasciare.
+  related: [plat-04-ci-cd, plat-03-iac, eng-04-security, plat-01-container, core-06-authn-vs-authz]
+  resources:
+    - title: "The Twelve-Factor App - Config"
+      url: https://12factor.net/config
+      kind: article
+    - title: "OWASP - Secrets Management Cheat Sheet"
+      url: https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+      kind: doc
+    - title: "Azure - Managed identities per le risorse"
+      url: https://learn.microsoft.com/en-us/entra/identity/managed-identities-azure-resources/overview
+      kind: doc

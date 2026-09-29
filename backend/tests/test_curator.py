@@ -26,6 +26,19 @@ DRAFT = TopicDraft(
 )
 
 
+DRAFT_REDIS = TopicDraft(
+    title="Redis per il colloquio",
+    summary=(
+        "Redis è uno store in memoria usato come cache, come contatore e come "
+        "coordinatore leggero: la memoria è il vincolo, la persistenza è opzionale."
+    ),
+    category="engineering",
+    tags=["redis", "cache", "in-memory"],
+    key_points=["Strutture dati native", "Eviction e TTL", "Persistenza RDB e AOF"],
+    interview_answer="Parto sempre da cosa succede quando la memoria finisce.",
+)
+
+
 @pytest.fixture
 def curator(kb: KnowledgeBase, offline_ai, data_dir):
     return KnowledgeCurator(kb, offline_ai, JsonFileRepository(data_dir))
@@ -39,15 +52,16 @@ def test_rileva_le_lacune_dell_annuncio(curator):
     gaps = curator.find_gaps(_posting())
     per_termine = {g.term: g for g in gaps}
 
-    assert per_termine["Kubernetes"].covered is False, "Kubernetes non ha un argomento dedicato"
+    assert per_termine["Redis"].covered is False, "Redis non ha un argomento dedicato"
     assert per_termine["Kafka"].covered is True, "Kafka ha già il suo argomento"
+    assert per_termine["Kubernetes"].covered is True, "Kubernetes ha il suo argomento dedicato"
 
 
 def test_le_lacune_indicano_l_argomento_piu_vicino(curator):
     gaps = {g.term: g for g in curator.find_gaps(_posting())}
-    kubernetes = gaps["Kubernetes"]
-    assert kubernetes.best_topic_title, "va mostrato l'argomento correlato più vicino"
-    assert kubernetes.coverage_score > 0
+    redis = gaps["Redis"]
+    assert redis.best_topic_title, "va mostrato l'argomento correlato più vicino"
+    assert redis.coverage_score > 0
 
 
 def test_le_lacune_sono_ordinate_per_importanza(curator):
@@ -81,14 +95,16 @@ async def test_aggiunge_un_argomento_da_contenuto_manuale(curator, kb):
 
 
 async def test_l_argomento_aggiunto_diventa_il_match_migliore(curator, kb):
-    _score_prima, id_prima, dedicato_prima = kb.coverage("Kubernetes")
+    # Redis: l'annuncio lo chiede, il catalogo lo tocca solo dentro gli argomenti
+    # sul caching. Kubernetes non serve più allo scopo, ha una scheda sua.
+    _score_prima, id_prima, dedicato_prima = kb.coverage("Redis")
     assert dedicato_prima is False
 
     topic, _ = await curator.create_topic(
-        TopicCreate(term="Kubernetes", draft=DRAFT, num_questions=0)
+        TopicCreate(term="Redis", draft=DRAFT_REDIS, num_questions=0)
     )
 
-    _score, id_dopo, dedicato_dopo = kb.coverage("Kubernetes")
+    _score, id_dopo, dedicato_dopo = kb.coverage("Redis")
     assert id_dopo == topic.id != id_prima
     assert dedicato_dopo is True
 

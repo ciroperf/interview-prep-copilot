@@ -1,0 +1,2041 @@
+# System design in profondita'. Il metodo e i design classici stanno in
+# topics_extra.yaml (sd-01, sd-02): qui ci sono i meccanismi di cui
+# l'intervistatore chiede conto quando il disegno di alto livello e' finito.
+- id: sd-03-consistency-models
+  title: Modelli di consistenza, CAP e PACELC
+  category: system-design
+  track: technical
+  level: hard
+  tags: [system-design, consistenza, distribuiti, cap]
+  estimated_minutes: 45
+  summary: >-
+    CAP dice che durante un partizionamento di rete si sceglie fra consistenza e
+    disponibilita'. E' vero ma dice poco: il compromesso che conta davvero in produzione
+    e' quello che PACELC aggiunge, cioe' latenza contro consistenza quando la rete
+    funziona, che e' il 99,9% del tempo.
+  deep_dive: |-
+    Il teorema CAP viene citato quasi sempre male. Non dice "scegline due su tre": la
+    tolleranza al partizionamento non e' opzionale, perche' le reti perdono pacchetti e
+    un sistema distribuito che non tollera partizionamenti semplicemente non funziona.
+    Dice che *durante* un partizionamento devi scegliere: o rifiuti le richieste che non
+    puoi servire in modo consistente (CP), o le servi accettando di poter rispondere con
+    dati divergenti (AP). Fuori dal partizionamento CAP non dice nulla.
+
+    Ed e' proprio per questo che CAP da solo e' inutile al colloquio: i partizionamenti
+    sono rari, e un sistema passa la quasi totalita' del tempo con la rete sana. PACELC
+    completa la frase: if Partition then A or C, Else L or C. Cioe' anche quando tutto
+    funziona c'e' un compromesso, fra latenza e consistenza, e quello lo paghi sempre.
+    Volere che ogni scrittura sia confermata da un quorum in tre continenti non e' un
+    problema di disponibilita': e' un problema di duecento millisecondi su ogni
+    richiesta. Dynamo e Cassandra sono PA/EL, tarate su latenza; HBase e i sistemi su
+    consenso sono PC/EC, tarati su consistenza.
+
+    Fra "consistenza forte" ed "eventuale" c'e' una scala intera che vale la pena saper
+    nominare, perche' il modello giusto e' quasi sempre uno intermedio. La linearizzabilita'
+    e' il massimo: il sistema si comporta come se ci fosse una sola copia, e ogni lettura
+    vede la scrittura piu' recente. La consistenza causale preserva l'ordine fra eventi
+    collegati: se la risposta e' scritta dopo il commento, nessuno vede la risposta prima
+    del commento, ma due eventi indipendenti possono apparire in ordine diverso a
+    osservatori diversi. Read-your-writes garantisce che chi ha scritto rivede la propria
+    scrittura, che e' il minimo per non far impazzire l'utente che ha appena premuto
+    salva. Monotonic reads impedisce di tornare indietro nel tempo fra due letture
+    successive. Eventuale, senza aggettivi, garantisce solo che a un certo punto le
+    copie convergono, senza dire quando.
+
+    Il meccanismo concreto dietro la maggior parte di queste scelte e' il quorum. Con N
+    copie, se richiedi W conferme in scrittura e R in lettura e vale R + W > N, allora
+    l'insieme dei nodi letti e quello dei nodi scritti si intersecano sempre in almeno un
+    nodo, quindi la lettura vede l'ultima scrittura. Con N=3 le combinazioni classiche
+    sono W=2, R=2 per un compromesso equilibrato, oppure W=3, R=1 per privilegiare le
+    letture, oppure W=1, R=1 che e' veloce e non garantisce niente. Detto questo, il
+    quorum non da' linearizzabilita' da solo: servono anche letture di riparazione e
+    attenzione alle scritture concorrenti, ed e' il punto dove un intervistatore attento
+    va a fondo.
+
+    La domanda da riportare sempre al dominio e' quali dati hanno bisogno di cosa. In
+    un e-commerce il saldo di un conto e la disponibilita' dell'ultimo pezzo in magazzino
+    vogliono consistenza forte; il contatore delle visualizzazioni, i "mi piace" e lo
+    storico degli ordini vivono benissimo con qualche secondo di ritardo. Dire "uso
+    consistenza forte sul pagamento ed eventuale sul feed, e questi sono i due motivi"
+    vale piu' di qualunque recita del teorema.
+  key_points:
+    - "CAP non e' 'due su tre': P non e' opzionale, la scelta e' fra C e A e vale solo durante un partizionamento"
+    - "PACELC aggiunge la parte che conta di piu': Else Latency or Consistency, cioe' il prezzo che paghi quando la rete e' sana"
+    - "La scala dei modelli: linearizzabile, causale, read-your-writes, monotonic reads, eventuale"
+    - "Quorum: con R + W > N le due maggioranze si intersecano e la lettura vede l'ultima scrittura (N=3, W=2, R=2)"
+    - "Il quorum da solo non da' linearizzabilita': servono read repair e una politica sulle scritture concorrenti"
+    - "Non si sceglie un modello per il sistema ma uno per tipo di dato: saldo forte, contatore eventuale"
+    - "Cassandra e Dynamo sono PA/EL, i sistemi su consenso tipo HBase sono PC/EC"
+  examples:
+    - title: Quorum su N=3, cosa garantisce ogni combinazione
+      language: text
+      code: |
+        N = 3 copie del dato
+
+        W=1 R=1   veloce in scrittura e lettura, nessuna garanzia
+                  (puoi leggere un nodo che non ha ancora il dato)
+        W=2 R=2   R+W=4 > 3 -> intersezione garantita, tollera 1 nodo giu'
+                  e' la configurazione di default sensata
+        W=3 R=1   letture rapidissime, ma una scrittura fallisce se un nodo e' giu'
+        W=1 R=3   scritture rapidissime, letture fragili e lente
+
+        Regola: R + W > N garantisce l'intersezione, non l'ordinamento.
+        Due scritture concorrenti su W=2 possono comunque divergere.
+      note: >-
+        La formula si dimostra in una riga: se leggo R nodi su N e ne sono stati scritti
+        W, e R + W > N, per il principio dei cassetti almeno un nodo sta in entrambi
+        gli insiemi.
+    - title: Lo stesso sistema, due modelli diversi per due dati
+      language: text
+      code: |
+        E-COMMERCE
+
+        Consistenza forte (leader, transazione, quorum di scrittura)
+          saldo del wallet        una doppia spesa e' un danno economico
+          ultimo pezzo in stock   venderlo due volte e' un cliente perso
+          stato del pagamento     la legge non ammette "eventualmente"
+
+        Consistenza eventuale (replica asincrona, cache, coda)
+          contatore visite        nessuno nota 3 secondi di ritardo
+          prodotti correlati      calcolati offline, stantii per ore
+          storico ordini          la lettura tollera il ritardo di replica
+
+        Read-your-writes (il minimo per l'esperienza utente)
+          recensione appena scritta   l'autore deve rivederla subito,
+                                      gli altri anche dopo 5 secondi
+      note: >-
+        La terza colonna e' quella che si dimentica: read-your-writes si ottiene a
+        buon mercato indirizzando temporaneamente l'utente al leader, o leggendo dalla
+        propria sessione, senza pagare consistenza forte su tutto.
+  trade_offs:
+    - option: Consistenza forte (linearizzabile)
+      pros: Nessuna anomalia da spiegare, il codice applicativo resta semplice
+      cons: Latenza piu' alta, disponibilita' ridotta durante i partizionamenti, scala peggio in geografia
+      when: Denaro, inventario, autorizzazioni, tutto cio' che genera un danno se contato due volte
+    - option: Consistenza eventuale
+      pros: Latenza bassa, resta disponibile sotto partizionamento, scala in multi-region
+      cons: "Sposta la complessita' nell'applicazione: conflitti, anomalie di lettura, utenti confusi"
+      when: Contatori, feed, raccomandazioni, dati aggregati, tutto cio' che tollera secondi di ritardo
+    - option: Read-your-writes sopra una base eventuale
+      pros: Elimina il 90% delle anomalie percepite dagli utenti a costo quasi nullo
+      cons: Va implementato esplicitamente (sticky session sul leader, o token di versione)
+      when: Quasi sempre, come livello minimo su un sistema a replica asincrona
+  numbers:
+    - "Round trip dentro un data center: meno di 1 ms. Fra due continenti: 80-150 ms, e un quorum sincrono li paga su ogni scrittura"
+    - "Ritardo di replica asincrona tipico: da qualche millisecondo a qualche secondo, ma sotto carico puo' arrivare a minuti"
+    - "Con N=3 e W=R=2 il sistema tollera la perdita di un nodo mantenendo l'intersezione dei quorum"
+  interview_answer: >-
+    CAP lo uso solo per dire che durante un partizionamento devo scegliere fra rifiutare le
+    richieste e servirle con dati potenzialmente divergenti. Ma il compromesso che pago ogni
+    giorno e' quello di PACELC: anche con la rete sana, piu' consistenza significa piu' latenza,
+    perche' devo aspettare la conferma di un quorum. Per questo non scelgo un modello per il
+    sistema ma uno per tipo di dato: sul saldo di un conto o sull'ultimo pezzo in magazzino
+    vado di consistenza forte, perche' contare due volte e' un danno economico; sul contatore
+    delle visualizzazioni o sul feed mi basta l'eventuale. E quasi sempre aggiungo
+    read-your-writes, perche' costa poco e toglie l'anomalia che gli utenti notano davvero:
+    scrivere qualcosa e non rivederla.
+  senior_signals:
+    - "Corregge la formulazione sbagliata di CAP invece di ripeterla"
+    - "Nomina PACELC, o almeno il compromesso latenza-consistenza fuori dal partizionamento"
+    - "Sa che R + W > N garantisce l'intersezione ma non l'ordinamento delle scritture concorrenti"
+    - "Assegna il modello per tipo di dato e porta due esempi dal dominio in questione"
+    - "Cita read-your-writes come livello minimo invece di trattare la scelta come binaria"
+  pitfalls:
+    - "Recitare 'CAP: scegline due su tre', che e' la formulazione sbagliata"
+    - "Trattare la consistenza come un interruttore del sistema e non come una proprieta' del singolo dato"
+    - "Credere che un quorum R + W > N dia linearizzabilita': serve anche gestire le scritture concorrenti"
+    - "Dire 'consistenza eventuale' senza dire entro quanto: senza un limite non e' una garanzia utilizzabile"
+    - "Progettare un quorum sincrono cross-continente e scoprire i 150 ms di latenza in produzione"
+  follow_ups:
+    - question: Con N=3, che differenza c'e' fra W=2/R=2 e W=3/R=1?
+      answer: >-
+        Entrambe soddisfano R + W > N, quindi entrambe garantiscono che la lettura veda
+        l'ultima scrittura confermata. Cambia dove metti la fragilita': con W=3 ogni
+        scrittura richiede tutti e tre i nodi, quindi un nodo giu' blocca le scritture,
+        ma le letture costano un solo nodo e sono rapidissime. Con W=2/R=2 tolleri un
+        nodo giu' sia in scrittura sia in lettura, pagando un po' piu' di latenza in
+        lettura. W=3/R=1 si sceglie quando le letture dominano di due ordini di
+        grandezza e le scritture possono aspettare.
+    - question: Come ottieni read-your-writes su un sistema a replica asincrona?
+      answer: >-
+        Tre modi, in ordine di costo. Il piu' semplice e' indirizzare l'utente al leader
+        per un intervallo dopo la sua scrittura, tipicamente pochi secondi, con una
+        sticky session. Il secondo e' restituire al client un token di versione al momento
+        della scrittura e farglielo rimandare in lettura, cosi' la replica che non e'
+        ancora a quella versione inoltra al leader o attende. Il terzo, il piu' grezzo, e'
+        tenere in sessione l'ultimo timestamp di scrittura dell'utente e leggere dal leader
+        se la replica e' indietro rispetto a quello.
+    - question: Dove sbaglia chi dice "usiamo Cassandra perche' e' AP"?
+      answer: >-
+        Sbaglia a trattarlo come una proprieta' fissa del prodotto. In Cassandra la
+        consistenza si configura per query, con ONE, QUORUM, ALL e le varianti locali al
+        data center: puoi ottenere un comportamento simile a CP scrivendo e leggendo a
+        QUORUM, pagandone la latenza e perdendo disponibilita' quando un quorum non e'
+        raggiungibile. La scelta AP e' il default e la direzione in cui il sistema e'
+        progettato, non un vincolo. La frase giusta e' "Cassandra mi lascia scegliere per
+        query, e su questa tabella scelgo QUORUM".
+    - question: Che cosa succede alle scritture concorrenti in un sistema a quorum?
+      answer: >-
+        Il quorum non le ordina, quindi due client che scrivono lo stesso dato nello
+        stesso istante producono due versioni e il sistema deve decidere. Le opzioni
+        sono last-write-wins su timestamp, che e' semplice e perde silenziosamente una
+        delle due scritture, i vector clock o le version, che rilevano il conflitto e lo
+        passano all'applicazione, e le strutture CRDT, che convergono per costruzione ma
+        vanno bene solo per alcuni tipi di dato come contatori e insiemi. Last-write-wins
+        con orologi non sincronizzati e' la sorgente di bug piu' sottile del gruppo.
+  related: [sd-04-consensus-leader-election, sd-08-multi-region, db-18-read-replicas, db-14-transactions-isolation, rel-31-delivery-semantics]
+  resources:
+    - title: "Designing Data-Intensive Applications, capitoli 5 e 9"
+      url: https://dataintensive.net/
+      kind: book
+    - title: "Jepsen - Consistency models"
+      url: https://jepsen.io/consistency
+      kind: doc
+    - title: "Daniel Abadi - Consistency Tradeoffs in Modern Distributed Database System Design (PACELC)"
+      url: https://www.cs.umd.edu/~abadi/papers/abadi-pacelc.pdf
+      kind: article
+
+- id: sd-04-consensus-leader-election
+  title: Consenso, elezione del leader e split brain
+  category: system-design
+  track: technical
+  level: hard
+  tags: [system-design, consenso, raft, distribuiti, leader]
+  estimated_minutes: 45
+  summary: >-
+    Ogni volta che in un disegno appare "un nodo decide" - il leader di una replica, il
+    proprietario di uno shard, chi esegue il job schedulato - serve un modo per
+    eleggerlo che non produca due leader convinti di esserlo entrambi.
+  deep_dive: |-
+    Il problema del consenso e' far concordare un insieme di nodi su un valore, nonostante
+    guasti e ritardi di rete. Sembra astratto ma salta fuori continuamente: chi e' il
+    leader di questo gruppo di replica, chi possiede questa partizione, chi esegue il cron
+    job che non deve partire due volte, in che ordine sono state applicate queste
+    scritture. Tutti riducibili al consenso.
+
+    La garanzia fondamentale e' la maggioranza. Un algoritmo di consenso come Raft o Paxos
+    richiede che ogni decisione sia approvata da piu' della metà dei nodi, e da qui segue
+    tutto il resto: con 2f+1 nodi tolleri f guasti, quindi 3 nodi tollerano 1 guasto e 5
+    ne tollerano 2. Due maggioranze di uno stesso insieme si intersecano necessariamente,
+    ed e' questo che rende impossibile eleggere due leader nello stesso termine: il secondo
+    candidato non troverebbe abbastanza voti. Ecco anche perche' i cluster di consenso
+    hanno un numero dispari di nodi: passare da 3 a 4 non aumenta i guasti tollerati, ma
+    aumenta il numero di nodi che devono essere d'accordo.
+
+    Raft funziona per termini. Ogni nodo e' follower, candidate o leader. Un follower che
+    non sente il leader entro un timeout casuale si candida per un nuovo termine e chiede
+    voti; se ottiene la maggioranza diventa leader e comincia a mandare heartbeat. Le
+    scritture passano solo dal leader, che le appende al proprio log e le replica; una
+    entry e' committed quando la maggioranza l'ha scritta. Il numero di termine
+    monotono crescente e' il dettaglio che risolve i casi patologici: un vecchio leader
+    che torna online dopo un partizionamento scopre dal primo messaggio che esiste un
+    termine piu' alto e si degrada a follower.
+
+    Lo split brain e' il fallimento che si vuole evitare: due nodi si credono entrambi
+    leader e accettano scritture divergenti. Il consenso a maggioranza lo previene
+    all'interno del proprio protocollo, ma non protegge cio' che sta fuori. Il caso
+    classico: il leader A ottiene un lock, va in pausa per una GC lunga oltre il timeout,
+    il cluster elegge B, A si risveglia convinto di avere ancora il lock e scrive sullo
+    storage esterno. Il consenso ha funzionato, il danno l'ha fatto A. La difesa e' il
+    fencing token: il lock restituisce un numero monotono crescente, ogni scrittura verso
+    la risorsa lo porta con se', e la risorsa rifiuta qualunque token inferiore a quello
+    piu' alto che ha visto. E' esattamente il ruolo che il termine svolge dentro Raft,
+    esteso al mondo esterno.
+
+    In un colloquio la mossa giusta e' quasi sempre non implementare il consenso.
+    Scrivere Raft a mano e' un progetto, non un componente: si delega a etcd, ZooKeeper,
+    Consul, o al database che il sistema ha gia'. La competenza che si dimostra e' sapere
+    dove serve consenso e dove no. Serve per l'appartenenza al cluster, l'elezione del
+    leader, la configurazione condivisa, i lock con garanzie. Non serve per i dati
+    applicativi ad alto volume, dove il prezzo e' insostenibile: ogni scrittura costa un
+    round trip verso la maggioranza. Il pattern sano e' un piccolo cluster di consenso che
+    decide chi comanda, e il traffico vero che scorre fuori da lì.
+  key_points:
+    - "Il consenso richiede la maggioranza: con 2f+1 nodi tolleri f guasti, da cui i numeri dispari (3, 5, 7)"
+    - "Due maggioranze si intersecano sempre: e' questo che rende impossibili due leader nello stesso termine"
+    - "Raft: termini monotoni, elezione su timeout casuale, log replicato, commit alla maggioranza"
+    - "Il termine crescente degrada automaticamente un vecchio leader che torna dopo un partizionamento"
+    - "Lo split brain esterno resta possibile: serve un fencing token che la risorsa sappia rifiutare"
+    - "Non implementare il consenso: delegare a etcd, ZooKeeper, Consul o al database esistente"
+    - "Il consenso serve sui metadati (chi comanda, la configurazione), non sui dati applicativi ad alto volume"
+  examples:
+    - title: Perche' i cluster di consenso hanno un numero dispari di nodi
+      language: text
+      code: |
+        nodi  maggioranza  guasti tollerati
+          1        1              0
+          2        2              0     <- peggio di 1 nodo: ne bastano 2 d'accordo
+          3        2              1
+          4        3              1     <- stessa tolleranza di 3, un nodo in piu' da coordinare
+          5        3              2
+          6        4              2     <- stessa tolleranza di 5
+          7        4              3
+
+        Passare da dispari a pari aggiunge costo e non aggiunge tolleranza.
+        Da qui i cluster etcd/ZooKeeper da 3 o 5 nodi.
+      note: >-
+        Con 2 nodi non c'e' maggioranza possibile in caso di partizionamento: nessuna
+        delle due metà puo' decidere, e il sistema si blocca. E' il motivo per cui il
+        "raddoppio per sicurezza" peggiora le cose.
+    - title: Lo split brain che il consenso non previene, e il fencing token
+      language: text
+      code: |
+        SENZA FENCING
+        A acquisisce il lock (lease 10s)
+        A entra in una GC pause di 15s
+        il lease scade, il cluster elegge B
+        B acquisisce il lock e scrive       storage: dato di B
+        A si risveglia, crede di avere il lock e scrive
+                                           storage: dato di A  <- corruzione
+
+        CON FENCING TOKEN
+        A acquisisce il lock -> token 33
+        A va in pausa
+        B acquisisce il lock -> token 34
+        B scrive con token 34              storage accetta, max visto = 34
+        A si risveglia e scrive con token 33
+                                           storage RIFIUTA: 33 < 34
+      note: >-
+        Il token deve essere verificato dalla risorsa che subisce la scrittura, non dal
+        client: un controllo lato client e' esattamente cio' che A non era in grado di
+        fare, perche' non sapeva di essere in ritardo.
+  trade_offs:
+    - option: Delegare a etcd, ZooKeeper o Consul
+      pros: Algoritmo corretto e testato, operabilita' nota, strumenti di diagnosi esistenti
+      cons: Un sistema in piu' da gestire, monitorare e aggiornare
+      when: Quasi sempre, quando serve elezione del leader o configurazione condivisa
+    - option: Usare il database che c'e' gia' (advisory lock, riga con lease)
+      pros: Nessuna nuova infrastruttura, sufficiente per job singoli e leader deboli
+      cons: Il database diventa un punto singolo di guasto per la coordinazione, garanzie piu' deboli
+      when: Un cron job che non deve partire due volte, con tolleranza a qualche minuto di fermo
+    - option: Implementare Raft o Paxos in casa
+      pros: Nessuna dipendenza esterna, controllo completo
+      cons: E' un progetto di mesi, e gli errori si manifestano solo sotto guasti rari
+      when: Praticamente mai, salvo che il consenso sia il prodotto che state vendendo
+  numbers:
+    - "Un cluster etcd da 3 nodi tollera 1 guasto, da 5 ne tollera 2: aggiungere nodi pari non aumenta la tolleranza"
+    - "Ogni scrittura su consenso costa almeno un round trip verso la maggioranza: dentro un data center meno di 1 ms, cross-region 80-150 ms"
+    - "Timeout di elezione tipici in Raft: 150-300 ms randomizzati, per evitare che tutti si candidino insieme"
+  interview_answer: >-
+    Ogni volta che nel disegno c'e' un nodo che decide qualcosa da solo - il leader di una
+    replica, il proprietario di uno shard, chi esegue un job che non deve girare due volte -
+    serve un'elezione che non produca due leader. La garanzia e' la maggioranza: con 2f+1 nodi
+    tollero f guasti, e due maggioranze si intersecano sempre, quindi non possono esserci due
+    leader nello stesso termine. In pratica non lo implemento: delego a etcd o al database che
+    ho gia'. La parte che aggiungo sempre e' il fencing token, perche' il consenso non protegge
+    dal caso vero: un leader che va in pausa per una GC lunga, viene sostituito, si risveglia
+    convinto di comandare ancora e scrive. Con un token monotono che la risorsa verifica, quella
+    scrittura viene rifiutata.
+  senior_signals:
+    - "Spiega perche' i nodi sono dispari partendo dalla maggioranza, non come regola mnemonica"
+    - "Nomina il fencing token e sa che il controllo va fatto dalla risorsa, non dal client"
+    - "Distingue dove serve consenso (metadati) da dove non serve (dati ad alto volume)"
+    - "Propone di delegare a un sistema esistente invece di descrivere un'implementazione"
+    - "Cita la GC pause come causa realistica di split brain, non un partizionamento esotico"
+  pitfalls:
+    - "Mettere un numero pari di nodi 'per sicurezza': non aumenta la tolleranza e con 2 nodi la azzera"
+    - "Credere che un lock con TTL basti: senza fencing token il processo in pausa scrive comunque"
+    - "Far passare i dati applicativi ad alto volume attraverso il consenso e pagare un round trip per scrittura"
+    - "Verificare il fencing token lato client, cioe' nel processo che per definizione non sa di essere in ritardo"
+    - "Scrivere Raft in casa e scoprire i bug solo durante il primo guasto reale"
+  follow_ups:
+    - question: Perche' un cluster di consenso da 2 nodi e' peggio di uno da 1?
+      answer: >-
+        Perche' con 2 nodi la maggioranza e' 2, quindi serve l'accordo di entrambi e la
+        tolleranza ai guasti e' zero: se uno cade, l'altro non puo' decidere nulla da
+        solo. Con 1 nodo la tolleranza e' ugualmente zero, ma non paghi coordinazione e
+        non hai il caso peggiore del partizionamento, in cui due nodi vivi ma separati si
+        bloccano entrambi perche' nessuno dei due ha la maggioranza. Il primo numero che
+        aggiunge tolleranza reale e' 3.
+    - question: Che cos'e' un fencing token e perche' un lock con TTL non basta?
+      answer: >-
+        Un fencing token e' un numero monotono crescente restituito dal lock a ogni
+        acquisizione, che il client allega a ogni scrittura verso la risorsa protetta; la
+        risorsa tiene il token piu' alto visto e rifiuta i token inferiori. Il TTL da solo
+        non basta perche' un processo puo' perdere il lock senza accorgersene - una GC
+        pause, un thread sospeso, una rete lenta - e proseguire convinto di averlo. Il TTL
+        protegge il lock dal restare bloccato per sempre, il fencing protegge i dati dal
+        client in ritardo. Sono due problemi diversi e servono entrambi.
+    - question: Dove metteresti il consenso e dove no in un sistema con shard?
+      answer: >-
+        Il consenso lo metto sui metadati: quale nodo possiede quale shard, chi e' il
+        leader di ogni gruppo di replica, la versione corrente della mappa di
+        partizionamento. E' poca informazione, cambia raramente e deve essere
+        indiscutibile. Non lo metto sul percorso dei dati: le scritture applicative vanno
+        al leader dello shard e si replicano con un quorum, senza passare dal cluster di
+        consenso, che diventerebbe il collo di bottiglia. Il pattern e' un piccolo cluster
+        che decide chi comanda, e il traffico vero che scorre fuori.
+    - question: Come eviti che un job schedulato parta su due istanze?
+      answer: >-
+        Con un lock con lease e fencing, non con un controllo sull'orologio. L'istanza
+        acquisisce un lock con TTL per la finestra del job, ottiene un token, e ogni
+        effetto esterno - scrittura, invio di email, chiamata a un pagamento - porta il
+        token o una chiave di idempotenza derivata dalla finestra temporale. Cosi' se due
+        istanze partono comunque, la seconda viene rifiutata a valle. In molti casi la
+        soluzione piu' robusta e' rendere il job idempotente sulla chiave della finestra
+        e smettere di preoccuparsi di quante volte parte.
+  related: [sd-03-consistency-models, rel-34-distributed-locking, sd-05-consistent-hashing, rel-33-race-conditions, db-18-read-replicas]
+  resources:
+    - title: "In Search of an Understandable Consensus Algorithm (Raft)"
+      url: https://raft.github.io/raft.pdf
+      kind: article
+    - title: "Raft - visualizzazione interattiva"
+      url: https://raft.github.io/
+      kind: practice
+    - title: "Martin Kleppmann - How to do distributed locking"
+      url: https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html
+      kind: article
+
+- id: sd-05-consistent-hashing
+  title: Consistent hashing, ribilanciamento e chiavi calde
+  category: system-design
+  track: technical
+  level: hard
+  tags: [system-design, sharding, hashing, partizionamento, hotspot]
+  estimated_minutes: 40
+  summary: >-
+    Partizionare con il modulo sul numero di nodi funziona finche' il numero di nodi non
+    cambia: al primo nodo aggiunto quasi tutte le chiavi si spostano. Il consistent
+    hashing risolve quello, e non risolve il problema successivo, che sono le chiavi calde.
+  deep_dive: |-
+    La partizione ovvia e' hash(chiave) % N. Funziona bene e si rompe male: con N che passa
+    da 4 a 5, la posizione di quasi ogni chiave cambia, perche' cambia il divisore. In una
+    cache significa perdere tutto il contenuto insieme e riversare il traffico sul
+    database; in un datastore significa spostare quasi tutti i dati. E' il motivo per cui
+    aggiungere un nodo a una cache partizionata col modulo e' un'operazione che si fa di
+    notte e con paura.
+
+    Il consistent hashing cambia il modello. Chiavi e nodi vengono mappati sullo stesso
+    spazio circolare di hash, e ogni chiave appartiene al primo nodo che si incontra
+    procedendo in senso orario. Quando un nodo entra o esce, le uniche chiavi che si
+    spostano sono quelle del suo arco: in media K/N, dove K e' il numero di chiavi e N
+    quello dei nodi. Passare da 4 a 5 nodi sposta circa un quinto delle chiavi invece di
+    quasi tutte.
+
+    L'anello puro ha due difetti pratici, e entrambi si curano con lo stesso trucco. Il
+    primo e' la distribuzione: pochi punti su un cerchio non lo dividono in archi uguali, e
+    un nodo puo' ritrovarsi con il doppio delle chiavi di un altro. Il secondo e' che alla
+    rimozione di un nodo tutto il suo carico finisce sul suo unico successore, che rischia
+    di cadere a sua volta. La soluzione sono i nodi virtuali: ogni nodo fisico viene
+    collocato in molti punti dell'anello, tipicamente da cento a qualche centinaio. La
+    distribuzione si livella, e quando un nodo esce i suoi archi si ridistribuiscono su
+    molti successori diversi invece che su uno solo. Come effetto collaterale i nodi
+    virtuali permettono di pesare i nodi: una macchina con il doppio della memoria riceve
+    il doppio dei punti.
+
+    Poi c'e' il problema che il consistent hashing non risolve, ed e' quello che in un
+    colloquio distingue chi ha solo letto la teoria. L'anello distribuisce bene le chiavi,
+    non il traffico. Se una singola chiave e' molto piu' richiesta delle altre - il post
+    del personaggio famoso, il prodotto in promozione, il tenant enorme in un sistema
+    multi-tenant - quella chiave sta su un nodo solo, e nessuna quantita' di nodi virtuali
+    la spostera'. Le difese sono diverse e vanno nominate distintamente. Replicare la chiave
+    calda su piu' nodi e leggere da uno a caso funziona per le letture. Suffissare la
+    chiave con un numero casuale in un intervallo - key salting - la spezza in piu' chiavi
+    fisiche, al prezzo di dover leggere tutte le varianti o accettare un aggregato
+    approssimato. Una cache locale davanti alla cache distribuita assorbe le chiavi
+    bollenti in modo molto efficace, perche' per definizione sono poche e stanno in memoria.
+    Per le scritture su un tenant enorme la risposta e' spesso strutturale: gli si da' uno
+    shard dedicato.
+
+    Vale la pena sapere che esistono alternative all'anello. Il rendezvous hashing calcola
+    per ogni chiave il punteggio hash(chiave, nodo) su tutti i nodi e prende il massimo:
+    ha le stesse garanzie di spostamento minimo senza dover mantenere l'anello, ed e' piu'
+    semplice da implementare correttamente quando i nodi sono pochi. Molti database
+    relazionali, all'opposto, usano il partizionamento per intervalli, che permette le
+    query su range ma va incontro agli hotspot temporali: se la chiave e' il timestamp,
+    tutte le scritture di oggi finiscono sulla stessa partizione.
+  key_points:
+    - "hash % N si rompe al cambio di N: quasi tutte le chiavi si spostano, la cache si svuota in blocco"
+    - "Consistent hashing: chiavi e nodi sullo stesso anello, la chiave va al primo nodo in senso orario"
+    - "Alla variazione di appartenenza si spostano in media K/N chiavi, non tutte"
+    - "I nodi virtuali (100+ per nodo fisico) livellano la distribuzione e spargono il carico di un nodo caduto"
+    - "I nodi virtuali permettono anche di pesare i nodi secondo la loro capacita'"
+    - "Il consistent hashing distribuisce le chiavi, non il traffico: le chiavi calde restano su un nodo"
+    - "Difese per le chiavi calde: replica della chiave, key salting, cache locale davanti, shard dedicato per i tenant enormi"
+    - "Alternative: rendezvous hashing (piu' semplice, stesse garanzie), partizionamento per intervalli (query su range, hotspot temporali)"
+  examples:
+    - title: Quante chiavi si spostano aggiungendo un nodo
+      language: text
+      code: |
+        hash(chiave) % N          N: 4 -> 5
+          chiave  h=17   17%4=1  ->  17%5=2   spostata
+          chiave  h=18   18%4=2  ->  18%5=3   spostata
+          chiave  h=20   20%4=0  ->  20%5=0   ferma
+          in media si spostano ~(1 - 1/N) delle chiavi, cioe' quasi tutte
+
+        CONSISTENT HASHING       4 -> 5 nodi
+          entra il nodo E sull'anello: prende solo l'arco fra il suo
+          predecessore e se stesso
+          si spostano ~K/N chiavi, cioe' circa il 20%
+
+        Su una cache da 100 GB:
+          modulo             ~80 GB di miss improvvisi -> valanga sul database
+          consistent hash    ~20 GB, e distribuiti nel tempo se si scalda il nodo
+      note: >-
+        La differenza non e' di efficienza ma di rischio operativo: col modulo, scalare la
+        cache e' un incidente potenziale, col consistent hashing e' un'operazione ordinaria.
+    - title: Una chiave calda che l'anello non salva
+      language: text
+      code: |
+        Sistema con 20 nodi, nodi virtuali, distribuzione delle chiavi perfetta.
+
+        chiave "post:celebrity:9182"   -> nodo 7
+        4.000 richieste al secondo su quella singola chiave
+        -> il nodo 7 e' saturo, gli altri 19 sono al 5%
+
+        RIMEDI
+        replica         post:celebrity:9182 copiata su 5 nodi
+                        la lettura ne sceglie uno a caso -> 800 req/s ciascuno
+                        costo: 5 copie da invalidare
+        key salting     post:celebrity:9182:{0..9}
+                        scrittura su tutte, lettura su una
+                        costo: invalidazione x10, o aggregato approssimato
+        cache locale    TTL di 1 s in memoria di processo
+                        assorbe quasi tutto: le chiavi bollenti sono poche
+                        costo: fino a 1 s di dato stantio
+      note: >-
+        La cache locale con TTL brevissimo e' la difesa con il miglior rapporto fra
+        efficacia e complessita', ed e' quella che si cita meno spesso al colloquio.
+  trade_offs:
+    - option: Modulo sul numero di nodi
+      pros: Banale da implementare e da spiegare, distribuzione uniforme a N fisso
+      cons: Ogni variazione di N rimescola quasi tutto
+      when: Numero di nodi fisso e noto, o partizionamento logico che non cambia mai
+    - option: Consistent hashing con nodi virtuali
+      pros: Spostamenti limitati a K/N, distribuzione livellata, nodi pesabili
+      cons: Piu' stato da mantenere e da far concordare fra i client, non risolve gli hotspot
+      when: Cache distribuite e datastore in cui i nodi entrano ed escono
+    - option: Partizionamento per intervalli
+      pros: Le query su range restano efficienti, la scansione ordinata e' naturale
+      cons: Hotspot garantiti se la chiave e' temporale o crescente
+      when: Dati interrogati per intervallo (serie storiche, log), con una chiave che non sia il solo timestamp
+  numbers:
+    - "Nodi virtuali per nodo fisico: 100-256 e' l'intervallo usato in pratica; con meno la distribuzione resta sbilanciata"
+    - "Chiavi spostate al variare dei nodi: ~K/N col consistent hashing, ~(1 - 1/N) col modulo"
+    - "Regola 80/20 sui dati caldi: il 20% delle chiavi genera l'80% del traffico, ed e' lì che nascono gli hotspot"
+  interview_answer: >-
+    Il modulo sul numero di nodi lo evito perche' si rompe quando i nodi cambiano: passando da
+    quattro a cinque si sposta quasi ogni chiave, e su una cache significa svuotarla tutta e
+    scaricare il traffico sul database. Col consistent hashing chiavi e nodi stanno sullo stesso
+    anello e si sposta solo l'arco del nodo che entra o esce, in media un K su N. Ci metto sempre
+    i nodi virtuali, un centinaio per nodo fisico, sia per livellare la distribuzione sia perche'
+    quando un nodo cade il suo carico si sparge su molti successori invece di ammazzare il
+    vicino. Poi dico esplicitamente che questo non risolve le chiavi calde: l'anello distribuisce
+    le chiavi, non le richieste, e se un singolo post ha quattromila richieste al secondo quella
+    chiave sta su un nodo solo. Lì replico la chiave, o la spezzo con un suffisso, o metto una
+    cache locale con TTL di un secondo davanti, che e' la soluzione piu' economica.
+  senior_signals:
+    - "Distingue la distribuzione delle chiavi da quella del traffico e nomina gli hotspot da solo"
+    - "Spiega i nodi virtuali con entrambe le motivazioni: livellare e spargere il carico di un nodo caduto"
+    - "Quantifica lo spostamento: K/N contro 1 - 1/N, e ne traduce l'effetto su una cache reale"
+    - "Conosce almeno un'alternativa all'anello (rendezvous, range) e sa quando conviene"
+    - "Propone la cache locale con TTL brevissimo come difesa contro le chiavi bollenti"
+  pitfalls:
+    - "Usare hash % N su una cache e scalarla in ora di punta"
+    - "Implementare l'anello senza nodi virtuali e ritrovarsi nodi con il doppio delle chiavi"
+    - "Pensare che il consistent hashing risolva le chiavi calde: distribuisce le chiavi, non le richieste"
+    - "Partizionare per timestamp e concentrare tutte le scritture di oggi su una partizione"
+    - "Dimenticare che i client devono concordare sulla stessa vista dell'anello, altrimenti cercano la chiave sul nodo sbagliato"
+  follow_ups:
+    - question: Perche' servono i nodi virtuali se l'anello funziona anche senza?
+      answer: >-
+        Per due motivi distinti. Il primo e' statistico: pochi punti su un cerchio non lo
+        dividono in archi uguali, quindi con dieci nodi e un punto ciascuno ci si ritrova
+        con nodi che tengono il doppio delle chiavi di altri. Con cento o duecento punti
+        per nodo la varianza crolla. Il secondo e' sul guasto: senza nodi virtuali, quando
+        un nodo esce tutto il suo carico va al suo unico successore, che puo' cadere a sua
+        volta e innescare una cascata. Con i nodi virtuali quel carico si sparge su molti
+        nodi diversi. In piu' i punti permettono di pesare i nodi secondo la capacita'.
+    - question: Come gestisci una chiave che riceve il 40% del traffico?
+      answer: >-
+        Prima di tutto la riconosco: serve una metrica per chiave, o almeno un
+        campionamento, altrimenti si scopre l'hotspot dal nodo che cade. Poi dipende dal
+        tipo di accesso. Se e' in sola lettura, la difesa piu' efficace e' una cache locale
+        in memoria di processo con TTL di uno o due secondi: le chiavi bollenti sono poche,
+        stanno in RAM, e il TTL breve limita il dato stantio. In alternativa replico la
+        chiave su piu' nodi con un suffisso e leggo da uno a caso. Se c'e' anche scrittura
+        intensa, il salting complica l'invalidazione e spesso la risposta giusta e'
+        strutturale: separare quell'entita' su un suo shard.
+    - question: Che differenza c'e' fra consistent hashing e rendezvous hashing?
+      answer: >-
+        Il risultato e' simile, il meccanismo no. Nel consistent hashing si mantiene un
+        anello con i punti dei nodi e si cerca il successore della chiave; serve tenere e
+        distribuire quella struttura. Nel rendezvous hashing, per ogni chiave si calcola
+        hash(chiave, nodo) per tutti i nodi e si prende il punteggio massimo: nessuna
+        struttura da mantenere, solo la lista dei nodi, e la proprieta' di spostamento
+        minimo vale allo stesso modo. Il costo e' O(numero di nodi) per lookup invece di
+        O(log) sull'anello, quindi conviene quando i nodi sono decine e non migliaia. Con
+        pochi nodi e' piu' semplice da implementare senza sbagliare.
+    - question: Quando il partizionamento per intervalli e' preferibile a quello per hash?
+      answer: >-
+        Quando le query interrogano intervalli. Con l'hash, i record adiacenti finiscono su
+        partizioni diverse, quindi "tutti gli eventi di marzo" o "gli ordini di questo
+        cliente in ordine di data" diventano una scansione di tutte le partizioni. Con gli
+        intervalli quei dati sono contigui e la query tocca una partizione o due. Il prezzo
+        e' l'hotspot: se la chiave e' crescente nel tempo, tutte le scritture nuove vanno
+        sull'ultima partizione. Il compromesso usato in pratica e' una chiave composta che
+        mette davanti qualcosa di distribuito - l'id del tenant, l'id dell'utente - e dopo
+        il timestamp: si distribuiscono le scritture e si mantengono i range per entita'.
+  related: [db-17-sharding-partitioning, cache-21-what-and-where, sd-04-consensus-leader-election, dist-26-load-balancing, cache-25-cache-danger]
+  resources:
+    - title: "Amazon Dynamo paper (consistent hashing e nodi virtuali in pratica)"
+      url: https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf
+      kind: article
+    - title: "Consistent Hashing and Random Trees (paper originale, Karger et al.)"
+      url: https://www.akamai.com/site/en/documents/research-paper/consistent-hashing-and-random-trees-distributed-caching-protocols-for-relieving-hot-spots-on-the-world-wide-web-technical-publication.pdf
+      kind: article
+    - title: "Discord - How Discord stores trillions of messages"
+      url: https://discord.com/blog/how-discord-stores-trillions-of-messages
+      kind: article
+
+- id: sd-06-feed-fanout
+  title: Feed e fan-out, dal timeline al problema del personaggio famoso
+  category: system-design
+  track: technical
+  level: hard
+  tags: [system-design, feed, fanout, scalabilita, letture]
+  estimated_minutes: 40
+  summary: >-
+    Costruire un feed e' il compromesso fra precalcolare al momento della scrittura e
+    assemblare al momento della lettura. La versione pura di entrambe le strategie si
+    rompe, e la domanda vera del colloquio e' dove metti il confine fra le due.
+  deep_dive: |-
+    Il problema e' asimmetrico, ed e' da questa asimmetria che discende tutto. Un utente
+    scrive un post una volta e il suo feed viene letto centinaia di volte; in piu' un post
+    di un utente con dieci milioni di follower deve raggiungere dieci milioni di feed,
+    mentre un post di un utente con dieci follower ne raggiunge dieci. Nessuna strategia
+    uniforme funziona bene su entrambi gli estremi.
+
+    Fan-out on write, o push, precalcola. Quando un utente pubblica, il sistema scrive un
+    riferimento al post nella timeline materializzata di ciascun follower. La lettura
+    diventa banale: una singola query su una lista gia' ordinata, che risponde in
+    millisecondi e si serve benissimo da una cache. Il prezzo lo paga la scrittura: un
+    post con un milione di follower genera un milione di inserimenti, e finche' non sono
+    finiti alcuni follower non vedono il post. Si sposta cosi' la latenza dal percorso
+    critico, quello della lettura, a un percorso asincrono dove e' tollerabile, ma il
+    lavoro totale resta e va gestito con code e worker.
+
+    Fan-out on read, o pull, non precalcola nulla. La timeline si costruisce al momento
+    della richiesta: prendi la lista di chi segui, chiedi a ciascuno i post recenti,
+    unisci, ordini, tagli. La scrittura e' una sola riga, il che rende il sistema semplice
+    e sempre coerente, ma la lettura diventa costosa e proporzionale al numero di persone
+    seguite: chi segue duemila account fa una query che ne tocca duemila. Sulla lettura,
+    cioe' l'operazione piu' frequente, e' il posto sbagliato dove mettere il costo.
+
+    La soluzione usata in pratica e' ibrida, con la soglia decisa sul numero di follower.
+    Per la grande maggioranza degli utenti si fa push, perche' il fan-out e' piccolo e la
+    lettura resta istantanea. Per gli account con un numero enorme di follower - la soglia
+    tipica e' nell'ordine delle decine o centinaia di migliaia - si fa pull: i loro post
+    non vengono scritti in milioni di timeline, e al momento della lettura il feed
+    precalcolato viene unito con i post recenti dei pochi account "grandi" che l'utente
+    segue. Il costo aggiuntivo in lettura e' limitato perche' quegli account sono pochi, e
+    si toglie di mezzo il caso peggiore della scrittura. E' il problema noto come
+    celebrity problem, e proporre l'ibrido prima che l'intervistatore lo solleciti e' uno
+    dei segnali piu' chiari che si e' capito il meccanismo.
+
+    Restano tre dettagli che vengono chiesti subito dopo. La paginazione non va fatta per
+    offset: su un feed che cambia continuamente, pagina 2 con OFFSET 20 salta o duplica
+    elementi perche' nel frattempo sono entrati post nuovi. Serve un cursore basato
+    sull'ultimo elemento visto, tipicamente una coppia timestamp piu' id per rompere i
+    pareggi. Le timeline non si conservano per intero: si tengono le prime centinaia di
+    voci e il resto si ricostruisce al volo, perche' praticamente nessuno scorre oltre.
+    E i feed degli utenti inattivi non vanno materializzati affatto: scrivere in dieci
+    milioni di timeline di cui otto milioni non verranno mai aperte e' la meta' del lavoro
+    buttata, quindi conviene limitare il push agli utenti attivi di recente e ricostruire
+    al primo accesso per gli altri.
+  key_points:
+    - "Il problema e' asimmetrico: si scrive una volta e si legge centinaia di volte, e il fan-out varia di sei ordini di grandezza fra utenti"
+    - "Fan-out on write (push): lettura banale e cachabile, scrittura proporzionale ai follower"
+    - "Fan-out on read (pull): scrittura banale, lettura proporzionale a quanti account si seguono"
+    - "La soluzione reale e' ibrida: push per la maggioranza, pull per gli account con follower enormi, unione in lettura"
+    - "Celebrity problem: un solo post da dieci milioni di follower e' il caso che rompe il push puro"
+    - "Paginazione a cursore (timestamp + id), non a offset: su un feed che cambia l'offset salta e duplica"
+    - "Materializzare solo le prime centinaia di voci e solo per gli utenti attivi: il resto si ricostruisce al volo"
+  examples:
+    - title: Il conto che porta all'ibrido
+      language: text
+      code: |
+        Utente medio: 200 follower
+          push -> 200 inserimenti per post, trascurabile
+          lettura: 1 query su lista ordinata, ~1 ms
+
+        Account con 10.000.000 follower, 20 post al giorno
+          push -> 200.000.000 inserimenti al giorno
+                  ~2.300 al secondo di media, e arrivano a raffica
+          lettura: sempre 1 query
+
+        IBRIDO, soglia a 100.000 follower
+          push  per il 99,9% degli account
+          pull  per gli account oltre soglia (poche migliaia in tutto il sistema)
+          lettura = timeline materializzata UNION post recenti dei "grandi" seguiti
+                    un utente segue in media 3-5 account grandi -> 3-5 query extra
+      note: >-
+        La soglia non e' un numero sacro: si sceglie guardando dove il costo di scrittura
+        supera quello delle query extra in lettura, e si tara in produzione.
+    - title: Paginazione a cursore, e perche' l'offset e' rotto
+      language: text
+      code: |
+        OFFSET (rotto su un feed che cambia)
+          pagina 1: SELECT ... ORDER BY created_at DESC LIMIT 20 OFFSET 0
+          [arrivano 3 post nuovi]
+          pagina 2: ... LIMIT 20 OFFSET 20
+          -> gli ultimi 3 della pagina 1 ricompaiono nella pagina 2
+
+        CURSORE (corretto)
+          pagina 1: SELECT ... ORDER BY created_at DESC, id DESC LIMIT 20
+                    ultimo elemento -> (created_at=T, id=X)
+          pagina 2: SELECT ... WHERE (created_at, id) < (T, X)
+                    ORDER BY created_at DESC, id DESC LIMIT 20
+          -> i post nuovi entrano sopra, la paginazione non se ne accorge
+
+        L'id nella chiave serve a rompere i pareggi: due post nello stesso
+        millisecondo senza id darebbero un ordine instabile.
+      note: >-
+        E' lo stesso ragionamento di db-16-pagination, ma qui e' obbligatorio e non
+        consigliato: su un feed la tabella cambia fra due richieste della stessa sessione.
+  trade_offs:
+    - option: Fan-out on write puro
+      pros: Lettura in un accesso, latenza minima, si serve da cache
+      cons: Il caso peggiore in scrittura e' devastante, ritardo di propagazione, lavoro sprecato sugli utenti inattivi
+      when: Sistemi dove nessun account ha un numero enorme di follower (team, aziende, gruppi chiusi)
+    - option: Fan-out on read puro
+      pros: Scrittura banale, nessuna duplicazione, sempre coerente
+      cons: Lettura costosa e proporzionale a quanti account si seguono, difficile da cachare
+      when: Prototipi, sistemi con pochi utenti, o feed consultati raramente
+    - option: Ibrido con soglia sui follower
+      pros: Toglie entrambi i casi peggiori, e' cio' che usano i sistemi reali
+      cons: Due percorsi da mantenere e da testare, la soglia va tarata
+      when: Qualunque feed pubblico con distribuzione dei follower a coda lunga
+  numbers:
+    - "Rapporto lettura/scrittura su un feed: tipicamente fra 50:1 e 1000:1, ed e' il motivo per cui il costo va spostato sulla scrittura"
+    - "Voci di timeline da materializzare: 200-800 bastano, oltre la prima o seconda schermata quasi nessuno scorre"
+    - "Soglia tipica per passare a pull: fra 10.000 e 100.000 follower, da tarare sul costo reale di scrittura"
+  interview_answer: >-
+    Parto dall'asimmetria: un post si scrive una volta e il feed si legge centinaia di volte,
+    quindi il costo va spostato sulla scrittura. Quindi fan-out on write: quando pubblichi,
+    scrivo un riferimento nelle timeline dei tuoi follower, e la lettura diventa una query su
+    una lista gia' ordinata. Poi dico subito dove si rompe, perche' e' la parte interessante: un
+    account con dieci milioni di follower genera dieci milioni di inserimenti per post. Per
+    quelli passo a pull, cioe' non materializzo niente e al momento della lettura unisco la
+    timeline precalcolata con i post recenti dei pochi account grandi che l'utente segue. La
+    soglia la taro sui follower. Aggiungo due cose che si dimenticano: la paginazione deve essere
+    a cursore e non a offset, perche' su un feed che cambia l'offset duplica elementi, e le
+    timeline le materializzo solo per gli utenti attivi di recente, altrimenti precalcolo feed
+    che nessuno aprira'.
+  senior_signals:
+    - "Solleva il celebrity problem da solo, prima che glielo chiedano"
+    - "Parte dall'asimmetria lettura/scrittura per giustificare la scelta, non dalla tecnologia"
+    - "Sa che la paginazione a offset e' scorretta su una lista che cambia, e propone il cursore con il tie-break sull'id"
+    - "Limita la materializzazione agli utenti attivi e alle prime centinaia di voci"
+    - "Tara la soglia dell'ibrido su un conto, non su un numero tirato a caso"
+  pitfalls:
+    - "Proporre fan-out on write puro e non accorgersi del caso da dieci milioni di follower"
+    - "Paginare con LIMIT e OFFSET su un feed: duplica e salta elementi fra una pagina e l'altra"
+    - "Materializzare timeline complete e illimitate, riempiendo lo storage di dati che nessuno leggera'"
+    - "Fare fan-out sincrono nella richiesta di pubblicazione invece di metterlo in coda"
+    - "Ordinare solo per timestamp senza tie-break: due post nello stesso istante danno un ordine instabile fra le pagine"
+  follow_ups:
+    - question: Dove metti la soglia fra push e pull, e come la scegli?
+      answer: >-
+        La scelgo confrontando due costi. Da un lato il costo di scrittura del push, che e'
+        il numero di follower per la frequenza di pubblicazione; dall'altro il costo
+        aggiuntivo in lettura del pull, che e' una query in piu' per ogni account grande
+        seguito, moltiplicata per le letture del feed. La soglia sta dove il primo supera
+        il secondo, e in pratica finisce fra le decine e le centinaia di migliaia di
+        follower. Non e' un numero da decidere a tavolino: lo si mette configurabile e lo
+        si taram guardando la latenza di pubblicazione e quella di lettura in produzione.
+    - question: Come gestisci il ritardo di propagazione del fan-out asincrono?
+      answer: >-
+        Prima di tutto lo rendo invisibile all'autore: chi pubblica deve rivedere il proprio
+        post immediatamente, quindi lo inserisco in modo sincrono nella sua timeline e lascio
+        asincrono il resto. E' read-your-writes applicato al feed. Poi lavoro sull'ordine di
+        propagazione: si scrive prima nelle timeline degli utenti attivi in questo momento e
+        poi negli altri, cosi' il ritardo cade dove nessuno lo nota. Infine monitoro il
+        ritardo della coda come metrica di prodotto, non solo di sistema: se il fan-out
+        accumula minuti, gli utenti percepiscono un feed rotto anche se nulla e' fallito.
+    - question: Come ordini un feed che non e' puramente cronologico?
+      answer: >-
+        Separo il recupero dal punteggio. Il fan-out mi da' l'insieme dei candidati, in
+        genere qualche centinaio di elementi recenti; il ranking e' uno strato sopra che
+        assegna un punteggio con i segnali che ho - affinita' con l'autore, tipo di
+        contenuto, freschezza, interazioni. Il punto architetturale e' che il ranking non
+        deve stare nel percorso di scrittura, altrimenti ogni cambio di modello richiede di
+        ricalcolare tutte le timeline. Se il punteggio dipende dall'utente che legge, deve
+        essere calcolato in lettura sui candidati, ed e' qui che serve un limite duro al
+        numero di candidati per tenere la latenza sotto controllo.
+    - question: Che cosa fai quando un utente segue un nuovo account?
+      answer: >-
+        Nel modello push la timeline materializzata non contiene i post passati di
+        quell'account, quindi ho due opzioni. La piu' semplice e' non fare nulla: la
+        timeline si popola con i post futuri, e l'utente vede il nuovo account comparire
+        man mano. Se invece si vuole un effetto immediato, si fa un backfill limitato -
+        gli ultimi venti o cinquanta post di quell'account uniti nella timeline - in
+        asincrono. Il backfill completo non si fa mai: su un account con anni di storia
+        significa riscrivere la timeline, e il valore per l'utente e' nullo oltre le prime
+        schermate. Simmetricamente, quando si smette di seguire, non serve ripulire la
+        timeline: si filtra in lettura.
+  related: [sd-07-full-text-search, cache-21-what-and-where, db-16-pagination, dist-30-message-queues, sd-05-consistent-hashing]
+  resources:
+    - title: "Designing Data-Intensive Applications, capitolo 1 (l'esempio del timeline di Twitter)"
+      url: https://dataintensive.net/
+      kind: book
+    - title: "Instagram Engineering - Sharding & IDs"
+      url: https://instagram-engineering.com/sharding-ids-at-instagram-1cf5a71e5a5c
+      kind: article
+
+- id: sd-07-full-text-search
+  title: Ricerca full-text, indice inverso e rilevanza
+  category: system-design
+  track: technical
+  level: hard
+  tags: [system-design, ricerca, elasticsearch, indice, rilevanza]
+  estimated_minutes: 40
+  summary: >-
+    Appena in un disegno compare "l'utente cerca", il LIKE '%parola%' non basta piu'. La
+    struttura che serve e' l'indice inverso, e le decisioni che l'intervistatore vuole
+    sentire riguardano l'analisi del testo, la rilevanza e come l'indice resta aggiornato.
+  deep_dive: |-
+    Un indice di database normale, un B-tree, e' ordinato per valore: serve a trovare
+    l'uguaglianza o un intervallo, ed e' per questo che accelera WHERE email = ... ma non
+    fa nulla per WHERE descrizione LIKE '%spedizione%'. Quel LIKE con il carattere jolly
+    iniziale non puo' usare l'indice e diventa una scansione completa: su un milione di
+    righe e' un secondo, su cento milioni e' fuori discussione.
+
+    La struttura giusta e' l'indice inverso, che ribalta la relazione. Invece di
+    documento -> testo, tiene termine -> lista dei documenti che lo contengono, la posting
+    list. Cercare "spedizione gratuita" diventa prendere due posting list e intersecarle,
+    che e' un'operazione su liste ordinate di interi, non una scansione di testo. Il costo
+    scala con il numero di documenti che contengono i termini cercati, non con la
+    dimensione della collezione, ed e' questa la ragione per cui funziona.
+
+    Il punto in cui si vince o si perde e' l'analisi del testo, cioe' cosa finisce nelle
+    chiavi dell'indice. Il testo viene tokenizzato, normalizzato in minuscolo, ripulito
+    dagli accenti, privato delle stopword e ridotto alla radice con stemming o
+    lemmatizzazione, in modo che "spedizioni" e "spedizione" cadano sullo stesso termine.
+    Questa catena va applicata identica in indicizzazione e in interrogazione, altrimenti
+    la query cerca una chiave che l'indice non contiene: e' l'errore piu' frequente e si
+    manifesta come "la ricerca non trova niente" senza nessun errore nei log. La catena e'
+    anche dipendente dalla lingua, perche' lo stemming italiano non e' quello inglese, e
+    su un corpus misto serve decidere come rilevare la lingua o indicizzare in piu' campi.
+
+    Trovare i documenti non basta: bisogna ordinarli. La rilevanza classica e' TF-IDF, e
+    la sua evoluzione BM25 e' il default di Lucene e quindi di Elasticsearch e OpenSearch.
+    L'idea e' che un termine conta di piu' se compare spesso nel documento, di meno se
+    compare in molti documenti della collezione, e che i documenti lunghi vanno normalizzati
+    per non essere premiati solo per la lunghezza. Sopra questa base si aggiungono i segnali
+    di dominio, che nella pratica contano quanto la rilevanza testuale: la popolarita', la
+    disponibilita' di un prodotto, la data. Dirlo e' importante, perche' in un sistema
+    reale il miglior risultato testuale non e' quasi mai il miglior risultato per l'utente.
+
+    Il tratto architetturale da tenere presente e' che un motore di ricerca non e' la
+    sorgente di verita'. E' un indice derivato, alimentato dal database tramite eventi o
+    change data capture, e va trattato come tale: ricostruibile da zero, eventualmente
+    stantio, mai l'unico posto dove un dato esiste. Il ritardo e' intrinseco: Lucene scrive
+    segmenti immutabili e li rende visibili a intervalli - il refresh di Elasticsearch e'
+    di un secondo per default - quindi "cerca e trova subito quello che hai appena salvato"
+    e' una richiesta che va negoziata, non data per scontata. Fare l'indicizzazione in modo
+    sincrono nella richiesta di scrittura e' l'errore corrispondente: lega la disponibilita'
+    delle scritture a quella del motore di ricerca, che e' il componente che si vuole poter
+    perdere senza conseguenze.
+  key_points:
+    - "LIKE '%x%' non usa il B-tree e diventa una scansione completa: e' il momento in cui serve un indice inverso"
+    - "Indice inverso: termine -> posting list dei documenti; la ricerca diventa intersezione di liste ordinate"
+    - "Il costo scala con i documenti che contengono i termini, non con la dimensione della collezione"
+    - "La catena di analisi (tokenizzazione, minuscolo, stopword, stemming) deve essere identica in indicizzazione e in query"
+    - "La rilevanza e' BM25 (evoluzione di TF-IDF) piu' i segnali di dominio: popolarita', disponibilita', freschezza"
+    - "Il motore di ricerca e' un indice derivato, non la sorgente di verita': ricostruibile e per sua natura in ritardo"
+    - "Il refresh di default in Elasticsearch e' 1 secondo: la ricerca e' near-real-time, non real-time"
+    - "Non indicizzare in modo sincrono nella richiesta: legherebbe le scritture alla disponibilita' del motore"
+  examples:
+    - title: L'indice inverso in tre righe
+      language: text
+      code: |
+        DOCUMENTI
+          d1: "Spedizione gratuita in Italia"
+          d2: "Spedizioni internazionali a pagamento"
+          d3: "Reso gratuito entro 30 giorni"
+
+        ANALISI (minuscolo, stopword via, stemming italiano)
+          d1 -> [spedizion, gratuit, itali]
+          d2 -> [spedizion, internazional, pagament]
+          d3 -> [res, gratuit, giorn]
+
+        INDICE INVERSO
+          spedizion      -> [d1, d2]
+          gratuit        -> [d1, d3]
+          internazional  -> [d2]
+
+        QUERY "spedizioni gratuite" -> analizzata in [spedizion, gratuit]
+          intersezione [d1,d2] n [d1,d3] = [d1]
+          nota: la query non conteneva nessuna delle parole esatte dei documenti,
+          e trova comunque, perche' entrambe passano dalla stessa analisi.
+      note: >-
+        Se l'analisi in query fosse diversa da quella in indicizzazione - per esempio senza
+        stemming - il termine cercato sarebbe "spedizioni" e l'indice non lo contiene:
+        zero risultati, nessun errore.
+    - title: Quando il miglior risultato testuale e' il risultato sbagliato
+      language: text
+      code: |
+        Query: "iphone"   (e-commerce)
+
+        Solo BM25
+          1. "Cover per iPhone, iPhone, iPhone compatibile"   <- keyword stuffing
+          2. "Recensione: iPhone contro Android"              <- articolo, non vendibile
+          3. "iPhone 15 Pro"                                  <- quello che l'utente vuole
+
+        BM25 + segnali di dominio
+          punteggio = 0,5 * bm25
+                    + 0,2 * log(vendite_30gg)
+                    + 0,2 * disponibile_in_magazzino
+                    + 0,1 * freschezza
+          1. "iPhone 15 Pro"
+          2. "iPhone 15"
+          3. "Cover per iPhone"
+      note: >-
+        I pesi non si indovinano: si misurano sul comportamento reale (click, conversioni)
+        e si cambiano con un test A/B. Ma va detto al colloquio che esistono, altrimenti
+        sembra che la ricerca finisca con BM25.
+  trade_offs:
+    - option: Full-text del database relazionale (tsvector di Postgres, FULLTEXT di MySQL)
+      pros: Nessun sistema in piu', transazionale con i dati, nessun problema di sincronizzazione
+      cons: Rilevanza e analisi meno ricche, scala verticalmente, pesa sul database di produzione
+      when: "Fino a milioni di documenti e requisiti di ricerca ordinari: e' la scelta giusta piu' spesso di quanto si ammetta"
+    - option: Motore dedicato (Elasticsearch, OpenSearch, Solr)
+      pros: Analisi per lingua, rilevanza configurabile, aggregazioni, faccette, scala orizzontale
+      cons: Un sistema distribuito in piu', pipeline di sincronizzazione, dati in ritardo e ricostruibili
+      when: Decine di milioni di documenti, faccette, rilevanza da tarare, o la ricerca e' il prodotto
+    - option: Ricerca vettoriale o ibrida
+      pros: Trova per significato anche senza parole in comune, gestisce sinonimi e parafrasi
+      cons: Costo di calcolo degli embedding, meno prevedibile, difficile da spiegare a chi si lamenta di un risultato
+      when: Come complemento a BM25, non in sostituzione, quando le query sono in linguaggio naturale
+  numbers:
+    - "Refresh di default in Elasticsearch: 1 secondo. Alzarlo a 30 s aumenta sensibilmente il throughput di indicizzazione in un bulk load"
+    - "LIKE '%x%' su una tabella: scansione completa, quindi lineare nei byte della colonna, non nei documenti che contengono il termine"
+    - "Un indice inverso occupa tipicamente dal 20% al 100% della dimensione del testo originale, secondo cosa si memorizza (posizioni, offset)"
+  interview_answer: >-
+    Appena la ricerca e' su testo libero smetto di ragionare con il LIKE, perche' con il jolly
+    davanti l'indice non si usa e diventa una scansione completa. Serve un indice inverso, cioe'
+    ribaltare la relazione e tenere termine verso lista dei documenti: la query diventa
+    l'intersezione di due liste ordinate di interi e il costo scala con i documenti che contengono
+    i termini, non con la collezione. La parte dove si sbaglia davvero e' l'analisi del testo: la
+    catena di tokenizzazione, minuscolo, stopword e stemming deve essere identica quando indicizzo
+    e quando cerco, altrimenti cerco una chiave che nell'indice non c'e' e ottengo zero risultati
+    senza nessun errore. Per l'ordinamento parto da BM25 e ci sommo i segnali di dominio, perche'
+    il miglior risultato testuale su un e-commerce e' spesso la cover e non il telefono. E tratto
+    il motore come un indice derivato, alimentato da eventi, ricostruibile e in ritardo di circa
+    un secondo, non come la sorgente di verita'.
+  senior_signals:
+    - "Dice che la catena di analisi va applicata identica in indicizzazione e in query, e sa che l'errore e' silenzioso"
+    - "Tratta il motore come indice derivato e ricostruibile, non come database"
+    - "Nomina BM25 e aggiunge i segnali di dominio invece di fermarsi alla rilevanza testuale"
+    - "Sa che la ricerca e' near-real-time e negozia il requisito 'trovo subito cio' che ho salvato'"
+    - "Considera seriamente il full-text del database prima di introdurre Elasticsearch"
+  pitfalls:
+    - "Introdurre Elasticsearch per centomila documenti, quando tsvector di Postgres basterebbe"
+    - "Analisi diversa fra indicizzazione e query: zero risultati, nessun errore, ore di debug"
+    - "Indicizzare in modo sincrono dentro la richiesta di scrittura e legare le scritture al motore di ricerca"
+    - "Usare il motore di ricerca come sorgente di verita' e non avere modo di ricostruire l'indice"
+    - "Promettere che un documento e' cercabile immediatamente dopo il salvataggio"
+    - "Fermarsi a BM25 e stupirsi che i risultati piu' rilevanti non siano quelli che l'utente vuole"
+  follow_ups:
+    - question: Perche' LIKE '%parola%' non puo' usare un indice?
+      answer: >-
+        Perche' un B-tree e' ordinato sul valore della colonna a partire dal primo
+        carattere, quindi permette di trovare rapidamente cio' che comincia con un certo
+        prefisso ma non cio' che contiene una sottostringa in posizione qualsiasi. Con il
+        jolly solo a destra, LIKE 'parola%', l'indice si usa, perche' e' una ricerca per
+        prefisso; con il jolly a sinistra non c'e' ordine che aiuti e il database deve
+        guardare ogni riga. Le vie d'uscita nel mondo relazionale sono un indice trigram,
+        che indicizza gruppi di tre caratteri, oppure un indice full-text vero, che e' un
+        indice inverso costruito dentro il database.
+    - question: Come tieni sincronizzato l'indice con il database?
+      answer: >-
+        Con un flusso asincrono, mai con una doppia scrittura sincrona. Le due strade sono
+        pubblicare un evento di dominio quando il dato cambia e farlo consumare da un
+        indicizzatore, oppure leggere il log delle transazioni con change data capture,
+        tipo Debezium, che ha il vantaggio di non poter perdere modifiche fatte fuori
+        dall'applicazione. In entrambi i casi l'indicizzatore deve essere idempotente,
+        perche' gli eventi arrivano almeno una volta, e le operazioni vanno applicate con
+        una versione del documento per non far vincere un aggiornamento vecchio arrivato
+        in ritardo. E serve un reindex completo eseguibile su richiesta, perche' prima o
+        poi l'indice va ricostruito.
+    - question: Cosa risponderesti a "i risultati non sono buoni" senza altri dettagli?
+      answer: >-
+        Chiederei di separare i due problemi possibili, perche' le cure sono opposte. Se i
+        documenti giusti non compaiono affatto e' un problema di recupero, quindi guardo
+        l'analisi del testo, i sinonimi, gli errori di battitura e i campi interrogati. Se
+        i documenti giusti ci sono ma in fondo e' un problema di ordinamento, quindi guardo
+        i pesi dei campi, i segnali di dominio e la normalizzazione sulla lunghezza. Poi
+        chiederei le query reali che non funzionano: senza un campione di query e dei
+        risultati attesi non si migliora la rilevanza, si tirano a caso dei pesi. La
+        misura si fa con metriche come nDCG su un set giudicato, o con i click in
+        produzione.
+    - question: Quando conviene la ricerca vettoriale invece di BM25?
+      answer: >-
+        Come aggiunta, raramente in sostituzione. BM25 fa una cosa che i vettori fanno male,
+        cioe' trovare esattamente quel codice prodotto o quella sigla, ed e' prevedibile e
+        spiegabile. I vettori fanno una cosa che BM25 non puo' fare, cioe' trovare per
+        significato quando la query e il documento non condividono nessuna parola. Per
+        questo in pratica si usa un approccio ibrido: si recuperano candidati con entrambi i
+        metodi e si fondono i punteggi. Vale la pena introdurlo quando le query sono in
+        linguaggio naturale e lunghe; per una barra di ricerca su un catalogo, BM25 con
+        buoni sinonimi e la tolleranza agli errori di battitura porta piu' lontano con meno
+        costi.
+  related: [sd-06-feed-fanout, db-12-indexes, rel-35-event-driven, sd-10-batch-vs-streaming, cache-21-what-and-where]
+  resources:
+    - title: "Elasticsearch - Analysis e text analyzers"
+      url: https://www.elastic.co/guide/en/elasticsearch/reference/current/analysis.html
+      kind: doc
+    - title: "Introduction to Information Retrieval (Manning, Raghavan, Schutze)"
+      url: https://nlp.stanford.edu/IR-book/
+      kind: book
+    - title: "PostgreSQL - Full Text Search"
+      url: https://www.postgresql.org/docs/current/textsearch.html
+      kind: doc
+
+- id: sd-08-multi-region
+  title: Multi-region, failover e residenza dei dati
+  category: system-design
+  track: technical
+  level: hard
+  tags: [system-design, multi-region, disaster-recovery, latenza, gdpr]
+  estimated_minutes: 45
+  summary: >-
+    Distribuire su piu' regioni si fa per tre motivi diversi - latenza, continuita' in caso
+    di disastro, obblighi normativi - e ognuno porta a un'architettura diversa. Confonderli
+    e' il modo piu' rapido per pagare il costo di tutti e tre senza ottenerne nessuno.
+  deep_dive: |-
+    La prima domanda da fare e' perche'. Se il motivo e' la latenza per utenti sparsi nel
+    mondo, spesso non serve replicare i dati: bastano una CDN per il contenuto statico e
+    dei punti di terminazione vicini agli utenti, perche' gran parte del tempo percepito e'
+    handshake TLS e round trip, non calcolo. Se il motivo e' sopravvivere alla perdita di
+    una regione, serve una copia dei dati altrove e un piano di failover provato. Se il
+    motivo e' normativo - dati di cittadini europei che non devono uscire dall'Unione -
+    allora non serve replica ma partizionamento geografico, che e' l'opposto: ogni regione
+    tiene i propri dati e non li condivide. Rispondere "multi-region" senza dire quale dei
+    tre problemi si sta risolvendo e' il segnale che non si e' capita la domanda.
+
+    Il vincolo fisico da cui non si scappa e' la velocita' della luce. Fra Europa e Stati
+    Uniti il round trip e' intorno agli 80-100 millisecondi, e nessuna ottimizzazione lo
+    riduce. Ne segue che una scrittura che deve essere confermata in modo sincrono da un'altra
+    regione costa almeno quel tempo, su ogni richiesta. Per questo le architetture
+    cross-region serie sono quasi sempre asincrone nella replica dei dati, e accettano di
+    perdere le ultime scritture in caso di failover improvviso.
+
+    Active-passive e' il modello piu' semplice e il piu' usato. Una regione serve tutto il
+    traffico e replica in modo asincrono verso una seconda, che sta ferma. In caso di
+    disastro si promuove la seconda. I due numeri che descrivono questa scelta sono l'RPO,
+    quanti dati si e' disposti a perdere, e l'RTO, quanto si e' disposti a restare fermi:
+    con replica asincrona l'RPO e' il ritardo di replica, secondi o minuti, e l'RTO dipende
+    quasi interamente da quanto e' automatizzata la promozione. Il rischio vero di questo
+    modello non e' tecnico ma organizzativo: il failover non provato non funziona. Una
+    regione passiva che non ha mai servito traffico reale nasconde configurazioni sbagliate,
+    quote non alzate, certificati scaduti, e lo si scopre nel momento peggiore.
+
+    Active-active serve traffico da entrambe le regioni, e il problema diventa la scrittura
+    concorrente sullo stesso dato da due posti. Le strategie sono tre, e vanno nominate
+    distintamente. La prima e' evitare il conflitto per costruzione, assegnando a ogni
+    entita' una regione proprietaria - si scrive solo lì, si legge ovunque - che copre la
+    maggioranza dei casi reali, perche' un utente sta quasi sempre nella stessa regione. La
+    seconda e' risolvere il conflitto quando accade, con last-write-wins se si accetta di
+    perdere una scrittura, o con strutture che convergono come i CRDT per contatori e
+    insiemi. La terza e' pagare il consenso cross-region e i suoi cento millisecondi, che
+    ha senso solo su pochi dati critici.
+
+    Restano i pezzi che si dimenticano e che affondano i progetti multi-region. Il database
+    e' la parte visibile, ma anche cache, code, ricerca e file storage vanno replicati o
+    resi regionali, e ognuno ha le sue regole. Il DNS e' spesso il punto di failover e ha
+    una granularita' grossolana: i TTL vengono ignorati da molti resolver, quindi il
+    passaggio non e' istantaneo. E il costo del traffico fra regioni e' una voce reale
+    nella bolletta cloud, che cresce con la chiacchiera fra servizi, non con i dati utili.
+  key_points:
+    - "Prima chiarire il perche': latenza, continuita' in caso di disastro o obbligo normativo portano ad architetture diverse"
+    - "Per la sola latenza spesso basta una CDN e la terminazione vicina, senza replicare i dati"
+    - "Il round trip Europa-Stati Uniti e' 80-100 ms: una scrittura sincrona cross-region lo paga sempre"
+    - "Active-passive: replica asincrona, si descrive con RPO (dati persi) e RTO (tempo di ripristino)"
+    - "Un failover mai provato non funziona: la regione passiva nasconde configurazioni sbagliate"
+    - "Active-active: evitare i conflitti con una regione proprietaria per entita' e' piu' economico che risolverli"
+    - "Il requisito normativo non chiede replica ma partizionamento geografico: i dati restano nella loro regione"
+    - "Non solo il database: cache, code, ricerca, file e DNS vanno pensati regione per regione"
+  examples:
+    - title: I tre motivi, e cosa costruisci per ciascuno
+      language: text
+      code: |
+        MOTIVO: latenza per utenti globali
+          CDN per statici + terminazione TLS vicina + cache ai bordi
+          dati: restano in una regione sola
+          costo: "basso        complessita': bassa"
+
+        MOTIVO: sopravvivere alla perdita di una regione
+          active-passive, replica asincrona, failover automatizzato e PROVATO
+          RPO: secondi-minuti  RTO: minuti
+          costo: "~1,6x         complessita': media (sta tutta nel provare il failover)"
+
+        MOTIVO: obblighi normativi (GDPR, dati sanitari)
+          partizionamento geografico: EU in EU, US in US, niente replica incrociata
+          il routing avviene sull'identita' del tenant, non sulla vicinanza
+          costo: "~2x           complessita': alta (ogni sistema va reso regionale)"
+
+        L'errore: chiedere "vogliamo il multi-region" e costruire il terzo
+        quando il problema era il primo.
+      note: >-
+        I tre non si sommano gratuitamente: si puo' costruire un sistema che li copre tutti,
+        ma va detto che e' il caso piu' costoso, non il default.
+    - title: Evitare i conflitti invece di risolverli
+      language: text
+      code: |
+        ACTIVE-ACTIVE con regione proprietaria per entita'
+
+          utente 4711  home_region = eu-west
+            scritture  -> instradate a eu-west, sempre
+            letture    -> replica locale in qualunque regione
+
+          nessun conflitto possibile: una sola regione scrive quel record
+
+          se l'utente viaggia negli Stati Uniti:
+            letture    veloci dalla replica locale
+            scritture  ~90 ms verso eu-west  <- accettabile: sono poche
+            oppure     si migra la home_region, con una procedura esplicita
+
+        CONFRONTO: active-active simmetrico
+          entrambe le regioni scrivono lo stesso record
+          servono last-write-wins (perde dati) o CRDT (solo alcuni tipi)
+          oppure consenso cross-region (+100 ms su ogni scrittura)
+      note: >-
+        Nella stragrande maggioranza dei sistemi reali gli utenti sono stabili
+        geograficamente: la regione proprietaria elimina il problema invece di risolverlo,
+        ed e' la risposta da dare per prima.
+  trade_offs:
+    - option: Regione singola, CDN per la latenza
+      pros: Nessuna complessita' distribuita, costo minimo, consistenza semplice
+      cons: La perdita della regione e' un fermo totale, nessuna copertura normativa
+      when: Default fino a che non esiste un requisito esplicito di continuita' o di residenza
+    - option: Active-passive con replica asincrona
+      pros: Continuita' reale a costo contenuto, nessun conflitto di scrittura
+      cons: RPO diverso da zero, e il failover va provato periodicamente o non funziona
+      when: Esiste un requisito di continuita' con tolleranza di minuti e di qualche scrittura persa
+    - option: Active-active con regione proprietaria per entita'
+      pros: Traffico servito localmente, nessun conflitto per costruzione, failover gia' rodato
+      cons: Instradamento da gestire, migrazione della regione proprietaria non banale
+      when: Utenti distribuiti e stabili geograficamente, scritture concentrate per entita'
+    - option: Consenso sincrono cross-region
+      pros: Consistenza forte globale, nessuna perdita di dati al failover
+      cons: 100 ms o piu' su ogni scrittura, e l'indisponibilita' di una regione puo' bloccare tutto
+      when: Solo su pochi dati dove la perdita e' inaccettabile, mai come default del sistema
+  numbers:
+    - "Round trip: dentro una regione meno di 1 ms, Europa-Stati Uniti 80-100 ms, Europa-Asia 150-250 ms"
+    - "RPO con replica asincrona: tipicamente secondi, ma sotto carico o durante una congestione puo' diventare minuti"
+    - "Il traffico fra regioni si paga a GB e non e' trascurabile: e' spesso la sorpresa piu' grossa nella prima bolletta multi-region"
+  interview_answer: >-
+    La prima cosa che chiedo e' perche', perche' i tre motivi portano a sistemi diversi. Se e'
+    latenza per utenti globali, spesso non replico niente: metto una CDN e termino vicino
+    all'utente, visto che il tempo se ne va in round trip e non in calcolo. Se e' continuita' in
+    caso di disastro, faccio active-passive con replica asincrona e ragiono in termini di RPO e
+    RTO, sapendo che con l'asincrona qualche secondo di scritture lo perdo; e insisto sul provare
+    il failover periodicamente, perche' una regione passiva mai usata nasconde sempre qualcosa. Se
+    e' un obbligo normativo non e' replica ma partizionamento: i dati europei restano in Europa e
+    non si replicano altrove. Se serve davvero active-active, la mia prima mossa e' evitare i
+    conflitti invece di risolverli, assegnando a ogni utente una regione proprietaria in cui si
+    scrive: gli utenti sono stabili geograficamente e questo copre quasi tutti i casi senza
+    pagare il consenso cross-region.
+  senior_signals:
+    - "Chiede il perche' e distingue i tre motivi prima di proporre un'architettura"
+    - "Sa che il round trip intercontinentale e' un vincolo fisico e ne deduce che la replica va asincrona"
+    - "Parla di RPO e RTO come numeri da concordare, non come sigle"
+    - "Insiste sul provare il failover, e cita cosa si rompe in una regione passiva mai esercitata"
+    - "Propone la regione proprietaria per entita' prima di parlare di risoluzione dei conflitti"
+    - "Ricorda che anche cache, code, ricerca e DNS vanno resi regionali, non solo il database"
+  pitfalls:
+    - "Dire 'multi-region' senza chiarire se il problema e' latenza, continuita' o conformita'"
+    - "Progettare scritture sincrone cross-region e scoprire i 100 ms in produzione"
+    - "Avere una regione passiva mai provata: al momento del failover mancano quote, certificati o configurazioni"
+    - "Usare last-write-wins su orologi non sincronizzati e perdere scritture in silenzio"
+    - "Replicare i dati europei fuori dall'Unione quando il requisito chiedeva esattamente il contrario"
+    - "Contare solo il database e dimenticare cache, code e ricerca, che al failover restano nella vecchia regione"
+  follow_ups:
+    - question: Che differenza c'e' fra RPO e RTO, e come li useresti per decidere?
+      answer: >-
+        L'RPO e' quanti dati sei disposto a perdere, misurato in tempo: un RPO di trenta
+        secondi significa che in caso di disastro le ultime scritture di trenta secondi
+        possono sparire. L'RTO e' quanto tempo puoi restare fermo prima che il servizio
+        torni. Li uso come vincoli da farmi dare dal business, non come scelte tecniche: un
+        RPO di zero impone replica sincrona e quindi latenza su ogni scrittura, mentre un
+        RPO di cinque minuti si copre con backup e replica asincrona a costo molto minore.
+        Quasi sempre, messi davanti al prezzo, i requisiti si rilassano da soli, ed e' una
+        conversazione che conviene avere prima di costruire.
+    - question: Perche' il DNS e' un punto delicato durante un failover?
+      answer: >-
+        Perche' la sua granularita' di cambiamento e' grossolana e non e' sotto il tuo
+        controllo. Puoi abbassare il TTL a sessanta secondi, ma molti resolver intermedi e
+        alcuni client lo ignorano e continuano a usare il vecchio indirizzo per molto piu'
+        tempo, quindi durante il passaggio ti ritrovi con una parte del traffico che va
+        ancora sulla regione morta. Le alternative sono spostare la decisione piu' in alto,
+        con un anycast o un load balancer globale che fa il failover a livello di rete
+        senza cambiare il nome, oppure progettare l'applicazione perche' tolleri di ricevere
+        traffico su entrambe le regioni durante la transizione, che e' comunque una buona
+        idea.
+    - question: Come gestisci i dati che per legge non possono uscire da una regione?
+      answer: >-
+        Come partizionamento, non come replica. Ogni tenant o utente ha una regione di
+        residenza decisa alla registrazione, e tutto cio' che lo riguarda - database, backup,
+        log, cache, coda, indice di ricerca - vive lì. L'instradamento avviene sull'identita',
+        quindi serve un livello che sappia risolvere utente verso regione senza consultare
+        dati regionali, tipicamente una mappa globale che contiene solo l'identificativo e la
+        regione, niente dati personali. La parte difficile non e' il database ma tutto il
+        resto: i log applicativi e le metriche sono il posto dove i dati personali escono
+        dalla regione senza che nessuno se ne accorga.
+    - question: Vale la pena fare active-active se il traffico e' concentrato in Europa?
+      answer: >-
+        Quasi mai. Se gli utenti sono in Europa, il beneficio di latenza di una seconda
+        regione attiva e' nullo, e resta solo il costo: instradamento, conflitti, traffico
+        fra regioni, doppia complessita' operativa. Se il requisito e' la continuita', la
+        risposta e' active-passive verso una seconda regione europea, che costa molto meno e
+        risolve lo stesso problema. Active-active si giustifica quando il traffico e'
+        davvero distribuito e la latenza percepita conta, oppure quando l'RTO richiesto e'
+        cosi' basso da non lasciare tempo per una promozione.
+  related: [sd-03-consistency-models, sd-04-consensus-leader-election, rel-39-deployments, cache-24-cdn, rel-37-graceful-degradation]
+  resources:
+    - title: "AWS - Disaster recovery strategies for applications in the cloud"
+      url: https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html
+      kind: doc
+    - title: "Google SRE Book - Managing Critical State"
+      url: https://sre.google/sre-book/managing-critical-state/
+      kind: book
+    - title: "Amazon Builders' Library - Static stability using Availability Zones"
+      url: https://aws.amazon.com/builders-library/static-stability-using-availability-zones/
+      kind: article
+
+- id: sd-09-object-storage-upload
+  title: File grandi, upload diretti e object storage
+  category: system-design
+  track: technical
+  level: medium
+  tags: [system-design, storage, upload, s3, cdn]
+  estimated_minutes: 35
+  summary: >-
+    Far passare i byte di un file dentro l'applicazione e' la scelta che sembra naturale
+    ed e' quasi sempre sbagliata. Il pattern corretto e' che il client parli direttamente
+    con l'object storage, e che l'applicazione si limiti ad autorizzare e a reagire.
+  deep_dive: |-
+    Il primo istinto e' un endpoint che riceve il multipart, lo valida e lo salva. Con file
+    piccoli funziona; con file grandi e' una sequenza di problemi. La richiesta occupa un
+    worker applicativo per tutta la durata del trasferimento, quindi un utente su una linea
+    lenta tiene impegnato un thread per minuti; il file transita in memoria o su disco
+    temporaneo, con i limiti che ne seguono; i timeout di proxy e load balancer vanno
+    alzati proprio dove non si vorrebbe; e scalare l'applicazione diventa un modo costoso di
+    scalare della banda.
+
+    Il pattern che si usa e' l'upload diretto con URL prefirmato. Il client chiede
+    all'applicazione il permesso di caricare; l'applicazione fa le sue verifiche - utente
+    autenticato, quota disponibile, tipo di file ammesso - e restituisce un URL firmato con
+    scadenza breve e vincoli sul contenuto, tipicamente dimensione massima e content type.
+    Il client carica direttamente sull'object storage. I byte non toccano mai
+    l'applicazione, che resta piccola e veloce; lo storage fa il lavoro per cui e'
+    progettato; e il costo della banda si sposta dove costa meno. Il download simmetrico
+    avviene con URL firmati serviti da una CDN, cosi' anche le letture non passano dai
+    server applicativi.
+
+    Per i file davvero grandi c'e' il multipart upload: il client spezza il file in parti,
+    le carica in parallelo e in caso di errore ripete solo la parte fallita. E' la
+    differenza fra ricominciare un caricamento da due gigabyte perche' e' caduta la rete
+    all'ottantesimo percento e ripetere dieci megabyte. Va abbinato a una regola di ciclo
+    di vita che cancelli gli upload multipart incompleti dopo qualche giorno, altrimenti
+    quelle parti restano nel bucket e si pagano per sempre senza comparire nella lista
+    degli oggetti, che e' una delle voci di costo piu' subdole di S3.
+
+    Il punto architetturale che si perde con l'upload diretto e' che l'applicazione non
+    vede piu' il file, quindi non puo' validarlo nel momento in cui arriva. La risposta e'
+    reagire a un evento: lo storage notifica l'avvenuto caricamento, un worker asincrono
+    scarica l'oggetto e fa le verifiche vere - tipo reale dedotto dai magic bytes e non
+    dall'estensione o dal content type dichiarato, dimensione, scansione antivirus,
+    generazione delle anteprime - e solo a quel punto l'oggetto viene marcato come valido e
+    reso visibile. Nel frattempo il record nel database esiste con stato "in attesa": e' lo
+    stesso schema in due fasi che si usa per qualunque risorsa la cui creazione non e'
+    istantanea. Trattare il content type dichiarato dal client come verita' e' la
+    vulnerabilita' classica di questo pattern, insieme al servire i file da un dominio che
+    condivide i cookie con l'applicazione, che trasforma un file HTML caricato da un utente
+    in una XSS sul dominio principale.
+
+    Infine i metadati. I file stanno nell'object storage, ma cio' che l'applicazione deve
+    poter interrogare - proprietario, nome originale, dimensione, stato, permessi - sta nel
+    database. Il bucket non e' un indice: elencare gli oggetti per trovarne uno e'
+    un'operazione lenta e costosa, e la chiave dell'oggetto dovrebbe essere un
+    identificativo opaco, non un percorso che espone il nome utente o il nome del file
+    originale.
+  key_points:
+    - "Non far passare i byte dall'applicazione: occupa worker, consuma memoria e trasforma la banda in un problema di scaling"
+    - "URL prefirmato: l'applicazione autorizza e firma, il client carica direttamente sull'object storage"
+    - "La firma porta scadenza breve e vincoli: dimensione massima e content type ammesso"
+    - "Multipart upload per i file grandi: si ripete solo la parte fallita, non l'intero trasferimento"
+    - "Regola di ciclo di vita per cancellare gli upload multipart incompleti: altrimenti si pagano parti invisibili"
+    - "Validare dopo l'upload, reagendo a un evento dello storage: magic bytes, dimensione, antivirus, anteprime"
+    - "Mai fidarsi del content type dichiarato dal client, e servire i file da un dominio separato dai cookie dell'app"
+    - "I metadati stanno nel database: il bucket non e' un indice e la chiave dev'essere opaca"
+  examples:
+    - title: Il flusso completo di un upload diretto
+      language: text
+      code: |
+        1. POST /api/uploads            { nome, dimensione, tipo }
+           app: verifica auth, quota, tipo ammesso
+           app: crea record  files(id, owner, stato='pending')
+           app: firma l'URL (scadenza 15 min, max 50 MB, content-type image/*)
+           -> { upload_url, file_id }
+
+        2. PUT upload_url               [i byte vanno diretti allo storage]
+           l'applicazione non e' coinvolta
+
+        3. storage -> evento "oggetto creato" -> coda
+
+        4. worker: scarica, verifica i magic bytes (non l'estensione!),
+                   scansione antivirus, genera le anteprime
+           worker: files.stato = 'ready'  oppure  'rejected' + cancella l'oggetto
+
+        5. GET /api/files/{id}
+           app: verifica i permessi, risponde con un URL firmato di download
+                servito dalla CDN, scadenza breve
+
+        Lo stato 'pending' e' quello che rende il flusso onesto: finche' il
+        worker non ha finito, il file esiste ma non e' utilizzabile.
+      note: >-
+        Il passo 4 e' quello che si salta piu' spesso, ed e' quello che rende sicuro tutto
+        il resto: senza, si sta servendo agli utenti un file che nessuno ha guardato.
+    - title: Perche' il content type dichiarato non e' una validazione
+      language: text
+      code: |
+        Il client dichiara      Content-Type: image/png
+        Il file contiene        <html><script>fetch('/api/me')...</script>
+
+        Se il file viene servito
+          da cdn.miosito.it   con Content-Type preso dal client
+          e miosito.it        condivide i cookie di sessione
+        -> il file HTML gira sul tuo dominio con i cookie dell'utente: XSS
+
+        DIFESE, tutte insieme
+          magic bytes         PNG inizia con 89 50 4E 47: verificalo lato server
+          content type        impostalo tu in base a cio' che hai verificato,
+                              non a cio' che il client ha dichiarato
+          dominio separato    file su un dominio senza cookie di sessione
+          intestazione        Content-Disposition: attachment  per i tipi non fidati
+                              X-Content-Type-Options: nosniff
+      note: >-
+        Il dominio separato e' la difesa che regge anche quando le altre vengono aggirate,
+        ed e' il motivo per cui i grandi servizi usano domini dedicati per i contenuti
+        caricati dagli utenti.
+  trade_offs:
+    - option: Upload attraverso l'applicazione
+      pros: Validazione immediata, un solo flusso, nessuna firma da gestire
+      cons: Occupa worker, limita la dimensione, rende la banda un problema di scaling
+      when: File piccoli (avatar, allegati di pochi MB) e volumi bassi
+    - option: URL prefirmato con validazione asincrona
+      pros: L'applicazione resta leggera, scala con lo storage, gestisce file grandi
+      cons: Flusso in due fasi con stato intermedio, la validazione arriva dopo
+      when: Default per qualunque upload di dimensioni o volumi non banali
+    - option: Multipart con ripresa
+      pros: Resistente alle reti instabili, parallelo, ripete solo la parte persa
+      cons: Client piu' complesso, servono regole di pulizia delle parti incomplete
+      when: File oltre il centinaio di MB, o utenti su reti mobili
+  numbers:
+    - "Sopra i 100 MB conviene il multipart: le parti tipiche stanno fra 5 e 100 MB"
+    - "Scadenza sensata per un URL prefirmato: 5-15 minuti per l'upload, anche meno per il download"
+    - "Le parti di upload multipart incomplete restano fatturate finche' una regola di ciclo di vita non le rimuove: tipicamente si imposta a 7 giorni"
+  interview_answer: >-
+    Evito di far passare i byte dall'applicazione, perche' un utente su una linea lenta mi
+    occupa un worker per minuti e mi trasforma un problema di banda in un problema di scaling.
+    Il client chiede all'API il permesso di caricare, l'API verifica autenticazione, quota e
+    tipo, e restituisce un URL prefirmato con scadenza breve e un limite di dimensione e di
+    content type; il client carica direttamente sull'object storage. Nel database intanto ho un
+    record in stato pending. Quando lo storage emette l'evento di oggetto creato, un worker
+    asincrono fa la validazione vera: controlla i magic bytes invece di fidarsi dell'estensione,
+    passa l'antivirus, genera le anteprime e solo allora marca il file come pronto. Per i file
+    grandi uso il multipart, cosi' una caduta di rete costa una parte e non l'intero
+    trasferimento, con una regola di ciclo di vita che cancella le parti incomplete. E i file li
+    servo da un dominio separato da quello che ha i cookie di sessione.
+  senior_signals:
+    - "Propone l'URL prefirmato senza che glielo si chieda, motivandolo con l'occupazione dei worker"
+    - "Mette i vincoli nella firma, non solo la scadenza: dimensione massima e content type"
+    - "Valida dopo l'upload con i magic bytes e sa che il content type del client non e' una validazione"
+    - "Ricorda la regola di ciclo di vita per le parti multipart incomplete, che e' un costo invisibile"
+    - "Serve i contenuti da un dominio separato dai cookie di sessione"
+    - "Tiene i metadati nel database e non usa il bucket come indice"
+  pitfalls:
+    - "Far transitare file grandi nell'applicazione e alzare i timeout dei proxy per farli passare"
+    - "Firmare un URL senza limite di dimensione: chiunque puo' riempire il bucket"
+    - "Fidarsi dell'estensione o del content type dichiarato per decidere che cosa e' il file"
+    - "Servire i contenuti caricati dagli utenti sullo stesso dominio dei cookie di sessione"
+    - "Dimenticare la pulizia degli upload multipart incompleti e pagare per byte che non compaiono nella lista degli oggetti"
+    - "Elencare gli oggetti del bucket per cercare un file invece di interrogare il database"
+  follow_ups:
+    - question: Come impedisci che un URL prefirmato venga usato per caricare 10 GB?
+      answer: >-
+        Mettendo il vincolo nella firma, non nel controllo successivo. Con una POST policy
+        di S3 si firma una condizione sull'intervallo di dimensione del contenuto, e lo
+        storage rifiuta direttamente ogni upload fuori intervallo, senza che
+        l'applicazione veda nulla. La stessa policy puo' vincolare il prefisso della chiave
+        e il content type. In piu' tengo la scadenza breve e la firma monouso dal punto di
+        vista logico, cioe' legata a un record pending che una volta completato non accetta
+        un secondo caricamento, e applico una quota per utente verificata al momento in cui
+        firmo.
+    - question: Che cosa fai se l'utente carica il file ma non conferma mai?
+      answer: >-
+        Il record resta pending ed e' una riga orfana, quindi servono due pulizie. Lato
+        database, un job che cancella i pending piu' vecchi di una certa soglia insieme
+        all'eventuale oggetto caricato. Lato storage, una regola di ciclo di vita che
+        elimina gli oggetti sotto un prefisso temporaneo dopo qualche giorno e che aborta
+        gli upload multipart incompleti. Il modo piu' pulito e' caricare su un prefisso di
+        staging e spostare l'oggetto nella posizione definitiva solo quando la validazione
+        e' passata: cosi' la regola di ciclo di vita puo' essere aggressiva sul prefisso di
+        staging senza rischiare di toccare i file buoni.
+    - question: Come gestisci i permessi sui download?
+      answer: >-
+        Il bucket resta privato e nessun oggetto e' pubblico. Il client chiede all'API il
+        file, l'API verifica i permessi applicativi - che sono una regola di dominio e non
+        possono stare nello storage - e risponde con un URL firmato a scadenza molto breve,
+        servito dalla CDN. La parte da non dimenticare e' che un URL firmato, finche' non
+        scade, e' condivisibile da chiunque lo riceva, quindi la scadenza va tenuta corta e
+        per i contenuti davvero sensibili si usa una firma legata anche all'indirizzo o si
+        passa da un endpoint che fa da proxy, accettando il costo. Per i contenuti cachabili
+        dalla CDN vale la pena firmare l'URL in modo che la chiave di cache resti stabile,
+        altrimenti ogni utente genera una voce di cache diversa.
+  related: [sd-08-multi-region, cache-24-cdn, core-09-rate-limiting-throttling, rel-35-event-driven, eng-04-security]
+  resources:
+    - title: "AWS - Uploading objects with presigned URLs"
+      url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/PresignedUrlUploadObject.html
+      kind: doc
+    - title: "AWS - Multipart upload e regole di ciclo di vita"
+      url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html
+      kind: doc
+    - title: "OWASP - File Upload Cheat Sheet"
+      url: https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html
+      kind: doc
+
+- id: sd-10-batch-vs-streaming
+  title: Batch contro streaming, tempo dell'evento e finestre
+  category: system-design
+  track: technical
+  level: hard
+  tags: [system-design, streaming, batch, pipeline, dati]
+  estimated_minutes: 40
+  summary: >-
+    Quando nel disegno compaiono statistiche, aggregati o contatori, la domanda e' se
+    calcolarli periodicamente o in continuo. La differenza vera non e' la latenza ma il
+    fatto che in streaming i dati arrivano in disordine e in ritardo, e va deciso quanto
+    aspettarli.
+  deep_dive: |-
+    Il batch elabora insiemi finiti a intervalli: ogni notte, ogni ora. Ha un vantaggio che
+    si sottovaluta, cioe' che rieseguirlo e' banale. Se la logica era sbagliata si corregge
+    il codice e si rilancia sullo stesso input, ottenendo un risultato corretto e
+    riproducibile. In streaming, correggere una logica sbagliata significa ricalcolare uno
+    stato che si e' accumulato nel tempo, e non e' un'operazione che si improvvisa. E' per
+    questo che, quando la latenza non e' un requisito, il batch resta la scelta piu' sana:
+    e' piu' semplice da capire, da testare e da riparare.
+
+    Lo streaming elabora eventi man mano che arrivano, e serve quando il valore del
+    risultato decade in fretta: rilevare una frode mentre la transazione e' in corso,
+    aggiornare un contatore che l'utente vede, alimentare un cruscotto operativo. Il prezzo
+    non e' solo infrastrutturale. In un flusso continuo non esiste il momento in cui "i
+    dati sono tutti arrivati", quindi ogni aggregato e' una risposta provvisoria su una
+    finestra, e bisogna decidere quanto attendere i ritardatari.
+
+    La distinzione da cui dipende tutto e' fra tempo dell'evento e tempo di elaborazione.
+    Il tempo dell'evento e' quando il fatto e' accaduto - il click sul telefono
+    dell'utente; il tempo di elaborazione e' quando il sistema lo vede. Fra i due c'e' un
+    ritardo variabile: un telefono offline puo' spedire gli eventi ore dopo. Aggregare per
+    tempo di elaborazione e' facile e da' numeri sbagliati, perche' gli eventi delle otto
+    finiscono nel conteggio delle dieci. Aggregare per tempo dell'evento da' numeri giusti
+    e obbliga a gestire il ritardo, ed e' qui che entrano i watermark: un watermark e'
+    l'affermazione del sistema che non si aspettano piu' eventi con tempo dell'evento
+    precedente a una certa soglia, e quindi che le finestre chiuse prima di quella soglia
+    possono essere emesse. Cio' che arriva dopo il watermark e' un late event, e va deciso
+    cosa farne: scartarlo, o riaprire la finestra e correggere il risultato gia' pubblicato.
+
+    Le finestre hanno tre forme da saper nominare. Le finestre fisse dividono il tempo in
+    intervalli contigui e non sovrapposti, come i minuti dell'orologio, e servono per i
+    report. Le finestre scorrevoli si sovrappongono - gli ultimi cinque minuti, calcolati
+    ogni minuto - e servono per gli allarmi, perche' non lasciano che un picco cada a cavallo
+    di due intervalli e sfugga a entrambi. Le finestre di sessione si chiudono dopo un
+    periodo di inattivita' e servono per raggruppare l'attivita' di un utente senza
+    imporle una durata arbitraria.
+
+    Sull'architettura complessiva esistono due scuole. L'architettura Lambda tiene due
+    percorsi paralleli, uno batch che produce il risultato corretto con ritardo e uno
+    streaming che produce l'approssimazione immediata, e li fonde in lettura; e' robusta e
+    obbliga a mantenere la stessa logica in due implementazioni, che divergono. La Kappa
+    tiene solo il percorso streaming e risolve il ricalcolo rileggendo il log degli eventi
+    dall'inizio: una sola logica, al prezzo di dover conservare il log abbastanza a lungo e
+    di saper rielaborare in tempi accettabili. Con i sistemi moderni, dove lo stesso motore
+    tratta un file come un flusso limitato, la distinzione si e' ammorbidita, ma la domanda
+    sottostante resta la stessa: dove sta la verita' e come si ricostruisce quando la
+    logica cambia.
+  key_points:
+    - "Il batch e' rieseguibile: correggi la logica e rilanci sullo stesso input. E' il suo vantaggio principale, non la semplicita'"
+    - "Lo streaming serve quando il valore del risultato decade in fretta: frodi, contatori visibili, cruscotti operativi"
+    - "Tempo dell'evento (quando e' accaduto) contro tempo di elaborazione (quando lo vedi): aggregare sul secondo da' numeri sbagliati"
+    - "Il watermark dichiara fino a che punto nel tempo dell'evento il sistema si considera completo"
+    - "I late event vanno decisi esplicitamente: scartarli o riaprire la finestra e correggere"
+    - "Tre tipi di finestra: fisse per i report, scorrevoli per gli allarmi, di sessione per l'attivita' utente"
+    - "Lambda: due percorsi e due implementazioni che divergono. Kappa: solo streaming, ricalcolo rileggendo il log"
+    - "In streaming ogni aggregato e' provvisorio: non esiste il momento in cui i dati sono tutti arrivati"
+  examples:
+    - title: Lo stesso conteggio, due tempi diversi
+      language: text
+      code: |
+        Eventi (tempo evento -> tempo elaborazione)
+          click A   08:59  ->  09:00
+          click B   08:58  ->  09:04   (telefono offline per 6 minuti)
+          click C   09:01  ->  09:02
+
+        Finestra fissa 08:00-09:00
+
+        per TEMPO DI ELABORAZIONE   -> conta solo A       = 1   SBAGLIATO
+                                       B finisce in 09:00-10:00
+        per TEMPO DELL'EVENTO       -> conta A e B        = 2   CORRETTO
+                                       ma richiede di aspettare B
+
+        watermark a 09:05 (tolleranza 5 min di ritardo)
+          08:58-09:00 restano aperte fino alle 09:05, poi si emettono
+          un evento delle 08:57 che arriva alle 09:10 e' un LATE EVENT
+      note: >-
+        La tolleranza del watermark e' il compromesso esplicito fra correttezza e latenza:
+        cinque minuti di attesa comprano la quasi totalita' degli eventi in ritardo, un'ora
+        ne compra qualcuno in piu' e ritarda ogni risultato di un'ora.
+    - title: Quando basta il batch, e come si riconosce
+      language: text
+      code: |
+        DOMANDE DA FARE
+          "Chi guarda questo numero, e cosa fa se cambia?"
+          -> un report letto il lunedi' mattina        BATCH notturno
+          -> un allarme che blocca una transazione     STREAMING
+          -> un contatore su una pagina                dipende: 1 minuto basta?
+                                                       spesso BATCH ogni minuto
+                                                       o semplice cache con TTL
+
+        "Cosa succede se il risultato e' sbagliato?"
+          -> si corregge e si rilancia                 BATCH (rieseguibile)
+          -> il danno e' gia' fatto                    STREAMING, con test seri
+
+        REGOLA PRATICA: se la tolleranza e' di minuti, un batch frequente
+        costa una frazione di una pipeline streaming e si ripara da solo.
+      note: >-
+        Proporre streaming quando la risposta e' "il report si legge il lunedi'" e' il modo
+        piu' rapido di raddoppiare il costo operativo di un sistema senza dare nulla
+        all'utente.
+  trade_offs:
+    - option: Batch periodico
+      pros: Rieseguibile e riproducibile, semplice da testare, costo operativo basso
+      cons: Latenza pari all'intervallo, picchi di carico concentrati
+      when: Report, fatturazione, aggregati storici, qualunque cosa tolleri minuti o ore
+    - option: Streaming
+      pros: Latenza di secondi, carico distribuito nel tempo, reagisce agli eventi
+      cons: Stato da gestire, late event, ricalcolo difficile, piu' infrastruttura
+      when: Frodi, allarmi, contatori visibili, tutto cio' il cui valore decade in minuti
+    - option: Lambda (batch + streaming in parallelo)
+      pros: Numeri corretti dal batch e approssimazione immediata dallo streaming
+      cons: Due implementazioni della stessa logica che divergono nel tempo
+      when: Quando la correttezza storica e' vincolante e serve comunque il tempo reale
+    - option: Kappa (solo streaming, ricalcolo rileggendo il log)
+      pros: Una sola logica da mantenere, ricalcolo come rilettura del log
+      cons: Richiede di conservare il log a lungo e di rielaborare in tempi accettabili
+      when: Il log degli eventi e' gia' la sorgente di verita' e la ritenzione lo consente
+  numbers:
+    - "Tolleranza tipica di un watermark: da pochi secondi a qualche minuto; oltre, il ritardo aggiunto supera il valore degli eventi recuperati"
+    - "Ritenzione del log degli eventi in un'architettura Kappa: giorni o settimane, perche' e' cio' da cui si ricalcola"
+    - "Una finestra scorrevole di 5 minuti calcolata ogni minuto moltiplica per 5 lo stato da tenere rispetto a una fissa di 5 minuti"
+  interview_answer: >-
+    La prima domanda che faccio e' chi guarda il risultato e cosa fa se cambia, perche' da lì
+    dipende tutto. Se e' un report che qualcuno legge il lunedi' mattina, faccio un batch: e'
+    piu' semplice, costa meno e soprattutto e' rieseguibile, quindi se la logica era sbagliata
+    correggo e rilancio sullo stesso input. Se invece il valore decade in minuti - una frode da
+    bloccare, un contatore che l'utente vede - allora serve streaming, e a quel punto la parte
+    difficile non e' l'infrastruttura ma il tempo. Distinguo il tempo dell'evento dal tempo di
+    elaborazione, perche' aggregare su quest'ultimo mette i click delle otto nel conteggio delle
+    dieci, e uso un watermark per dichiarare fino a dove mi considero completo, decidendo
+    esplicitamente se gli eventi in ritardo li scarto o riaprono la finestra. Le finestre le
+    scelgo secondo l'uso: fisse per i report, scorrevoli per gli allarmi, di sessione per
+    l'attivita' di un utente.
+  senior_signals:
+    - "Difende il batch come scelta, motivandolo con la rieseguibilita' e non con la pigrizia"
+    - "Distingue tempo dell'evento da tempo di elaborazione senza che glielo si chieda"
+    - "Sa cos'e' un watermark e lo presenta come compromesso fra correttezza e latenza"
+    - "Decide esplicitamente il destino dei late event invece di ignorarli"
+    - "Sceglie il tipo di finestra in base all'uso e sa perche' un allarme vuole finestre scorrevoli"
+    - "Conosce il costo di Lambda, cioe' due implementazioni che divergono"
+  pitfalls:
+    - "Proporre una pipeline streaming per un report letto una volta a settimana"
+    - "Aggregare per tempo di elaborazione e pubblicare numeri che non tornano con quelli del batch"
+    - "Non decidere cosa fare dei late event: finiscono scartati in silenzio e i totali non quadrano"
+    - "Usare finestre fisse per gli allarmi e non accorgersi dei picchi a cavallo di due intervalli"
+    - "Costruire Lambda e lasciare che le due implementazioni della logica divergano"
+    - "Dimenticare che lo stato di una pipeline streaming va dimensionato e sopravvive ai riavvii"
+  follow_ups:
+    - question: Perche' non aggregare semplicemente per tempo di elaborazione?
+      answer: >-
+        Perche' i numeri diventano funzione delle condizioni di rete invece che dei fatti.
+        Un evento accaduto alle 8:58 su un telefono offline che si riconnette alle 9:04
+        finirebbe nel conteggio delle 9, quindi lo stesso giorno ricalcolato in momenti
+        diversi darebbe risultati diversi, e i totali non quadrerebbero mai con quelli del
+        batch. E' accettabile solo per metriche operative sul sistema stesso - quante
+        richieste sto ricevendo adesso - dove il fatto interessante e' proprio quando il
+        sistema le vede. Per qualunque numero che descriva il comportamento degli utenti,
+        il tempo dell'evento e' l'unico corretto.
+    - question: Che cosa fai con un evento che arriva dopo il watermark?
+      answer: >-
+        Sono tre opzioni e la scelta va dichiarata. Scartarlo e' accettabile se la quota e'
+        minima e il numero e' una stima: si conta quanti se ne scartano come metrica, per
+        accorgersi se cresce. Riaprire la finestra ed emettere un risultato aggiornato e'
+        corretto ma richiede che i consumatori a valle sappiano gestire una correzione, cioe'
+        che il risultato sia idempotente sulla chiave della finestra e non un incremento.
+        La terza e' dirottare i late event su un percorso separato e riconciliarli con un
+        batch periodico, che e' il compromesso comune: il tempo reale resta approssimato e
+        il numero definitivo arriva dal batch.
+    - question: Quando servono le finestre scorrevoli invece di quelle fisse?
+      answer: >-
+        Quando quello che cerchi e' un superamento di soglia, non un totale di periodo. Con
+        finestre fisse di cinque minuti, un picco che occupa gli ultimi due minuti di una
+        finestra e i primi due della successiva si divide in due meta', e nessuna delle due
+        supera la soglia: l'allarme non scatta pur essendoci stato il problema. Una finestra
+        scorrevole di cinque minuti valutata ogni minuto vede quel picco intero. Il prezzo
+        e' che lo stato da mantenere cresce con il rapporto fra ampiezza e passo, e che lo
+        stesso evento contribuisce a piu' finestre, quindi le finestre scorrevoli si usano
+        per gli allarmi e non per la fatturazione.
+    - question: Come ricalcoli un aggregato quando scopri che la logica era sbagliata?
+      answer: >-
+        Nel batch e' banale: correggi e rilanci sull'input, che e' ancora lì. In streaming
+        dipende da come hai costruito il sistema. Se hai il log degli eventi con ritenzione
+        sufficiente, avvii una seconda istanza della pipeline con la logica nuova che
+        rilegge dall'inizio e scrive su una destinazione parallela, e quando ha raggiunto il
+        presente scambi le due destinazioni: e' lo stesso schema di un deploy blu-verde
+        applicato ai dati. Se il log non c'e' piu', non si ricalcola, si puo' solo correggere
+        da qui in avanti ed e' il motivo per cui la ritenzione del log e' una decisione
+        architetturale e non una impostazione operativa.
+  related: [rel-35-event-driven, dist-30-message-queues, sd-07-full-text-search, rel-31-delivery-semantics, sd-12-probabilistic-structures]
+  resources:
+    - title: "Streaming 101 e 102 (Tyler Akidau)"
+      url: https://www.oreilly.com/radar/the-world-beyond-batch-streaming-101/
+      kind: article
+    - title: "Designing Data-Intensive Applications, capitolo 11"
+      url: https://dataintensive.net/
+      kind: book
+    - title: "Apache Flink - Event time e watermark"
+      url: https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/
+      kind: doc
+
+- id: sd-11-realtime-connections
+  title: Tempo reale, WebSocket e presenza
+  category: system-design
+  track: technical
+  level: hard
+  tags: [system-design, websocket, realtime, sse, presenza]
+  estimated_minutes: 40
+  summary: >-
+    Spingere dati verso il browser sembra una scelta di protocollo e in realta' e' una
+    scelta di architettura: le connessioni persistenti rendono i server stateful, e da lì
+    discendono il bilanciamento, il deploy e il modo in cui i messaggi trovano l'utente.
+  deep_dive: |-
+    Le opzioni sono tre e vanno distinte prima di parlare di scala. Il polling ripetuto e'
+    la piu' semplice: il client chiede ogni N secondi, il server risponde subito. Spreca
+    richieste ma e' banale da gestire, cachabile, e per molti casi - un cruscotto che si
+    aggiorna ogni trenta secondi - e' la risposta corretta. Server-Sent Events e' un flusso
+    HTTP unidirezionale dal server al client, con riconnessione automatica e ripresa
+    dall'ultimo identificativo ricevuto gia' nel protocollo: e' la scelta giusta quando i
+    dati vanno in una direzione sola, cioe' notifiche, aggiornamenti di stato, cruscotti.
+    WebSocket apre un canale bidirezionale dopo un upgrade HTTP, e serve davvero quando il
+    client deve mandare messaggi con la stessa frequenza con cui li riceve: chat,
+    collaborazione, giochi. Scegliere WebSocket per mandare notifiche in una sola direzione
+    e' il caso piu' comune di complessita' non necessaria.
+
+    Il salto architetturale e' che con una connessione persistente il server smette di
+    essere intercambiabile. Un utente non e' piu' "chiunque risponda" ma "quel processo su
+    quel nodo", e questo cambia tre cose. Il bilanciamento non puo' distribuire per
+    richiesta perche' la richiesta e' una sola e dura ore, quindi si distribuiscono le
+    connessioni e si finisce sbilanciati, perche' un nodo riavviato di recente ne ha poche.
+    Il deploy diventa disturbante: riavviare un nodo chiude migliaia di connessioni, che si
+    riconnettono tutte insieme, e senza jitter nel backoff del client si ottiene una
+    tempesta che rimbalza fra i nodi. E il conteggio delle connessioni diventa un limite di
+    capacita' vero, perche' ogni connessione consuma memoria e un descrittore di file anche
+    quando non passa traffico.
+
+    Il problema che segue e' l'instradamento. Il servizio che genera un messaggio - un
+    worker, un altro microservizio - non sa su quale nodo sia connesso il destinatario, e
+    non deve saperlo. La soluzione standard e' un backplane di pubblicazione e
+    sottoscrizione: ogni nodo si sottoscrive ai canali degli utenti che ha connessi, chi
+    produce il messaggio lo pubblica sul canale e il nodo giusto lo riceve e lo inoltra.
+    Redis pub/sub e' l'implementazione tipica per volumi medi; sopra si passa a sistemi che
+    persistono. Il dettaglio che distingue una soluzione seria e' che il pub/sub puro non
+    conserva nulla: se l'utente e' momentaneamente disconnesso il messaggio si perde. Per
+    una chat questo non e' accettabile, quindi il messaggio va prima persistito con un
+    numero di sequenza per conversazione, e la consegna in tempo reale diventa
+    un'ottimizzazione sopra un recupero che il client fa comunque alla riconnessione
+    chiedendo "tutto dopo la sequenza N". Progettare la riconnessione prima del tempo reale
+    e' il modo giusto di ordinare il lavoro.
+
+    La presenza - chi e' online - ha una sua trappola. Sembra derivabile dalla connessione
+    aperta, ma una connessione puo' restare aperta su un client sparito, e un utente puo'
+    avere cinque dispositivi. Si implementa con un heartbeat e una chiave con TTL per
+    dispositivo: il client conferma periodicamente, la chiave scade se smette, e l'utente e'
+    online se almeno uno dei suoi dispositivi ha la chiave viva. La granularita' va tenuta
+    grossolana, perche' la presenza precisa al secondo per migliaia di contatti genera un
+    fan-out enorme per un'informazione che nessuno guarda con quella attenzione.
+  key_points:
+    - "Tre opzioni: polling (semplice, cachabile), SSE (unidirezionale, riconnessione nel protocollo), WebSocket (bidirezionale)"
+    - "SSE basta per notifiche e cruscotti: WebSocket per una sola direzione e' complessita' non necessaria"
+    - "Le connessioni persistenti rendono i nodi stateful: il bilanciamento distribuisce connessioni, non richieste"
+    - "Il deploy chiude migliaia di connessioni insieme: serve backoff con jitter lato client o si ottiene una tempesta"
+    - "Il produttore del messaggio non sa dove e' connesso il destinatario: serve un backplane pub/sub fra i nodi"
+    - "Il pub/sub puro non persiste: il messaggio va salvato con un numero di sequenza e recuperato alla riconnessione"
+    - "Progettare prima la riconnessione ('dammi tutto dopo N') e poi il tempo reale come ottimizzazione"
+    - "Presenza: heartbeat e chiave con TTL per dispositivo, con granularita' volutamente grossolana"
+  examples:
+    - title: Scegliere il protocollo dal verso dei dati
+      language: text
+      code: |
+        Notifiche, cruscotto, stato di un ordine, avanzamento di un job
+          dati: server -> client, solo
+          SSE          riconnessione e Last-Event-ID nel protocollo,
+                       passa dai proxy come un normale HTTP,
+                       una riga di codice sul client
+          WebSocket    stessa funzione, piu' codice, piu' problemi
+
+        Chat, editing collaborativo, gioco, terminale remoto
+          dati: bidirezionali e frequenti
+          WebSocket    giustificato
+
+        Cruscotto che tollera 30 secondi
+          polling      cachabile, stateless, nessun backplane
+                       spesso e' la risposta giusta e la si scarta per moda
+
+        Limite storico di SSE: 6 connessioni per dominio su HTTP/1.1.
+        Con HTTP/2 il multiplexing lo rende irrilevante.
+      note: >-
+        La domanda da farsi e' "il client deve mandare qualcosa con la stessa frequenza con
+        cui riceve?". Se la risposta e' no, SSE fa lo stesso lavoro con meno parti mobili.
+    - title: Perche' il pub/sub da solo non basta per una chat
+      language: text
+      code: |
+        SOLO PUB/SUB (fragile)
+          Anna manda "ciao" -> pubblicato sul canale user:bruno
+          Bruno e' in metropolitana, disconnesso da 4 secondi
+          nessun nodo ha quel canale -> il messaggio evapora
+          Bruno torna online: non sapra' mai che Anna ha scritto
+
+        PERSISTENZA + SEQUENZA (corretto)
+          1. messaggio salvato:  conversazione 77, seq 1043
+          2. pubblicato sul canale (ottimizzazione per chi e' connesso)
+          3. Bruno si riconnette e chiede: "conversazione 77, dopo seq 1041"
+             -> riceve 1042 e 1043
+
+          il tempo reale e' un'ottimizzazione del passo 3, non il meccanismo
+          di consegna
+
+        La sequenza per conversazione da' anche l'ordinamento e permette
+        la deduplicazione: lo stesso messaggio consegnato due volte ha la
+        stessa seq e il client lo ignora.
+      note: >-
+        Costruire prima il recupero e poi il push rende il sistema corretto anche quando il
+        push fallisce. Nell'ordine inverso, ogni disconnessione e' una perdita di dati.
+  trade_offs:
+    - option: Polling periodico
+      pros: Stateless, cachabile, nessun backplane, deploy indolore
+      cons: Latenza pari all'intervallo, richieste sprecate quando non cambia nulla
+      when: Tolleranza di decine di secondi, pochi client, o come primo passo prima di ottimizzare
+    - option: Server-Sent Events
+      pros: Riconnessione e ripresa nel protocollo, HTTP normale, client semplicissimo
+      cons: Una direzione sola, e su HTTP/1.1 il limite di connessioni per dominio
+      when: "Notifiche, aggiornamenti di stato, cruscotti: la maggior parte dei casi reali"
+    - option: WebSocket
+      pros: Bidirezionale, latenza minima, adatto a traffico frequente in entrambi i versi
+      cons: Nodi stateful, backplane, deploy disturbante, riconnessione da implementare a mano
+      when: Chat, collaborazione, giochi, cioe' quando il client scrive quanto legge
+  numbers:
+    - "Una connessione inattiva costa comunque memoria e un descrittore: le migliaia per nodo sono un limite di capacita' reale, da misurare"
+    - "Heartbeat di presenza ogni 20-30 secondi con TTL della chiave a 2-3 volte l'intervallo: piu' frequente non aggiunge informazione utile"
+    - "Backoff di riconnessione con jitter: senza il termine casuale tutti i client tornano insieme e replicano il picco a ogni tentativo"
+  interview_answer: >-
+    Prima decido il verso dei dati, perche' cambia tutto. Se vanno solo dal server al client -
+    notifiche, stato di un ordine, un cruscotto - uso Server-Sent Events, che ha riconnessione e
+    ripresa dall'ultimo evento gia' dentro il protocollo e passa dai proxy come HTTP normale.
+    WebSocket lo tengo per quando il client scrive con la stessa frequenza con cui legge, cioe'
+    chat e collaborazione. La parte architetturale e' che una connessione persistente rende il
+    nodo stateful: il bilanciamento distribuisce connessioni e non richieste, un deploy ne chiude
+    migliaia insieme e senza jitter nel backoff si ottiene una tempesta di riconnessioni. Chi
+    produce il messaggio non sa su quale nodo sia l'utente, quindi metto un backplane pub/sub fra
+    i nodi. E soprattutto progetto prima la riconnessione: persisto il messaggio con un numero di
+    sequenza e il client alla riconnessione chiede tutto quello che c'e' dopo l'ultimo che ha, poi
+    il push in tempo reale diventa un'ottimizzazione. Al contrario, ogni disconnessione sarebbe
+    una perdita di messaggi.
+  senior_signals:
+    - "Sceglie SSE quando il verso e' uno solo, invece di andare su WebSocket per abitudine"
+    - "Nomina il fatto che le connessioni persistenti rendono i nodi stateful e ne trae le conseguenze su bilanciamento e deploy"
+    - "Progetta il recupero alla riconnessione prima del push, e usa numeri di sequenza"
+    - "Sa che il pub/sub puro non persiste e non lo usa come meccanismo di consegna"
+    - "Cita il jitter nel backoff come difesa dalla tempesta di riconnessioni"
+    - "Tiene la presenza grossolana e la implementa con heartbeat e TTL per dispositivo"
+  pitfalls:
+    - "Usare WebSocket per notifiche unidirezionali e ritrovarsi a implementare a mano cio' che SSE ha gia'"
+    - "Affidare la consegna al solo pub/sub: chi e' disconnesso per due secondi perde i messaggi"
+    - "Riconnessione senza jitter: tutti i client tornano insieme e la tempesta si ripete a ogni tentativo"
+    - "Dimenticare che un deploy chiude tutte le connessioni e non prevedere un drenaggio graduale"
+    - "Dedurre la presenza dalla connessione aperta: resta aperta su client spariti e ignora il multi-dispositivo"
+    - "Non limitare le connessioni per utente: un client con un bug ne apre centinaia"
+  follow_ups:
+    - question: Quando SSE e' preferibile a WebSocket?
+      answer: >-
+        Ogni volta che i dati vanno in una direzione sola, che nella pratica e' la
+        maggioranza dei casi: notifiche, avanzamento di un'elaborazione, aggiornamenti di un
+        cruscotto, stato di un ordine. SSE e' HTTP normale, quindi attraversa proxy e
+        bilanciatori senza configurazioni speciali, e porta gia' nel protocollo la
+        riconnessione automatica e la ripresa tramite Last-Event-ID, che con WebSocket
+        dovrei scrivere a mano e probabilmente scrivere male. Il limite storico delle sei
+        connessioni per dominio su HTTP/1.1 non conta piu' con HTTP/2. Scelgo WebSocket
+        quando il client deve mandare messaggi con la stessa frequenza con cui li riceve.
+    - question: Come gestisci il deploy di un servizio con centomila connessioni aperte?
+      answer: >-
+        Con un drenaggio graduale invece di un riavvio secco. Il nodo in uscita smette di
+        accettare nuove connessioni, poi chiude quelle esistenti a scaglioni - non tutte
+        insieme - eventualmente inviando un messaggio applicativo che invita il client a
+        riconnettersi dopo un ritardo casuale. Lato client servono comunque backoff
+        esponenziale e jitter, altrimenti anche uno scaglione torna tutto nello stesso
+        istante. La capacita' residua va verificata prima: se i nodi sono al novanta per
+        cento delle connessioni, riavviarne uno significa che gli altri non reggono i suoi
+        utenti, e il deploy diventa un incidente.
+    - question: Come fai arrivare un messaggio a un utente connesso su un altro nodo?
+      answer: >-
+        Non provo a sapere dove sta. Ogni nodo si sottoscrive ai canali degli utenti che ha
+        connessi, e chi produce il messaggio pubblica sul canale dell'utente: il nodo giusto
+        lo riceve e lo inoltra sulla sua connessione. Cosi' il produttore resta ignaro della
+        topologia e i nodi possono entrare e uscire liberamente. L'alternativa, cioe' un
+        registro che mappa utente verso nodo, sembra piu' efficiente ma va tenuta coerente
+        con le connessioni che cadono, ed e' una sorgente di stato stantio. In entrambi i
+        casi il pub/sub non sostituisce la persistenza: il messaggio e' gia' salvato, quello
+        che viaggia sul canale e' solo la notifica per chi e' online adesso.
+    - question: Come implementi la presenza per un utente con piu' dispositivi?
+      answer: >-
+        Con una chiave per dispositivo, non per utente. Ogni sessione attiva scrive una
+        chiave del tipo presenza:utente:dispositivo con un TTL di due o tre volte
+        l'intervallo di heartbeat, e la rinnova a ogni battito; l'utente risulta online se
+        esiste almeno una chiave viva. Il TTL fa il lavoro di pulizia da solo, anche quando
+        la connessione muore senza un addio. Sul fan-out sono deliberatamente grossolano:
+        non propago ogni cambiamento a tutti i contatti, ma aggrego e notifico le
+        transizioni con un ritardo di qualche secondo, perche' la presenza precisa al
+        secondo costa moltissimo e nessuno la guarda con quella precisione.
+  related: [sd-06-feed-fanout, dist-29-service-communication, rel-32-retries-timeouts-breakers, rel-39-deployments, dist-26-load-balancing]
+  resources:
+    - title: "MDN - Server-Sent Events"
+      url: https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events
+      kind: doc
+    - title: "RFC 6455 - The WebSocket Protocol"
+      url: https://datatracker.ietf.org/doc/html/rfc6455
+      kind: doc
+    - title: "Amazon Builders' Library - Timeouts, retries and backoff with jitter"
+      url: https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/
+      kind: article
+
+- id: sd-12-probabilistic-structures
+  title: Strutture probabilistiche, quando una stima basta
+  category: system-design
+  track: technical
+  level: hard
+  tags: [system-design, bloom-filter, hyperloglog, memoria, stime]
+  estimated_minutes: 35
+  summary: >-
+    Contare gli utenti unici o verificare se un elemento e' gia' stato visto sono operazioni
+    che a volumi grandi costano piu' memoria di quanta ne valga la risposta. Le strutture
+    probabilistiche scambiano una precisione che spesso non serve con ordini di grandezza
+    di memoria in meno.
+  deep_dive: |-
+    L'intuizione da avere e' che la memoria esatta cresce con il numero di elementi
+    distinti, e che moltissime domande non richiedono una risposta esatta. Quanti visitatori
+    unici ha avuto la pagina ieri? Questo URL l'abbiamo gia' visitato? Quali sono i dieci
+    termini piu' cercati? In tutti e tre i casi un errore dell'uno per cento e' invisibile,
+    ma la struttura esatta richiede di tenere ogni elemento distinto in memoria.
+
+    Il Bloom filter risponde a "questo elemento c'e'?" con due esiti asimmetrici:
+    "sicuramente no" oppure "forse si'". E' un vettore di bit e k funzioni hash; si inserisce
+    accendendo i k bit corrispondenti, e si interroga verificando se sono tutti accesi. Se
+    anche uno solo e' spento l'elemento non c'e' di sicuro; se sono tutti accesi potrebbero
+    esserlo per colpa di altri elementi, ed e' il falso positivo. Non esistono falsi
+    negativi, ed e' questa asimmetria a renderlo utile: si mette davanti a una risorsa
+    costosa per evitare l'accesso quando la risposta e' certamente no. Un database che
+    riceve valanghe di richieste per chiavi inesistenti - il cosiddetto cache penetration -
+    si protegge cosi'. I numeri sono buoni: con circa dieci bit per elemento si sta intorno
+    all'uno per cento di falsi positivi, quindi dieci milioni di elementi occupano poco piu'
+    di dieci megabyte contro le centinaia di un insieme vero. Il limite e' che non si puo'
+    cancellare, perche' spegnere i bit di un elemento ne spegnerebbe anche per altri; se
+    serve cancellare si usa un counting Bloom filter o un cuckoo filter, che pagano in
+    memoria.
+
+    HyperLogLog risponde a "quanti elementi distinti?" senza tenerli. Si basa sul fatto che,
+    osservando gli hash degli elementi, la piu' lunga sequenza di zeri iniziali vista e'
+    legata all'ordine di grandezza della cardinalita': se hai visto un hash che comincia con
+    venti zeri, probabilmente hai visto circa due alla venti elementi distinti. Mediando
+    l'osservazione su molti registri si ottiene una stima stabile. In Redis occupa dodici
+    kilobyte con un errore standard intorno allo 0,8 per cento, e la proprieta' che lo rende
+    prezioso in un sistema distribuito e' che due HyperLogLog si possono unire: ogni nodo
+    tiene il suo, e l'unione da' la cardinalita' globale senza spostare i dati. Contare gli
+    utenti unici del mese su venti nodi diventa l'unione di venti strutture da dodici
+    kilobyte.
+
+    Il Count-Min Sketch risponde a "quante volte e' comparso questo elemento?" con una
+    matrice di contatori e diverse funzioni hash, restituendo il minimo fra le celle. Le
+    collisioni possono solo aggiungere, quindi la stima e' sempre maggiore o uguale al vero:
+    sovrastima, mai sottostima. Serve per trovare gli elementi frequenti - le chiavi calde
+    di una cache, gli indirizzi che stanno abusando di un'API - dove sbagliare in eccesso su
+    un elemento raro non fa danno.
+
+    La regola per usarle bene e' una sola: vanno scelte sapendo in che direzione sbagliano, e
+    il sistema va progettato perche' quell'errore sia innocuo. Un Bloom filter davanti a una
+    cache e' ottimo perche' il falso positivo costa solo un accesso inutile; lo stesso
+    filtro come controllo di sicurezza sarebbe un disastro, perche' lascerebbe passare
+    qualcuno. Scegliere una struttura probabilistica per un saldo contabile e' l'errore
+    speculare, e al colloquio si valuta esattamente la capacita' di distinguere i due casi.
+  key_points:
+    - "Rispondono a domande che non richiedono esattezza, con ordini di grandezza di memoria in meno"
+    - "Bloom filter: 'sicuramente no' o 'forse si'. Nessun falso negativo, ed e' l'asimmetria che lo rende utile"
+    - "Circa 10 bit per elemento danno l'1% di falsi positivi: 10 milioni di elementi in poco piu' di 10 MB"
+    - "Dal Bloom filter non si cancella: servono counting Bloom o cuckoo filter, che costano di piu'"
+    - "HyperLogLog stima la cardinalita': in Redis 12 KB con ~0,8% di errore, e due strutture si possono unire"
+    - "L'unione di HyperLogLog permette di contare gli unici globali senza spostare i dati fra i nodi"
+    - "Count-Min Sketch stima le frequenze e sovrastima sempre: adatto a trovare gli elementi piu' frequenti"
+    - "La regola: scegliere sapendo in che direzione la struttura sbaglia e rendere quell'errore innocuo"
+  examples:
+    - title: Bloom filter davanti alla cache, contro le chiavi inesistenti
+      language: text
+      code: |
+        PROBLEMA (cache penetration)
+          richieste per id inesistenti -> cache miss sempre
+          -> ogni richiesta arriva al database -> il database cade
+
+        CON BLOOM FILTER (10 MB per 10 milioni di id esistenti)
+          richiesta id=99999999
+          bloom.contiene(id)?
+            NO    -> 404 immediato, il database non viene toccato mai
+            FORSE -> cache, poi database (l'1% di accessi inutili: innocuo)
+
+        MEMORIA A CONFRONTO, 10 milioni di id
+          set di interi in memoria   ~400 MB
+          bloom filter all'1%        ~12 MB
+
+        PERCHE' FUNZIONA: l'errore e' solo nella direzione "forse si'",
+        cioe' un accesso in piu'. Non esiste il caso "dico no ed esisteva",
+        che sarebbe un id valido dichiarato inesistente.
+      note: >-
+        Il filtro va ricostruito quando l'insieme cambia molto, perche' non si puo'
+        cancellare: in pratica lo si rigenera periodicamente da zero, operazione economica
+        e facile da schedulare.
+    - title: Contare gli unici su venti nodi senza spostare i dati
+      language: text
+      code: |
+        ESATTO
+          ogni nodo tiene l'insieme degli utenti visti
+          per il totale globale servono gli insiemi completi
+          50 milioni di utenti x 8 byte = 400 MB per nodo, da trasferire e unire
+
+        HYPERLOGLOG
+          ogni nodo tiene un HLL da 12 KB
+          totale globale = unione dei 20 HLL = 240 KB trasferiti
+          errore ~0,8%: su 50 milioni sono +/- 400.000
+
+        La domanda da fare: "questo numero finisce in un cruscotto o in una
+        fattura?". Nel cruscotto lo 0,8% non lo nota nessuno. In fattura
+        e' inaccettabile, e allora si conta esatto e si paga la memoria.
+      note: >-
+        L'unione senza perdita di precisione e' la proprieta' che rende HyperLogLog adatto
+        ai sistemi distribuiti: si puo' anche tenere un HLL per ora e unirli per ottenere il
+        giorno, la settimana o il mese senza ricalcolare nulla.
+  trade_offs:
+    - option: Struttura esatta (set, contatori per chiave)
+      pros: Nessun errore, si puo' cancellare, facile da spiegare e da verificare
+      cons: Memoria proporzionale agli elementi distinti, difficile da unire fra nodi
+      when: Denaro, conformita', qualunque numero che un utente possa contestare
+    - option: Bloom filter
+      pros: Memoria costante e minima, nessun falso negativo, velocissimo
+      cons: Falsi positivi, nessuna cancellazione, dimensione da decidere in anticipo
+      when: Filtro davanti a una risorsa costosa, dove un accesso inutile e' innocuo
+    - option: HyperLogLog
+      pros: 12 KB per qualunque cardinalita', strutture unibili fra nodi e nel tempo
+      cons: Solo cardinalita', errore intorno all'1%, non dice quali elementi
+      when: Visitatori unici, dispositivi distinti, metriche di prodotto su cruscotti
+    - option: Count-Min Sketch
+      pros: Frequenze in memoria fissa, trova bene gli elementi piu' frequenti
+      cons: Sovrastima gli elementi rari, non elenca le chiavi, serve conoscerle a parte
+      when: Individuare chiavi calde, abusi, i primi N per frequenza
+  numbers:
+    - "Bloom filter: ~10 bit per elemento danno circa l'1% di falsi positivi, ~14 bit lo portano allo 0,1%"
+    - "HyperLogLog in Redis: 12 KB fissi, errore standard 0,81%, indipendente dalla cardinalita'"
+    - "Un set esatto di 10 milioni di interi a 64 bit costa centinaia di MB in memoria: due ordini di grandezza in piu' di un Bloom filter equivalente"
+  interview_answer: >-
+    Le tiro fuori quando la memoria esatta cresce con gli elementi distinti e la domanda non
+    richiede una risposta esatta. Il caso che uso piu' spesso e' il Bloom filter davanti a una
+    cache per fermare le richieste su chiavi che non esistono: risponde "sicuramente no" oppure
+    "forse si'", non ha falsi negativi, e con una decina di bit per elemento tiene dieci milioni
+    di identificativi in poco piu' di dieci megabyte contro le centinaia di un insieme vero. Il
+    falso positivo mi costa solo un accesso inutile, quindi l'errore cade dalla parte innocua.
+    Per i visitatori unici uso HyperLogLog, che sta in dodici kilobyte con meno dell'uno per
+    cento di errore e soprattutto si unisce fra nodi, quindi ogni nodo tiene il suo e il totale
+    globale e' l'unione, senza spostare dati. La regola che seguo e' sempre la stessa: scelgo
+    sapendo in che direzione la struttura sbaglia e mi assicuro che quell'errore non faccia
+    danno. Su un saldo o su una fattura conto esatto e pago la memoria.
+  senior_signals:
+    - "Formula il criterio in termini di direzione dell'errore, non di risparmio di memoria"
+    - "Sa che il Bloom filter non ha falsi negativi e ne deduce l'uso come filtro davanti a una risorsa costosa"
+    - "Cita l'unibilita' di HyperLogLog come la proprieta' che conta in un sistema distribuito"
+    - "Ricorda che dal Bloom filter non si cancella e propone la rigenerazione periodica"
+    - "Distingue i casi in cui l'approssimazione e' inaccettabile (fatture, saldi) senza che glielo si chieda"
+  pitfalls:
+    - "Usare un Bloom filter come controllo di sicurezza: il falso positivo lascia passare qualcuno"
+    - "Provare a cancellare da un Bloom filter spegnendo i bit: si cancellano anche elementi altrui"
+    - "Dimensionare il filtro per la cardinalita' di oggi: quando l'insieme cresce i falsi positivi esplodono"
+    - "Usare HyperLogLog per un numero che compare in una fattura o in un report contestabile"
+    - "Trattare la stima del Count-Min Sketch come esatta per gli elementi rari, dove sovrastima di piu'"
+    - "Introdurre queste strutture quando i dati stanno comodamente in memoria: complessita' senza beneficio"
+  follow_ups:
+    - question: Perche' un Bloom filter non puo' avere falsi negativi?
+      answer: >-
+        Perche' l'inserimento accende bit e non li spegne mai. Se un elemento e' stato
+        inserito, i k bit corrispondenti ai suoi hash sono accesi per costruzione, e
+        nessuna operazione successiva li spegne: quindi l'interrogazione di quell'elemento
+        li trovera' sempre tutti accesi e rispondera' "forse si'". Il caso contrario, cioe'
+        tutti i bit accesi per un elemento mai inserito, e' possibile perche' altri elementi
+        possono aver acceso proprio quei bit, ed e' il falso positivo. E' anche il motivo
+        per cui la cancellazione e' impossibile: spegnere i bit di un elemento potrebbe
+        spegnerne di condivisi con altri, e allora comparirebbero i falsi negativi.
+    - question: Come dimensioni un Bloom filter?
+      answer: >-
+        Servono due numeri: quanti elementi ci metterai e quale tasso di falsi positivi
+        accetti. Da questi si ricavano la dimensione del vettore di bit e il numero ottimale
+        di funzioni hash, con un rapporto di circa dieci bit per elemento per stare all'uno
+        per cento e quattordici per lo 0,1. Il punto critico e' la stima del numero di
+        elementi: se e' sottostimata, il filtro si satura e il tasso di falsi positivi
+        peggiora rapidamente, fino a rispondere "forse si'" a tutto e diventare inutile. Per
+        questo in pratica si sovradimensiona, si monitora il rapporto di bit accesi e si
+        rigenera il filtro quando l'insieme cresce oltre le attese.
+    - question: Quando NON useresti una struttura probabilistica?
+      answer: >-
+        Quando il numero e' contestabile o ha conseguenze. Una fattura basata su un conteggio
+        stimato non e' difendibile; una soglia contrattuale, un limite di quota che blocca un
+        cliente, un saldo, un controllo di autorizzazione vogliono strutture esatte. Ci
+        aggiungo un secondo caso meno ovvio: quando i dati stanno comodamente in memoria. Se
+        gli elementi distinti sono centomila, un insieme esatto costa pochi megabyte ed e'
+        piu' semplice, piu' verificabile e senza sorprese; introdurre un Bloom filter lì e'
+        complessita' che non compra nulla. Queste strutture si giustificano dai milioni di
+        elementi in su.
+    - question: Come useresti un Count-Min Sketch per trovare le chiavi calde?
+      answer: >-
+        Il Count-Min Sketch da' la frequenza stimata di una chiave che gli chiedi, ma non
+        sa elencare le chiavi, quindi da solo non basta: si abbina a una struttura che tiene
+        i primi N, tipicamente uno heap di dimensione fissa. Per ogni evento si aggiorna lo
+        sketch, si legge la stima della chiave e, se supera la piu' piccola nello heap, la si
+        inserisce. Cosi' con memoria costante si ottengono i candidati caldi. Il fatto che lo
+        sketch sovrastimi lavora a favore: una chiave davvero calda non verra' mai
+        sottostimata e quindi non sfuggira'; al massimo entrera' nei candidati qualche chiave
+        che calda non e', e la si scarta con una verifica successiva.
+  related: [cache-25-cache-danger, sd-10-batch-vs-streaming, sd-05-consistent-hashing, cache-21-what-and-where, core-09-rate-limiting-throttling]
+  resources:
+    - title: "Redis - HyperLogLog"
+      url: https://redis.io/docs/latest/develop/data-types/probabilistic/hyperloglogs/
+      kind: doc
+    - title: "Bloom filter - calcolatore interattivo dei parametri"
+      url: https://hur.st/bloomfilter/
+      kind: practice
+    - title: "Google - HyperLogLog in Practice"
+      url: https://research.google/pubs/hyperloglog-in-practice-algorithmic-engineering-of-a-state-of-the-art-cardinality-estimation-algorithm/
+      kind: article

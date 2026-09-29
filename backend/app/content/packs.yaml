@@ -604,7 +604,7 @@
 
 - id: pack-system-design
   title: System design
-  subtitle: Impostare il colloquio e reggere le domande di approfondimento
+  subtitle: Dal metodo del colloquio ai meccanismi su cui si va a fondo
   summary: >-
     Il colloquio di system design non si supera sapendo molte tecnologie, ma avendo
     un metodo: chiarire i requisiti, stimare gli ordini di grandezza, disegnare un
@@ -633,6 +633,16 @@
     - rel-38-observability
     - rel-40-traffic-spikes
     - sd-02-classic-designs
+    - sd-03-consistency-models
+    - sd-05-consistent-hashing
+    - sd-04-consensus-leader-election
+    - sd-06-feed-fanout
+    - sd-07-full-text-search
+    - sd-09-object-storage-upload
+    - sd-11-realtime-connections
+    - sd-10-batch-vs-streaming
+    - sd-12-probabilistic-structures
+    - sd-08-multi-region
   sources:
     - title: "The System Design Primer (Donne Martin)"
       url: https://github.com/donnemartin/system-design-primer
@@ -928,3 +938,70 @@
         La proposta originale spiega il problema che i virtual thread risolvono e i loro
         limiti meglio di qualsiasi articolo divulgativo. Utile per rispondere anche alla
         domanda su quando non servono.
+
+- id: pack-platform
+  title: Piattaforma e infrastruttura
+  subtitle: Container, Kubernetes, infrastruttura come codice, pipeline e segreti
+  summary: >-
+    E' la parte che gli annunci mettono sotto "DevOps" e che quasi nessuno studia
+    apposta, salvo poi trovarsela addosso al colloquio perche' il ruolo prevede di
+    rilasciare cio' che si scrive. Il percorso parte dal container, che si capisce
+    davvero solo sapendo che e' un processo Linux con la vista ristretta e non una
+    macchina virtuale leggera, e da lì sale: l'orchestratore e il suo ciclo di
+    riconciliazione, l'infrastruttura descritta in file versionati con il problema
+    dello stato che si porta dietro, la pipeline che rende il rilascio noioso, e la
+    gestione di configurazione e segreti, dove la risposta migliore e' quasi sempre
+    fare in modo che il segreto non esista. Chiude con il rilascio senza fermo, che
+    e' il punto in cui tutti questi pezzi si incontrano.
+  for_whom: >-
+    Per chi si candida su annunci che citano Docker, Kubernetes, Terraform o CI/CD
+    anche solo di sfuggita, e per chi ha gia' rilasciato qualcosa in cloud ma non
+    saprebbe spiegare a voce perche' funziona. Un junior puo' fermarsi ai primi due.
+  level: medium
+  tags: [devops, container, kubernetes, terraform, ci-cd, infrastruttura]
+  prerequisites:
+    - Fondamenti di API e backend
+  topic_ids:
+    - plat-01-container
+    - plat-02-kubernetes
+    - plat-03-iac
+    - plat-04-ci-cd
+    - plat-05-config-segreti
+    - eng-03-cloud-basics
+    - rel-39-deployments
+  sources:
+    - title: "The Twelve-Factor App"
+      url: https://12factor.net/
+      kind: article
+      note: >-
+        Dodici principi scritti nel 2011 che spiegano ancora oggi perche' la
+        configurazione sta fuori dall'artefatto e perche' i log vanno su stdout. Si
+        legge in mezz'ora ed e' il vocabolario con cui queste cose vengono chieste.
+    - title: "Docker - Best practices for writing Dockerfiles"
+      url: https://docs.docker.com/build/building/best-practices/
+      kind: doc
+      note: >-
+        La fonte da cui vengono le risposte su cache dei livelli, build multi-stage e
+        dimensione delle immagini. Utile soprattutto per capire quale istruzione
+        invalida cosa, che e' la domanda pratica che viene fatta piu' spesso.
+    - title: "Kubernetes - Concepts"
+      url: https://kubernetes.io/docs/concepts/
+      kind: doc
+      note: >-
+        Da leggere nell'ordine in cui e' scritta, partendo dal modello a
+        riconciliazione: se si comincia dai comandi di kubectl si impara a memoria una
+        sintassi senza capire perche' le modifiche fatte a mano vengono riassorbite.
+    - title: "Google - DORA, i quattro indicatori chiave"
+      url: https://dora.dev/guides/dora-metrics-four-keys/
+      kind: article
+      note: >-
+        Frequenza di rilascio, tempo di attraversamento, tasso di fallimento e tempo di
+        ripristino. Sono i numeri con cui si giudica una pipeline, e citarli da' alla
+        risposta un metro condiviso invece di un'opinione sulle preferenze personali.
+    - title: "OWASP - Secrets Management Cheat Sheet"
+      url: https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+      kind: doc
+      note: >-
+        Copre il ciclo di vita completo di un segreto, rotazione e revoca comprese. La
+        parte piu' utile al colloquio e' quella sui posti in cui i segreti sfuggono
+        senza che nessuno se ne accorga: log, tracce di eccezione, stato di Terraform.
