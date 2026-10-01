@@ -50,7 +50,7 @@ I `related` devono puntare a id esistenti e gli URL delle risorse devono essere
 - id: core-10-idempotency          # stabile: piani e quiz lo referenziano
   title: Idempotenza (specialmente nei pagamenti)
   category: core-concepts
-  track: knowledge                 # knowledge = si studia, technical = si esercita
+  track: technical                 # derivato dalla categoria, vedi sotto
   level: medium                    # easy | medium | hard
   tags: [api, affidabilita, pagamenti]
   estimated_minutes: 30
@@ -97,6 +97,25 @@ I `related` devono puntare a id esistenti e gli URL delle risorse devono essere
 `interview_answer` è il campo che fa la differenza: è scritto in prima persona,
 come lo diresti a voce. Non è un riassunto della teoria ma una risposta da
 colloquio, con i compromessi espliciti e le esperienze citate al posto giusto.
+
+### Il campo `track` non si scrive a mano
+
+Lo decide la categoria: `company` e `behavioral` sono `knowledge`, tutto il
+resto è `technical`. La regola sta in `track_for_category()`
+(`app/services/knowledge.py`) e viene applicata al caricamento, quindi un
+valore sbagliato nello YAML viene corretto in memoria — ma un test lo segnala,
+perché un file che mente è comunque un file da correggere.
+
+Serve distinguere due cose che prima erano lo stesso campo:
+
+| | Cos'è | Valori | Dove si legge |
+|---|---|---|---|
+| `Topic.track` | la **materia** della scheda | tecnica / conoscitiva | catalogo, percorsi |
+| `PlanItem.track` | il **tipo di attività** | teoria / pratica | piano di studi |
+
+Studiare una scheda tecnica è teoria; il quiz e l'esercizio sulla stessa
+scheda sono pratica. La mappa dalle attività ai binari è `TRACK_BY_KIND` in
+`app/services/planner.py`.
 
 ## Struttura di una domanda
 
@@ -159,6 +178,20 @@ test**: se aggiungi un problema con una soluzione sbagliata, la CI lo dice.
 
 Senza AI configurata puoi scrivere la scheda a mano da **Argomenti → Scrivi un
 argomento**.
+
+### Dal piano, dai suggerimenti dell'AI
+
+Il piano elenca sotto **Non coperto dal catalogo** le competenze dell'annuncio
+per cui non esiste una scheda. **Genera la scheda** la scrive e la innesta nel
+piano stesso: compare nel calendario con priorità 5 (più il suo quiz, se le
+domande sono state generate), il suggerimento esce dall'elenco e la riga
+corrispondente sparisce dalle lacune.
+
+I suggerimenti sono **al massimo tre** e passano da un filtro deterministico:
+se il catalogo ha già una scheda dedicata a quel termine, il suggerimento viene
+scartato. Senza quel filtro il modello ne trovava sempre uno in più — generata
+la scheda su Kubernetes proponeva Helm, poi gli operator — e si generavano
+schede all'infinito senza mai arrivare a studiare.
 
 ### Rendere permanente ciò che hai aggiunto
 

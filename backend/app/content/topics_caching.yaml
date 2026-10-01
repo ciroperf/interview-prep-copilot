@@ -4,7 +4,7 @@
 - id: cache-21-what-and-where
   title: Cos'è il caching e dove mettere la cache
   category: caching
-  track: knowledge
+  track: technical
   level: easy
   tags: [caching, performance]
   estimated_minutes: 25
@@ -171,7 +171,7 @@
 - id: cache-22-eviction
   title: Strategie di eviction (TTL, LRU, LFU)
   category: caching
-  track: knowledge
+  track: technical
   level: medium
   tags: [caching, performance, algoritmi]
   estimated_minutes: 25
@@ -342,7 +342,7 @@
 - id: cache-23-consistency
   title: Coerenza della cache e dati stantii
   category: caching
-  track: knowledge
+  track: technical
   level: hard
   tags: [caching, consistenza, distribuito]
   estimated_minutes: 35
@@ -543,7 +543,7 @@
 - id: cache-24-cdn
   title: CDN e edge caching
   category: caching
-  track: knowledge
+  track: technical
   level: medium
   tags: [caching, cdn, performance, http]
   estimated_minutes: 25
@@ -728,7 +728,7 @@
 - id: cache-25-cache-danger
   title: Perché la cache può rendere sbagliato un sistema
   category: caching
-  track: knowledge
+  track: technical
   level: hard
   tags: [caching, affidabilita, distribuito]
   estimated_minutes: 25

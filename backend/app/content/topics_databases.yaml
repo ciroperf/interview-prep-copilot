@@ -5,7 +5,7 @@
 - id: db-11-sql-vs-nosql
   title: SQL vs NoSQL - quando usare cosa
   category: databases
-  track: knowledge
+  track: technical
   level: medium
   tags: [database, sql, nosql, design]
   estimated_minutes: 30
@@ -186,7 +186,7 @@
 - id: db-12-indexes
   title: Indici e come velocizzano le query
   category: databases
-  track: knowledge
+  track: technical
   level: medium
   tags: [database, performance, sql]
   estimated_minutes: 35
@@ -383,7 +383,7 @@
 - id: db-13-acid
   title: Proprietà ACID
   category: databases
-  track: knowledge
+  track: technical
   level: easy
   tags: [database, transazioni, sql]
   estimated_minutes: 20
@@ -544,7 +544,7 @@
 - id: db-14-transactions-isolation
   title: Transazioni e livelli di isolamento
   category: databases
-  track: knowledge
+  track: technical
   level: hard
   tags: [database, transazioni, concorrenza]
   estimated_minutes: 40
@@ -762,7 +762,7 @@
 - id: db-15-normalization
   title: Normalizzazione vs denormalizzazione
   category: databases
-  track: knowledge
+  track: technical
   level: medium
   tags: [database, design, modellazione]
   estimated_minutes: 25
@@ -927,7 +927,7 @@
 - id: db-16-pagination
   title: Paginazione - offset vs cursor
   category: databases
-  track: knowledge
+  track: technical
   level: medium
   tags: [database, api, performance]
   estimated_minutes: 25
@@ -1095,7 +1095,7 @@
 - id: db-17-sharding-partitioning
   title: Sharding e partizionamento
   category: databases
-  track: knowledge
+  track: technical
   level: hard
   tags: [database, scalabilita, distribuito]
   estimated_minutes: 35
@@ -1301,7 +1301,7 @@
 - id: db-18-read-replicas
   title: Read replica e scalabilità delle scritture
   category: databases
-  track: knowledge
+  track: technical
   level: medium
   tags: [database, scalabilita, replica]
   estimated_minutes: 30
@@ -1477,7 +1477,7 @@
 - id: db-19-duplicate-records
   title: Gestire i record duplicati
   category: databases
-  track: knowledge
+  track: technical
   level: medium
   tags: [database, integrita, concorrenza]
   estimated_minutes: 25
@@ -1660,7 +1660,7 @@
 - id: db-20-locking
   title: Locking ottimistico vs pessimistico
   category: databases
-  track: knowledge
+  track: technical
   level: medium
   tags: [database, concorrenza, transazioni]
   estimated_minutes: 30

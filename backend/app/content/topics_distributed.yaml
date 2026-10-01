@@ -4,7 +4,7 @@
 - id: dist-26-load-balancing
   title: Load balancing (round-robin, least connections, hashing)
   category: distributed
-  track: knowledge
+  track: technical
   level: medium
   tags: [distribuito, scalabilita, networking]
   estimated_minutes: 25
@@ -178,7 +178,7 @@
 - id: dist-27-horizontal-vertical
   title: Scaling orizzontale vs verticale
   category: distributed
-  track: knowledge
+  track: technical
   level: easy
   tags: [scalabilita, architettura, cloud]
   estimated_minutes: 20
@@ -349,7 +349,7 @@
 - id: dist-28-microservices-monolith
   title: Microservizi vs monolite (trade-off)
   category: distributed
-  track: knowledge
+  track: technical
   level: medium
   tags: [architettura, distribuito, organizzazione]
   estimated_minutes: 30
@@ -521,7 +521,7 @@
 - id: dist-29-service-communication
   title: Comunicazione fra servizi (sincrona vs asincrona)
   category: distributed
-  track: knowledge
+  track: technical
   level: medium
   tags: [distribuito, architettura, messaggistica]
   estimated_minutes: 30
@@ -701,7 +701,7 @@
 - id: dist-30-message-queues
   title: Message queue (Kafka, RabbitMQ, SQS)
   category: distributed
-  track: knowledge
+  track: technical
   level: medium
   tags: [distribuito, messaggistica, kafka]
   estimated_minutes: 35

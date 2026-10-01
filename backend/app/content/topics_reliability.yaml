@@ -4,7 +4,7 @@
 - id: rel-31-delivery-semantics
   title: Exactly-once vs at-least-once
   category: reliability
-  track: knowledge
+  track: technical
   level: hard
   tags: [affidabilita, messaggistica, distribuito]
   estimated_minutes: 30
@@ -174,7 +174,7 @@
 - id: rel-32-retries-timeouts-breakers
   title: Retry, timeout e circuit breaker
   category: reliability
-  track: knowledge
+  track: technical
   level: medium
   tags: [affidabilita, resilienza, distribuito]
   estimated_minutes: 30
@@ -369,7 +369,7 @@
 - id: rel-33-race-conditions
   title: Gestire le race condition
   category: reliability
-  track: knowledge
+  track: technical
   level: hard
   tags: [concorrenza, affidabilita, database]
   estimated_minutes: 30
@@ -543,7 +543,7 @@
 - id: rel-34-distributed-locking
   title: Lock distribuito
   category: reliability
-  track: knowledge
+  track: technical
   level: hard
   tags: [distribuito, concorrenza, redis]
   estimated_minutes: 30
@@ -727,7 +727,7 @@
 - id: rel-35-event-driven
   title: Architettura event-driven
   category: reliability
-  track: knowledge
+  track: technical
   level: medium
   tags: [architettura, distribuito, eventi]
   estimated_minutes: 30
@@ -916,7 +916,7 @@
 - id: rel-36-saga
   title: Saga pattern (transazioni distribuite)
   category: reliability
-  track: knowledge
+  track: technical
   level: hard
   tags: [distribuito, architettura, transazioni]
   estimated_minutes: 35
@@ -1109,7 +1109,7 @@
 - id: rel-37-graceful-degradation
   title: Degrado graduale (graceful degradation)
   category: reliability
-  track: knowledge
+  track: technical
   level: medium
   tags: [affidabilita, resilienza, architettura]
   estimated_minutes: 25
@@ -1289,7 +1289,7 @@
 - id: rel-38-observability
   title: Observability (log, metriche, tracing)
   category: reliability
-  track: knowledge
+  track: technical
   level: medium
   tags: [affidabilita, osservabilita, operazioni]
   estimated_minutes: 30
@@ -1477,7 +1477,7 @@
 - id: rel-39-deployments
   title: Strategie di deploy (blue-green, rolling, canary)
   category: reliability
-  track: knowledge
+  track: technical
   level: medium
   tags: [deploy, devops, affidabilita]
   estimated_minutes: 30
@@ -1662,7 +1662,7 @@
 - id: rel-40-traffic-spikes
   title: Picchi di traffico e carico virale
   category: reliability
-  track: knowledge
+  track: technical
   level: hard
   tags: [scalabilita, affidabilita, performance]
   estimated_minutes: 30

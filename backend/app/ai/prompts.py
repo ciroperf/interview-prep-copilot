@@ -183,7 +183,13 @@ PLAN_SCHEMA = {
         "extra_recommendations": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Temi importanti per questo ruolo ma assenti dal catalogo",
+            "maxItems": 3,
+            "description": "Al massimo 3, e solo se servono davvero. Una competenza "
+            "nominata esplicitamente dall'annuncio per cui nel catalogo non esiste "
+            "nessuna scheda, nemmeno vicina. Mai un sotto-argomento o un dettaglio "
+            "di una scheda che c'è già: se il catalogo ha 'Kubernetes', Helm e gli "
+            "operator non vanno qui. Se il catalogo copre tutto, lascia la lista "
+            "vuota: è il caso normale, non un fallimento.",
         },
     },
     "required": ["summary", "focus_areas", "selected_topics"],
@@ -212,7 +218,13 @@ def plan_user(
         "(5 = imprescindibile per questo colloquio) e motiva ogni scelta collegandola "
         "all'annuncio. Abbassa la priorita' dei punti di forza gia' dichiarati e alzala "
         "per le aree deboli che l'annuncio richiede. Non inventare id non presenti nel "
-        "catalogo: cio' che manca va in `extra_recommendations`."
+        "catalogo.\n\n"
+        "Prima di mettere qualcosa in `extra_recommendations`, cerca nel catalogo: "
+        "quasi sempre c'e' una scheda che copre il tema con un titolo diverso, e in "
+        "quel caso va usato il suo id. Scrivi li' solo le competenze dell'annuncio "
+        "per cui non trovi proprio nulla, al massimo tre, e al livello della "
+        "competenza richiesta - non del singolo dettaglio tecnico. Una lista vuota "
+        "e' la risposta giusta quando il catalogo basta."
     )
 
 
@@ -408,12 +420,8 @@ TOPIC_SCHEMA = {
         "category": {
             "type": "string",
             "description": "Una fra: core-concepts, databases, caching, distributed, "
-            "reliability, dsa, system-design, patterns, engineering, languages",
-        },
-        "track": {
-            "type": "string",
-            "enum": ["knowledge", "technical"],
-            "description": "knowledge se si studia e si racconta, technical se si esercita",
+            "reliability, dsa, system-design, patterns, engineering, languages, "
+            "frontend, platform, behavioral, company",
         },
         "level": {"type": "string", "enum": ["easy", "medium", "hard"]},
         "tags": {"type": "array", "items": {"type": "string"}},

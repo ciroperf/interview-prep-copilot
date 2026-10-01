@@ -145,7 +145,7 @@ export const api = {
     suggestion: string
     term?: string
     num_questions?: number
-  }) => request<{ topic: Topic; question_count: number }>(
+  }) => request<{ topic: Topic; question_count: number; plan_items_added: number }>(
     '/knowledge/topics/from-suggestion',
     json(body),
   ),

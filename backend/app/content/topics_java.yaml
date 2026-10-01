@@ -3,7 +3,7 @@
 - id: java-01-linguaggio-jvm
   title: Java e la JVM - memoria, garbage collection, equals e hashCode
   category: languages
-  track: knowledge
+  track: technical
   level: medium
   tags: [java, jvm, memoria, linguaggio]
   estimated_minutes: 35
@@ -193,7 +193,7 @@
 - id: java-02-concorrenza
   title: Concorrenza in Java - thread, pool e virtual thread
   category: languages
-  track: knowledge
+  track: technical
   level: hard
   tags: [java, concorrenza, thread, jvm]
   estimated_minutes: 35
@@ -372,7 +372,7 @@
 - id: java-03-spring-core
   title: Spring - inversione del controllo, bean e configurazione
   category: languages
-  track: knowledge
+  track: technical
   level: medium
   tags: [java, spring, dependency-injection, backend]
   estimated_minutes: 30

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.services.knowledge import normalize, tokenize
+from app.services.knowledge import normalize, tokenize, track_for_category
 
 
 def test_carica_argomenti_domande_e_problemi(kb):
@@ -119,3 +119,32 @@ def test_lo_stack_degli_annunci_tipici_trova_l_argomento_giusto(kb):
         assert migliore.startswith(prefisso), (
             f"'{termine}' doveva portare a {prefisso}*, ha portato a {migliore}"
         )
+
+
+def test_il_binario_di_un_argomento_lo_decide_la_categoria(kb):
+    """Materia tecnica, etichetta tecnica.
+
+    Il campo `track` nello YAML era libero e metà del catalogo - database,
+    caching, affidabilità, pattern - si dichiarava "knowledge" pur essendo
+    materia tecnica: nell'app quelle schede comparivano come conoscitive.
+    """
+    for topic in kb.topics.values():
+        atteso = track_for_category(topic.category)
+        assert topic.track == atteso, (
+            f"{topic.id} ({topic.category}): track {topic.track}, atteso {atteso}"
+        )
+
+    conoscitivi = {t.category for t in kb.topics.values() if t.track == "knowledge"}
+    assert conoscitivi == {"company", "behavioral"}
+
+
+def test_lo_yaml_dichiara_lo_stesso_binario_che_usa_l_app(kb):
+    """La normalizzazione al caricamento non deve coprire un file che mente."""
+    import yaml
+
+    for path in sorted(kb.content_dir.glob("topics_*.yaml")):
+        for row in yaml.safe_load(path.read_text(encoding="utf-8")) or []:
+            atteso = track_for_category(row["category"])
+            assert row.get("track", "technical") == atteso, (
+                f"{path.name} / {row['id']}: track da correggere in {atteso}"
+            )

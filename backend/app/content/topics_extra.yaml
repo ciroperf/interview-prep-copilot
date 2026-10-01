@@ -845,7 +845,7 @@
 - id: eng-01-testing
   title: "Testing: piramide, doppi e cosa testare"
   category: engineering
-  track: knowledge
+  track: technical
   level: medium
   tags: [testing, qualita, pratiche]
   estimated_minutes: 30
@@ -1026,7 +1026,7 @@
 - id: eng-02-git
   title: "Git: branching, merge, rebase"
   category: engineering
-  track: knowledge
+  track: technical
   level: easy
   tags: [git, pratiche, collaborazione]
   estimated_minutes: 25
@@ -1194,7 +1194,7 @@
 - id: eng-03-cloud-basics
   title: Fondamenti di cloud e container
   category: engineering
-  track: knowledge
+  track: technical
   level: medium
   tags: [cloud, docker, kubernetes, devops]
   estimated_minutes: 35
@@ -1382,7 +1382,7 @@
 - id: eng-04-security
   title: Sicurezza applicativa (OWASP Top 10)
   category: engineering
-  track: knowledge
+  track: technical
   level: medium
   tags: [sicurezza, owasp, backend]
   estimated_minutes: 35
@@ -1566,7 +1566,7 @@
 - id: eng-05-code-quality
   title: Qualità del codice, SOLID e code review
   category: engineering
-  track: knowledge
+  track: technical
   level: medium
   tags: [design, solid, pratiche]
   estimated_minutes: 30

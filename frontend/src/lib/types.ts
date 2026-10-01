@@ -133,8 +133,8 @@ export interface TopicGap {
 export interface TopicDraft {
   title: string
   summary: string
+  // Il binario non si invia: lo deriva il server dalla categoria.
   category?: string
-  track?: Track
   level?: Difficulty
   tags?: string[]
   key_points?: string[]

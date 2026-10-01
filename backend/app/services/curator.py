@@ -34,7 +34,7 @@ from ..domain.models import (
     utcnow,
 )
 from ..storage.base import Repository
-from .knowledge import KnowledgeBase
+from .knowledge import KnowledgeBase, track_for_category
 
 # Presi dal modello invece che riscritti: se SourceKind cambia, questo segue.
 VALID_SOURCE_KINDS = set(get_args(SourceKind))
@@ -92,32 +92,6 @@ class KnowledgeCurator:
 
     # --- creazione di un argomento ------------------------------------------
 
-    @staticmethod
-    def term_from_suggestion(suggestion: str) -> str:
-        """Ricava un'etichetta breve dalla frase di un suggerimento.
-
-        I suggerimenti arrivano come "Studiare X specific: a, b e c" oppure
-        "Approfondire Y pratiche: ...". Serve un nome corto e stabile, perché
-        da lì nasce l'id dell'argomento e il termine con cui gli annunci futuri
-        lo aggancieranno. Si tagliano il verbo iniziale e tutto quello che
-        segue i due punti, che è l'elenco dei dettagli.
-        """
-        testo = suggestion.strip()
-        # Via il prefisso che il modello mette quasi sempre.
-        for prefisso in ("Non coperto dal catalogo:", "Studiare", "Approfondire",
-                         "Studio mirato di", "Pratica su", "Ripasso pratico di",
-                         "Esercizi pratici:", "Pratica"):
-            if testo.lower().startswith(prefisso.lower()):
-                testo = testo[len(prefisso):].lstrip(" :")
-                break
-        # I due punti separano il tema dall'elenco dei dettagli: tieni il tema.
-        testo = testo.split(":", 1)[0]
-        # E la virgola o la parentesi separano il primo concetto dagli altri.
-        for separatore in (" (", ",", " e ", " — ", " - "):
-            testo = testo.split(separatore, 1)[0]
-        testo = testo.strip(" .;")
-        return (testo[:80] or suggestion[:80]).strip()
-
     async def create_topic(
         self, request: TopicCreate, posting: JobPosting | None = None
     ) -> tuple[Topic, list[QuizQuestion]]:
@@ -150,11 +124,12 @@ class KnowledgeCurator:
     def _from_draft(topic_id: str, request: TopicCreate) -> Topic:
         draft = request.draft
         assert draft is not None
+        categoria = request.category or draft.category
         return Topic(
             id=topic_id,
             title=draft.title,
-            category=request.category or draft.category,
-            track=draft.track,
+            category=categoria,
+            track=track_for_category(categoria),
             level=draft.level,
             tags=draft.tags or [request.term.lower()],
             summary=draft.summary,
@@ -193,12 +168,16 @@ class KnowledgeCurator:
             return [str(v)[:size] for v in value][:limit] if isinstance(value, list) else []
 
         level = str(data.get("level", "medium"))
-        track = str(data.get("track", "knowledge"))
+        categoria = request.category or str(data.get("category") or "custom")[:40]
         topic = Topic(
             id=topic_id,
             title=str(data.get("title") or request.term)[:120],
-            category=request.category or str(data.get("category") or "custom")[:40],
-            track=track if track in {"knowledge", "technical"} else "knowledge",  # type: ignore
+            category=categoria,
+            # Il binario non lo chiediamo piu' al modello: lo decide la materia,
+            # con la stessa regola del catalogo versionato. Chiesto, rispondeva
+            # quasi sempre "knowledge" e una scheda su Kubernetes finiva fra i
+            # temi da raccontare.
+            track=track_for_category(categoria),
             level=level if level in {"easy", "medium", "hard"} else "medium",  # type: ignore
             tags=[str(t)[:40] for t in (data.get("tags") or [])][:8] or [request.term.lower()],
             summary=str(data.get("summary", ""))[:2000],

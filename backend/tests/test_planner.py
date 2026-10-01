@@ -4,9 +4,17 @@ from __future__ import annotations
 
 from conftest import SAMPLE_JOB
 
-from app.domain.models import PlanItem, StudyPlanCreate
+from app.domain.models import PlanItem, StudyPlan, StudyPlanCreate, Topic
 from app.services.jobs import JobAnalyzer
-from app.services.planner import StudyPlanBuilder, plan_by_day, plan_progress_by_track
+from app.services.planner import (
+    MAX_SUGGESTIONS,
+    TRACK_BY_KIND,
+    StudyPlanBuilder,
+    add_topic_to_plan,
+    drop_suggestion,
+    plan_by_day,
+    plan_progress_by_track,
+)
 
 
 def _posting():
@@ -207,6 +215,112 @@ async def test_nessun_quiz_su_argomenti_non_studiati(kb, offline_ai):
             _posting(),
             StudyPlanCreate(job_id="x", days=giorni, daily_minutes=minuti, use_ai=False),
         )
-        studiati = {i.topic_id for i in plan.items if i.track == "knowledge" and i.topic_id}
+        # Studiato = qualunque attività sull'argomento che non sia il quiz stesso.
+        # Non "track knowledge": il system design si studia esercitandosi, ed è
+        # un'attività del binario pratico.
+        studiati = {i.topic_id for i in plan.items if i.kind != "quiz" and i.topic_id}
         orfani = [i.title for i in plan.items if i.kind == "quiz" and i.topic_id not in studiati]
         assert not orfani, f"piano {giorni}x{minuti}: quiz senza studio -> {orfani}"
+
+
+async def test_il_binario_dell_attivita_non_dipende_dalla_materia(kb, offline_ai):
+    """Leggere una scheda è teoria anche quando la materia è tecnicissima.
+
+    Finché l'item ereditava il binario dell'argomento, con un catalogo quasi
+    tutto tecnico il piano non aveva più una parte di teoria e l'alternanza fra
+    i due binari lavorava su dati sbagliati.
+    """
+    builder = StudyPlanBuilder(kb, offline_ai)
+    plan = await builder.build(
+        _posting(), StudyPlanCreate(job_id="x", days=10, daily_minutes=120, use_ai=False)
+    )
+    for item in plan.items:
+        assert item.track == TRACK_BY_KIND[item.kind], f"{item.title}: binario incoerente"
+    assert {i.track for i in plan.items} == {"knowledge", "technical"}
+
+
+async def test_i_quiz_arrivano_anche_sugli_argomenti_tecnici(kb, offline_ai):
+    """Regressione: `studied` si popolava solo dagli item del binario conoscitivo.
+
+    Da quando lo studio eredita il binario dell'argomento, un argomento tecnico
+    non finiva in quell'insieme e il suo quiz veniva scartato come orfano. Il
+    risultato era zero quiz su Spring, JPA, Kubernetes e compagnia.
+    """
+    builder = StudyPlanBuilder(kb, offline_ai)
+    plan = await builder.build(
+        _posting(), StudyPlanCreate(job_id="x", days=10, daily_minutes=120, use_ai=False)
+    )
+    quiz = [i for i in plan.items if i.kind == "quiz"]
+    assert quiz, "nessun quiz nel piano"
+    tecnici = {t.id for t in kb.topics.values() if t.track == "technical"}
+    assert any(i.topic_id in tecnici for i in quiz), (
+        "nessun quiz su un argomento tecnico: i quiz vengono scartati di nuovo"
+    )
+
+
+def test_i_suggerimenti_gia_coperti_dal_catalogo_vengono_scartati(kb, offline_ai):
+    """È il freno al ciclo infinito: se la scheda esiste, la lacuna non torna."""
+    builder = StudyPlanBuilder(kb, offline_ai)
+    grezzi = [
+        "Studiare Kubernetes: pod, deployment e probe",  # c'è già plat-02
+        "Approfondire Docker e la build delle immagini",  # c'è già plat-01
+        "Studiare Salesforce Commerce Cloud: template e hook",  # davvero assente
+    ]
+    tenuti = builder._filtra_suggerimenti(grezzi)
+    assert tenuti == [grezzi[2]]
+
+
+def test_i_suggerimenti_sono_al_massimo_tre_e_senza_doppioni(kb, offline_ai):
+    builder = StudyPlanBuilder(kb, offline_ai)
+    grezzi = [f"Studiare Piattaforma Interna {n}" for n in range(6)]
+    assert len(builder._filtra_suggerimenti(grezzi)) == MAX_SUGGESTIONS
+    # Stessa etichetta scritta in due modi: una sola volta.
+    doppi = ["Studiare Zuora billing: cicli", "Approfondire Zuora billing"]
+    assert len(builder._filtra_suggerimenti(doppi)) == 1
+
+
+async def test_la_scheda_creata_dopo_entra_nel_piano(kb, offline_ai):
+    """Il piano è una fotografia: senza questo innesto la scheda restava fuori."""
+    builder = StudyPlanBuilder(kb, offline_ai)
+    plan = await builder.build(
+        _posting(), StudyPlanCreate(job_id="x", days=5, daily_minutes=90, use_ai=False)
+    )
+    prima = len(plan.items)
+    topic = Topic(
+        id="custom-sfcc",
+        title="Salesforce Commerce Cloud",
+        category="engineering",
+        summary="Storefront, template e hook.",
+        estimated_minutes=40,
+    )
+
+    nuovi = add_topic_to_plan(plan, topic, has_questions=True)
+
+    assert len(nuovi) == 2, "studio e quiz"
+    assert len(plan.items) == prima + 2
+    studio, quiz = nuovi
+    assert studio.title == "Studia: Salesforce Commerce Cloud"
+    assert studio.track == "knowledge" and quiz.track == "technical"
+    assert studio.priority == 5
+    assert 1 <= studio.day <= plan.days
+    # Idempotente: un secondo clic non raddoppia le attività.
+    assert add_topic_to_plan(plan, topic, has_questions=True) == []
+    assert len(plan.items) == prima + 2
+
+
+def test_il_suggerimento_soddisfatto_esce_dal_piano():
+    """Se restasse, al ricaricamento la pagina lo riproporrebbe da generare."""
+    suggerimento = "Studiare Salesforce Commerce Cloud: template e hook"
+    plan = StudyPlan(
+        job_id="job-1",
+        suggested_topics=[suggerimento, "Studiare Zuora"],
+        gap_analysis=[
+            f"Non coperto dal catalogo: {suggerimento}",
+            "Kafka: richiesto con importanza 5/5.",
+        ],
+    )
+
+    drop_suggestion(plan, suggerimento)
+
+    assert plan.suggested_topics == ["Studiare Zuora"]
+    assert plan.gap_analysis == ["Kafka: richiesto con importanza 5/5."]

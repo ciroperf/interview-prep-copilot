@@ -7,7 +7,7 @@
 - id: py-01-modello-oggetti
   title: Il modello a oggetti di Python
   category: languages
-  track: knowledge
+  track: technical
   level: medium
   tags: [python, oggetti, dunder, mutabilita]
   estimated_minutes: 30
@@ -188,7 +188,7 @@
 - id: py-02-memoria-gc
   title: Memoria e garbage collection in CPython
   category: languages
-  track: knowledge
+  track: technical
   level: hard
   tags: [python, memoria, gc, performance]
   estimated_minutes: 30
@@ -374,7 +374,7 @@
 - id: py-03-gil-concorrenza
   title: GIL, thread e processi
   category: languages
-  track: knowledge
+  track: technical
   level: hard
   tags: [python, concorrenza, gil, performance]
   estimated_minutes: 35
@@ -567,7 +567,7 @@
 - id: py-04-asyncio
   title: asyncio - event loop, task e cancellazione
   category: languages
-  track: knowledge
+  track: technical
   level: hard
   tags: [python, asyncio, concorrenza, async]
   estimated_minutes: 35
@@ -770,7 +770,7 @@
 - id: py-05-tipi-e-typing
   title: Type hints, mypy e tipi a runtime
   category: languages
-  track: knowledge
+  track: technical
   level: medium
   tags: [python, typing, mypy, qualita]
   estimated_minutes: 30

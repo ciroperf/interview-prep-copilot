@@ -3,7 +3,7 @@
 - id: fe-01-react-rendering
   title: React - componenti, rendering e hook
   category: frontend
-  track: knowledge
+  track: technical
   level: medium
   tags: [react, frontend, hook, rendering]
   estimated_minutes: 35
@@ -183,7 +183,7 @@
 - id: fe-02-react-stato-dati
   title: React - stato, dati remoti e state management
   category: frontend
-  track: knowledge
+  track: technical
   level: medium
   tags: [react, stato, frontend, dati]
   estimated_minutes: 30
@@ -362,7 +362,7 @@
 - id: fe-03-angular
   title: Angular - change detection, signal e dependency injection
   category: frontend
-  track: knowledge
+  track: technical
   level: medium
   tags: [angular, frontend, signal, rxjs]
   estimated_minutes: 35
@@ -549,7 +549,7 @@
 - id: fe-04-css-layout
   title: CSS - layout, Flexbox, Grid e responsive
   category: frontend
-  track: knowledge
+  track: technical
   level: medium
   tags: [css, layout, responsive, frontend]
   estimated_minutes: 30

@@ -7,7 +7,7 @@
 - id: js-01-tipi-coercizione
   title: Tipi primitivi e coercizione
   category: languages
-  track: knowledge
+  track: technical
   level: medium
   tags: [javascript, tipi, coercizione, fondamentali]
   estimated_minutes: 25
@@ -183,7 +183,7 @@
 - id: js-02-scope-closure-this
   title: Scope, closure e this
   category: languages
-  track: knowledge
+  track: technical
   level: medium
   tags: [javascript, closure, this, scope]
   estimated_minutes: 30
@@ -370,7 +370,7 @@
 - id: js-03-prototipi-classi
   title: Prototipi, classi ed ereditarietà
   category: languages
-  track: knowledge
+  track: technical
   level: medium
   tags: [javascript, prototipi, classi, oop]
   estimated_minutes: 25
@@ -546,7 +546,7 @@
 - id: js-04-event-loop
   title: Event loop, microtask e asincronia
   category: languages
-  track: knowledge
+  track: technical
   level: hard
   tags: [javascript, event-loop, async, promise]
   estimated_minutes: 35
@@ -929,7 +929,7 @@
 - id: js-06-moduli-bundling
   title: Moduli, bundling e dimensione del bundle
   category: languages
-  track: knowledge
+  track: technical
   level: medium
   tags: [javascript, moduli, bundling, performance]
   estimated_minutes: 25
@@ -1104,7 +1104,7 @@
 - id: js-07-typescript
   title: TypeScript - tipi strutturali, narrowing e confini
   category: languages
-  track: knowledge
+  track: technical
   level: medium
   tags: [typescript, tipi, qualita]
   estimated_minutes: 30

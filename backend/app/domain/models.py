@@ -114,6 +114,10 @@ class Topic(BaseModel):
     id: str
     title: str
     category: str
+    # La materia della scheda: tecnica o conoscitiva. Non si scrive a mano, la
+    # deriva `track_for_category()` dalla categoria, sia per il catalogo YAML
+    # sia per gli argomenti generati dall'AI. Da non confondere con
+    # `PlanItem.track`, che dice invece che tipo di attività è (teoria o pratica).
     track: Track = "technical"
     level: Difficulty = "medium"
     tags: list[str] = Field(default_factory=list)
@@ -279,6 +283,9 @@ class JobPostingCreate(BaseModel):
 class PlanItem(BaseModel):
     id: str = Field(default_factory=lambda: new_id("item"))
     day: int = 1
+    # Il tipo di attività: knowledge = teoria da studiare, technical = pratica
+    # da fare. Lo decide `kind` tramite `TRACK_BY_KIND`, non la materia
+    # dell'argomento: leggere una scheda tecnica resta teoria.
     track: Track = "technical"
     kind: ItemKind = "study"
     title: str
@@ -453,7 +460,6 @@ class TopicDraft(BaseModel):
     title: str = Field(min_length=3, max_length=120)
     summary: str = Field(min_length=20)
     category: str = "custom"
-    track: Track = "knowledge"
     level: Difficulty = "medium"
     tags: list[str] = Field(default_factory=list)
     key_points: list[str] = Field(default_factory=list)

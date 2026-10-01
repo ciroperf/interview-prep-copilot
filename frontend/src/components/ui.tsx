@@ -75,13 +75,25 @@ export function Stat({ value, label }: { value: ReactNode; label: string }) {
   )
 }
 
-const TRACK_LABEL: Record<Track, string> = {
-  knowledge: 'Conoscitiva',
-  technical: 'Tecnica',
+/** Il binario risponde a due domande diverse a seconda di dove lo si legge.
+ *
+ * Nel catalogo dice che materia e' la scheda: tecnica o conoscitiva. Nel piano
+ * dice che tipo di attivita' e': teoria da studiare o pratica da fare. Erano la
+ * stessa etichetta, e cosi' una scheda su JPA finiva marcata "conoscitiva".
+ */
+const TRACK_LABEL: Record<'materia' | 'attivita', Record<Track, string>> = {
+  materia: { knowledge: 'Conoscitivo', technical: 'Tecnico' },
+  attivita: { knowledge: 'Teoria', technical: 'Pratica' },
 }
 
-export function TrackBadge({ track }: { track: Track }) {
-  return <span className={`badge ${track}`}>{TRACK_LABEL[track]}</span>
+export function TrackBadge({
+  track,
+  come = 'materia',
+}: {
+  track: Track
+  come?: 'materia' | 'attivita'
+}) {
+  return <span className={`badge ${track}`}>{TRACK_LABEL[come][track]}</span>
 }
 
 const KIND_LABEL: Record<ItemKind, string> = {

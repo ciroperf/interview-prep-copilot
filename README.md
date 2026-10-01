@@ -3,15 +3,21 @@
 Da un annuncio di lavoro a un piano di studi su misura per quel colloquio.
 
 Incolli il testo dell'offerta, l'app ne estrae ruolo, seniority, stack e
-requisiti, e costruisce un piano diviso in **parte conoscitiva** (teoria da
-saper raccontare, scheda azienda, domande comportamentali) e **parte tecnica**
-(quiz, esercizi di coding, system design), tarato sui giorni e sui minuti che
-hai davvero a disposizione.
+requisiti, e costruisce un piano diviso in **teoria** (schede da studiare,
+scheda azienda, domande comportamentali) e **pratica** (quiz, esercizi di
+coding, system design), tarato sui giorni e sui minuti che hai davvero a
+disposizione.
+
+Due parole che nell'app vogliono dire cose diverse: una *scheda* è
+**tecnica** o **conoscitiva** secondo la materia (Kubernetes è tecnica, le
+domande comportamentali no), mentre un'*attività del piano* è **teoria** o
+**pratica** secondo cosa si fa (leggere la scheda su Kubernetes è teoria, il
+quiz sulla stessa scheda è pratica).
 
 ```
   Annuncio  ─►  Analisi  ─►  Piano di studi  ─►  Quiz · Coding · CV
                    │              │
-                   │              └─ conoscitiva  +  tecnica
+                   │              └─ teoria  +  pratica
                    └─ scheda azienda, requisiti pesati, lacune del catalogo
 ```
 

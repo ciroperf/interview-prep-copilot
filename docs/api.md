@@ -87,7 +87,7 @@ curl -s -X POST "$API/api/plans" \
 ```
 
 La risposta ha quattro sezioni: `plan` (con gli `items`), `progress`,
-`by_track` (statistiche separate per binario conoscitivo e tecnico) e `by_day`
+`by_track` (statistiche separate per teoria e pratica) e `by_day`
 (il calendario già raggruppato).
 
 Stati possibili di un'attività: `todo`, `in_progress`, `done`, `skipped`.
@@ -101,6 +101,7 @@ Stati possibili di un'attività: `todo`, `in_progress`, `done`, `skipped`.
 | GET | `/knowledge/topics/{id}` | Argomento completo. |
 | GET | `/knowledge/gaps?job_id=` | Competenze dell'annuncio senza argomento dedicato. |
 | POST | `/knowledge/topics` | Aggiunge un argomento al catalogo. |
+| POST | `/knowledge/topics/from-suggestion` | Genera la scheda di un suggerimento del piano e la innesta in quel piano. |
 | DELETE | `/knowledge/topics/{id}` | Elimina un argomento aggiunto (non quelli del repo). |
 | GET | `/knowledge/export` | Argomenti aggiunti, nel formato dei file YAML. |
 

@@ -312,3 +312,94 @@ def test_il_piano_espone_i_suggerimenti_come_campo_a_parte(client):
     ).json()["plan"]
 
     assert plan["suggested_topics"] == []
+
+
+class _FakeAI:
+    """Client AI finto: la rotta from-suggestion ne richiede uno disponibile."""
+
+    available = True
+
+    async def complete_json(self, system: str, user: str, **_kwargs) -> dict:
+        return {
+            "title": "Salesforce Commerce Cloud",
+            "category": "engineering",
+            "summary": "Storefront SFRA, template e hook per le integrazioni.",
+            "deep_dive": "Come funziona il ciclo di richiesta di uno storefront SFRA.",
+            "key_points": ["Controller e template", "Hook per le integrazioni"],
+            "interview_answer": "Lo descrivo partendo dal ciclo della richiesta.",
+            "follow_ups": [{"question": "Cos'è un hook?", "answer": "Un punto di estensione."}],
+            "resources": [{"title": "Documentazione ufficiale", "url": "", "kind": "doc"}],
+            "estimated_minutes": 40,
+        }
+
+
+def _piano_con_suggerimento(client, suggerimento: str) -> dict:
+    """Crea un piano e gli inietta un suggerimento: senza AI non ne produce."""
+    from app.storage.factory import get_repository
+
+    job = client.post("/api/jobs", json={"raw_text": SAMPLE_JOB}).json()["job"]
+    plan = client.post(
+        "/api/plans", json={"job_id": job["id"], "days": 5, "daily_minutes": 90, "use_ai": False}
+    ).json()["plan"]
+
+    repo = get_repository()
+    grezzo = repo.get("plans", plan["id"])
+    grezzo["suggested_topics"] = [suggerimento]
+    grezzo["gap_analysis"] = [f"Non coperto dal catalogo: {suggerimento}"]
+    repo.put("plans", plan["id"], grezzo)
+    return grezzo
+
+
+def test_la_scheda_generata_dal_suggerimento_entra_nel_piano(client):
+    """I tre sintomi insieme: la scheda mancava dal piano, il suggerimento
+    tornava a ogni ricaricamento, e si potevano generare schede all'infinito."""
+    from app.ai.client import get_ai_client
+
+    suggerimento = "Studiare Salesforce Commerce Cloud: template e hook"
+    plan = _piano_con_suggerimento(client, suggerimento)
+    client.app.dependency_overrides[get_ai_client] = _FakeAI
+    try:
+        risposta = client.post(
+            "/api/knowledge/topics/from-suggestion",
+            json={"plan_id": plan["id"], "suggestion": suggerimento},
+        )
+        assert risposta.status_code == 201, risposta.text
+        esito = risposta.json()
+        assert esito["plan_items_added"] >= 1
+
+        aggiornato = client.get(f"/api/plans/{plan['id']}").json()["plan"]
+        topic_id = esito["topic"]["id"]
+        assert topic_id in {i["topic_id"] for i in aggiornato["items"]}, "scheda non nel piano"
+        # Il suggerimento è stato soddisfatto: esce dall'elenco e dalle lacune,
+        # così al ricaricamento la pagina non lo ripropone.
+        assert aggiornato["suggested_topics"] == []
+        assert aggiornato["gap_analysis"] == []
+
+        # E non si può rigenerare la stessa scheda: il suggerimento non c'è più.
+        di_nuovo = client.post(
+            "/api/knowledge/topics/from-suggestion",
+            json={"plan_id": plan["id"], "suggestion": suggerimento},
+        )
+        assert di_nuovo.status_code == 400
+    finally:
+        client.app.dependency_overrides.pop(get_ai_client, None)
+
+
+def test_la_scheda_generata_e_tecnica_non_conoscitiva(client):
+    """Una competenza presa da un annuncio è materia tecnica, e va etichettata così."""
+    from app.ai.client import get_ai_client
+
+    suggerimento = "Studiare Salesforce Commerce Cloud: template e hook"
+    plan = _piano_con_suggerimento(client, suggerimento)
+    client.app.dependency_overrides[get_ai_client] = _FakeAI
+    try:
+        esito = client.post(
+            "/api/knowledge/topics/from-suggestion",
+            json={"plan_id": plan["id"], "suggestion": suggerimento},
+        ).json()
+    finally:
+        client.app.dependency_overrides.pop(get_ai_client, None)
+
+    assert esito["topic"]["track"] == "technical"
+    scheda = client.get(f"/api/knowledge/topics/{esito['topic']['id']}").json()["topic"]
+    assert scheda["track"] == "technical"

@@ -8,7 +8,7 @@
 - id: core-01-what-is-an-api
   title: Che cos'è una API
   category: core-concepts
-  track: knowledge
+  track: technical
   level: easy
   tags: [api, http, fondamentali]
   estimated_minutes: 20
@@ -168,7 +168,7 @@
 - id: core-02-rest-vs-graphql
   title: REST vs GraphQL
   category: core-concepts
-  track: knowledge
+  track: technical
   level: medium
   tags: [api, rest, graphql, design]
   estimated_minutes: 30
@@ -339,7 +339,7 @@
 - id: core-03-http-methods
   title: Metodi HTTP (GET, POST, PUT, PATCH, DELETE)
   category: core-concepts
-  track: knowledge
+  track: technical
   level: easy
   tags: [http, rest, api]
   estimated_minutes: 20
@@ -504,7 +504,7 @@
 - id: core-04-http-status-codes
   title: Codici di stato HTTP (2xx, 4xx, 5xx)
   category: core-concepts
-  track: knowledge
+  track: technical
   level: easy
   tags: [http, api, errori]
   estimated_minutes: 20
@@ -669,7 +669,7 @@
 - id: core-05-stateless-vs-stateful
   title: API stateless vs stateful
   category: core-concepts
-  track: knowledge
+  track: technical
   level: medium
   tags: [api, scalabilita, architettura]
   estimated_minutes: 25
@@ -834,7 +834,7 @@
 - id: core-06-authn-vs-authz
   title: Autenticazione vs autorizzazione
   category: core-concepts
-  track: knowledge
+  track: technical
   level: easy
   tags: [sicurezza, auth]
   estimated_minutes: 20
@@ -993,7 +993,7 @@
 - id: core-07-sessions-vs-jwt
   title: Autenticazione a sessione vs JWT
   category: core-concepts
-  track: knowledge
+  track: technical
   level: medium
   tags: [sicurezza, auth, jwt, sessioni]
   estimated_minutes: 30
@@ -1211,7 +1211,7 @@
 - id: core-08-oauth2
   title: OAuth 2.0 e OpenID Connect
   category: core-concepts
-  track: knowledge
+  track: technical
   level: medium
   tags: [sicurezza, auth, oauth]
   estimated_minutes: 30
@@ -1399,7 +1399,7 @@
 - id: core-09-rate-limiting-throttling
   title: Rate limiting vs throttling
   category: core-concepts
-  track: knowledge
+  track: technical
   level: medium
   tags: [api, affidabilita, scalabilita]
   estimated_minutes: 25
@@ -1582,7 +1582,7 @@
 - id: core-10-idempotency
   title: Idempotenza (specialmente nei pagamenti)
   category: core-concepts
-  track: knowledge
+  track: technical
   level: medium
   tags: [api, affidabilita, pagamenti]
   estimated_minutes: 30

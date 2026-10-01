@@ -45,7 +45,7 @@ function ItemRow({
         <div className="plan-item-title">{item.title}</div>
         {item.rationale && <div className="plan-item-why">{item.rationale}</div>}
         <div className="plan-item-meta">
-          <TrackBadge track={item.track} />
+          <TrackBadge track={item.track} come="attivita" />
           <KindBadge kind={item.kind} />
           <span className="badge">{formatMinutes(item.estimated_minutes)}</span>
           <span className="badge accent">priorità {item.priority}</span>
@@ -90,11 +90,20 @@ function ItemRow({
  *
  * Prima erano solo righe di testo: si leggeva "non coperto dal catalogo" e
  * finiva li'. Ora ognuno genera una scheda vera, con il contesto dell'annuncio
- * da cui il suggerimento e' nato.
+ * da cui il suggerimento e' nato, e la scheda entra subito nel piano.
  */
-function SuggeritiDallAi({ planId, voci }: { planId: string; voci: string[] }) {
+function SuggeritiDallAi({
+  planId,
+  voci,
+  create,
+  onCreata,
+}: {
+  planId: string
+  voci: string[]
+  create: { id: string; title: string }[]
+  onCreata: (scheda: { id: string; title: string }) => Promise<void>
+}) {
   const [inCorso, setInCorso] = useState<string | null>(null)
-  const [fatti, setFatti] = useState<Record<string, string>>({})
   const [errore, setErrore] = useState('')
 
   async function genera(suggerimento: string) {
@@ -105,7 +114,11 @@ function SuggeritiDallAi({ planId, voci }: { planId: string; voci: string[] }) {
         plan_id: planId,
         suggestion: suggerimento,
       })
-      setFatti((prec) => ({ ...prec, [suggerimento]: esito.topic.id }))
+      // Il server ha gia' tolto il suggerimento dal piano e ci ha innestato la
+      // scheda: ricaricando, la voce sparisce e l'attivita' compare nel
+      // calendario. Prima lo stato stava solo qui e al refresh della pagina il
+      // pulsante ricompariva, invitando a rigenerare la stessa scheda.
+      await onCreata({ id: esito.topic.id, title: esito.topic.title })
     } catch (err) {
       setErrore(err instanceof ApiError ? err.message : 'Errore imprevisto')
     } finally {
@@ -117,35 +130,47 @@ function SuggeritiDallAi({ planId, voci }: { planId: string; voci: string[] }) {
     <div className="card">
       <div className="card-title">
         <h2>Non coperto dal catalogo</h2>
-        <span className="faint">{voci.length} suggerimenti</span>
+        <span className="faint">
+          {voci.length === 0 ? 'tutto coperto' : `${voci.length} da coprire`}
+        </span>
       </div>
-      <p className="small muted" style={{ marginTop: -4 }}>
-        L&apos;AI ha individuato queste competenze nell&apos;annuncio senza trovare una scheda
-        corrispondente. Generane una e finisce nel catalogo, nei piani e nei quiz.
-      </p>
+      {voci.length > 0 && (
+        <p className="small muted" style={{ marginTop: -4 }}>
+          L&apos;AI ha individuato queste competenze nell&apos;annuncio senza trovare una scheda
+          corrispondente. Generane una ed entra nel catalogo, in questo piano e nei quiz.
+        </p>
+      )}
 
       {errore && <ErrorBox error={errore} />}
 
-      <ul className="suggerimenti">
-        {voci.map((voce) => {
-          const creato = fatti[voce]
-          return (
+      {voci.length > 0 && (
+        <ul className="suggerimenti">
+          {voci.map((voce) => (
             <li key={voce}>
               <p>{voce}</p>
-              {creato ? (
-                <Link to={`/knowledge/${creato}`} className="badge accent">
-                  Scheda creata — aprila
-                </Link>
-              ) : (
-                <button className="sm" onClick={() => genera(voce)} disabled={inCorso !== null}>
-                  {inCorso === voce && <span className="spinner" />}
-                  {inCorso === voce ? 'Sto scrivendo la scheda…' : 'Genera la scheda'}
-                </button>
-              )}
+              <button className="sm" onClick={() => genera(voce)} disabled={inCorso !== null}>
+                {inCorso === voce && <span className="spinner" />}
+                {inCorso === voce ? 'Sto scrivendo la scheda…' : 'Genera la scheda'}
+              </button>
             </li>
-          )
-        })}
-      </ul>
+          ))}
+        </ul>
+      )}
+
+      {create.length > 0 && (
+        <div className="stack" style={{ marginTop: voci.length > 0 ? 14 : 0 }}>
+          <p className="small muted" style={{ margin: 0 }}>
+            Schede create e aggiunte al piano:
+          </p>
+          <div className="tags">
+            {create.map((scheda) => (
+              <Link key={scheda.id} to={`/knowledge/${scheda.id}`} className="badge accent">
+                {scheda.title}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -157,6 +182,9 @@ export default function PlanPage() {
   const [busyItem, setBusyItem] = useState('')
   const [actionError, setActionError] = useState('')
   const [filter, setFilter] = useState<Track | 'all'>('all')
+  // Le schede create in questa visita: il piano non le elenca piu' fra i
+  // suggerimenti, ma l'utente vuole poterle aprire subito.
+  const [schedeCreate, setSchedeCreate] = useState<{ id: string; title: string }[]>([])
 
   if (loading) return <Spinner />
   if (error) return <div className="container"><ErrorBox error={error} onRetry={reload} /></div>
@@ -219,11 +247,11 @@ export default function PlanPage() {
         <Stat value={`${progress.percent}%`} label="Completato" />
         <Stat
           value={`${by_track.knowledge.done}/${by_track.knowledge.total}`}
-          label="Parte conoscitiva"
+          label="Teoria"
         />
         <Stat
           value={`${by_track.technical.done}/${by_track.technical.total}`}
-          label="Parte tecnica"
+          label="Pratica"
         />
       </div>
 
@@ -240,14 +268,14 @@ export default function PlanPage() {
           </div>
           <div>
             <div className="row between small">
-              <span>Conoscitiva — teoria, azienda, comportamentale</span>
+              <span>Teoria — schede da studiare, azienda, comportamentale</span>
               <span className="muted">{by_track.knowledge.percent}%</span>
             </div>
             <Progress percent={by_track.knowledge.percent} track="knowledge" />
           </div>
           <div>
             <div className="row between small">
-              <span>Tecnica — quiz, coding, system design</span>
+              <span>Pratica — quiz, coding, system design</span>
               <span className="muted">{by_track.technical.percent}%</span>
             </div>
             <Progress percent={by_track.technical.percent} track="technical" />
@@ -277,8 +305,16 @@ export default function PlanPage() {
         </div>
       )}
 
-      {plan.suggested_topics?.length > 0 && (
-        <SuggeritiDallAi planId={plan.id} voci={plan.suggested_topics} />
+      {(plan.suggested_topics?.length > 0 || schedeCreate.length > 0) && (
+        <SuggeritiDallAi
+          planId={plan.id}
+          voci={plan.suggested_topics ?? []}
+          create={schedeCreate}
+          onCreata={async (scheda) => {
+            setSchedeCreate((prec) => [...prec, scheda])
+            setData(await api.getPlan(plan.id))
+          }}
+        />
       )}
 
       <div className="row between" style={{ marginBottom: 12 }}>
@@ -290,7 +326,7 @@ export default function PlanPage() {
               className={filter === value ? 'primary sm' : 'sm'}
               onClick={() => setFilter(value)}
             >
-              {value === 'all' ? 'Tutto' : value === 'knowledge' ? 'Conoscitiva' : 'Tecnica'}
+              {value === 'all' ? 'Tutto' : value === 'knowledge' ? 'Teoria' : 'Pratica'}
             </button>
           ))}
         </div>

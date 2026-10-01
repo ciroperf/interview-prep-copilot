@@ -4,7 +4,7 @@
 - id: pat-01-layered-architecture
   title: Architettura a livelli - controller, service, repository
   category: patterns
-  track: knowledge
+  track: technical
   level: easy
   tags: [architettura, layer, service, repository, struttura]
   estimated_minutes: 30
@@ -182,7 +182,7 @@
 - id: pat-02-repository
   title: Repository pattern
   category: patterns
-  track: knowledge
+  track: technical
   level: medium
   tags: [repository, persistenza, database, testing, struttura]
   estimated_minutes: 30
@@ -348,7 +348,7 @@
 - id: pat-03-service-layer
   title: Service layer e use case
   category: patterns
-  track: knowledge
+  track: technical
   level: medium
   tags: [service, use-case, architettura, struttura]
   estimated_minutes: 30
@@ -531,7 +531,7 @@
 - id: pat-04-dto-entity-model
   title: DTO, entity e modello di dominio
   category: patterns
-  track: knowledge
+  track: technical
   level: medium
   tags: [dto, modellazione, api, struttura]
   estimated_minutes: 30
@@ -709,7 +709,7 @@
 - id: pat-05-dependency-injection
   title: Dependency injection e inversion of control
   category: patterns
-  track: knowledge
+  track: technical
   level: medium
   tags: [di, testing, solid, struttura]
   estimated_minutes: 30
@@ -896,7 +896,7 @@
 - id: pat-06-hexagonal-clean
   title: Architettura esagonale e Clean Architecture
   category: patterns
-  track: knowledge
+  track: technical
   level: hard
   tags: [architettura, hexagonal, clean, porte-adattatori, struttura]
   estimated_minutes: 35
@@ -1063,7 +1063,7 @@
 - id: pat-07-ddd-tactical
   title: DDD tattico - entity, value object, aggregate
   category: patterns
-  track: knowledge
+  track: technical
   level: hard
   tags: [ddd, modellazione, dominio, struttura]
   estimated_minutes: 35
@@ -1259,7 +1259,7 @@
 - id: pat-08-unit-of-work
   title: Unit of Work e confini transazionali
   category: patterns
-  track: knowledge
+  track: technical
   level: medium
   tags: [transazioni, repository, persistenza, struttura]
   estimated_minutes: 25
@@ -1436,7 +1436,7 @@
 - id: pat-09-gof-patterns
   title: Design pattern che si usano davvero
   category: patterns
-  track: knowledge
+  track: technical
   level: medium
   tags: [design-pattern, gof, strategy, factory, struttura]
   estimated_minutes: 35
@@ -1620,7 +1620,7 @@
 - id: pat-10-project-structure
   title: Organizzare le cartelle - per livello o per feature
   category: patterns
-  track: knowledge
+  track: technical
   level: medium
   tags: [struttura, organizzazione, modularita, architettura]
   estimated_minutes: 25
@@ -1800,7 +1800,7 @@
 - id: pat-11-cqrs
   title: CQRS - separare letture e scritture
   category: patterns
-  track: knowledge
+  track: technical
   level: hard
   tags: [cqrs, architettura, performance, struttura]
   estimated_minutes: 30
@@ -1990,7 +1990,7 @@
 - id: pat-12-error-handling
   title: Gestione degli errori - eccezioni, Result e confini
   category: patterns
-  track: knowledge
+  track: technical
   level: medium
   tags: [errori, eccezioni, api, struttura]
   estimated_minutes: 30

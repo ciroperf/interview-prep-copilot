@@ -6,6 +6,8 @@ from fastapi import APIRouter, HTTPException, Query
 
 from ...deps import AccessGuard, CuratorDep, KnowledgeDep, RepositoryDep
 from ...domain.models import JobPosting, StudyPlan, SuggestionToTopic, TopicCreate
+from ...services.knowledge import term_from_suggestion
+from ...services.planner import add_topic_to_plan, drop_suggestion
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"], dependencies=[AccessGuard])
 
@@ -168,7 +170,8 @@ async def create_topic_from_suggestion(
 
     Il piano elenca le competenze che il catalogo non copre, ma finora erano
     solo testo: qui diventano una scheda vera, generata con il contesto
-    dell'annuncio da cui il suggerimento è nato.
+    dell'annuncio da cui il suggerimento è nato, e la scheda entra subito nel
+    piano da cui il suggerimento proveniva.
     """
     raw = repo.get("plans", payload.plan_id)
     if raw is None:
@@ -190,15 +193,24 @@ async def create_topic_from_suggestion(
             posting = JobPosting(**grezzo)
 
     richiesta = TopicCreate(
-        term=payload.term or curator.term_from_suggestion(payload.suggestion),
+        term=payload.term or term_from_suggestion(payload.suggestion),
         job_id=plan.job_id,
         num_questions=payload.num_questions,
         suggestion=payload.suggestion,
     )
     topic, questions = await curator.create_topic(richiesta, posting)
+
+    # La scheda serve per QUESTO colloquio: entra nel piano subito, e il
+    # suggerimento esce dall'elenco perché è stato soddisfatto. Senza questi due
+    # passaggi la scheda finiva solo in catalogo e il piano continuava a chiederla.
+    aggiunti = add_topic_to_plan(plan, topic, bool(questions))
+    drop_suggestion(plan, payload.suggestion)
+    repo.put("plans", plan.id, plan.model_dump(mode="json"))
+
     return {
         "topic": topic.model_dump(mode="json"),
         "question_count": len(questions),
+        "plan_items_added": len(aggiunti),
     }
 
 

@@ -9,7 +9,7 @@ from conftest import SAMPLE_JOB
 from app.domain.models import StudyPlanCreate, TopicCreate, TopicDraft
 from app.services.curator import KnowledgeCurator
 from app.services.jobs import JobAnalyzer
-from app.services.knowledge import KnowledgeBase
+from app.services.knowledge import KnowledgeBase, term_from_suggestion
 from app.services.planner import StudyPlanBuilder
 from app.storage.jsonfiles import JsonFileRepository
 
@@ -350,4 +350,18 @@ async def test_il_suggerimento_arriva_al_modello(kb, data_dir):
 )
 def test_l_etichetta_si_ricava_dalla_frase_del_suggerimento(suggerimento, atteso):
     """Da quella etichetta nasce l'id, quindi deve essere corta e stabile."""
-    assert KnowledgeCurator.term_from_suggestion(suggerimento) == atteso
+    assert term_from_suggestion(suggerimento) == atteso
+
+
+async def test_il_binario_della_scheda_generata_lo_decide_la_categoria(kb, data_dir):
+    """Il payload chiede "knowledge", la categoria dice engineering: vince la categoria.
+
+    Chiesto al modello, il campo tornava quasi sempre "knowledge" e una scheda
+    su Kubernetes finiva fra i temi da raccontare invece che fra quelli tecnici.
+    """
+    curator = KnowledgeCurator(kb, _FakeAI(AI_PAYLOAD), JsonFileRepository(data_dir))  # type: ignore[arg-type]
+
+    topic, _ = await curator.create_topic(TopicCreate(term="Kubernetes", num_questions=0))
+
+    assert topic.category == "engineering"
+    assert topic.track == "technical"

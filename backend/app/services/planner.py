@@ -1,8 +1,13 @@
 """Costruzione del piano di studi su misura per un singolo annuncio.
 
-Il piano e' diviso in due binari, come richiesto:
-  * knowledge -> parte conoscitiva: teoria da saper raccontare, azienda, comportamentale;
-  * technical -> parte tecnica: quiz, problemi DSA, system design.
+Il piano e' diviso in due binari, per tipo di attivita':
+  * knowledge -> teoria: schede da studiare, azienda, domande comportamentali;
+  * technical -> pratica: quiz, problemi DSA, system design.
+
+Il binario e' una proprieta' dell'attivita', non della materia: leggere la scheda
+su JPA e' teoria anche se JPA e' materia tecnica, e il quiz sulla stessa scheda e'
+pratica. La materia la dichiara l'argomento (Topic.track), e la decide la sua
+categoria.
 
 La selezione degli argomenti parte sempre da un punteggio deterministico calcolato
 sulla knowledge base. Se l'AI e' disponibile la usiamo per riordinare e motivare le
@@ -16,14 +21,27 @@ from datetime import date
 
 from ..ai import prompts
 from ..ai.client import AIClient
-from ..domain.models import JobPosting, PlanItem, Resource, StudyPlan, StudyPlanCreate
-from .knowledge import KnowledgeBase, normalize
+from ..domain.models import (
+    JobPosting,
+    PlanItem,
+    Resource,
+    StudyPlan,
+    StudyPlanCreate,
+    Topic,
+    Track,
+)
+from .knowledge import KnowledgeBase, normalize, term_from_suggestion
 
 logger = logging.getLogger(__name__)
 
 # Quanti argomenti passare al modello: abbastanza per scegliere, non tanti da
 # far esplodere il prompt.
 CANDIDATE_POOL = 34
+
+# Quanti suggerimenti "non coperti dal catalogo" mostrare. Tenerli pochi è il
+# punto: con la lista aperta il modello ne trova sempre uno in più e l'utente
+# genera schede all'infinito senza arrivare mai a studiare.
+MAX_SUGGESTIONS = 3
 
 # I temi trasversali non dipendono dall'annuncio ma servono sempre.
 ANCHOR_BEHAVIORAL = "beh-01-star-method"
@@ -68,6 +86,20 @@ TITLE_PREFIX = {
     "company": "Ricerca",
     "behavioral": "Prepara",
     "system_design": "Esercitati",
+}
+
+# Il binario di un'attività dipende da cosa si fa, non da quanto è tecnica la
+# materia: leggere una scheda su JPA resta teoria, il quiz e il codice sono
+# pratica. Prima l'item ereditava il binario dell'argomento, cioè rispondeva
+# a una domanda diversa da quella che il piano pone.
+TRACK_BY_KIND: dict[str, Track] = {
+    "study": "knowledge",
+    "review": "knowledge",
+    "company": "knowledge",
+    "behavioral": "knowledge",
+    "quiz": "technical",
+    "coding": "technical",
+    "system_design": "technical",
 }
 
 
@@ -130,8 +162,9 @@ class StudyPlanBuilder:
                 # Restano anche in gap_analysis per chi legge il piano, ma la
                 # forma azionabile e' questa: il frontend ci mette accanto il
                 # pulsante che genera la scheda.
-                grezzi = data.get("extra_recommendations") or []
-                suggested_topics = [str(x)[:300] for x in grezzi][:8]
+                suggested_topics = self._filtra_suggerimenti(
+                    data.get("extra_recommendations") or []
+                )
                 for extra in suggested_topics:
                     gap_analysis.append(f"Non coperto dal catalogo: {extra}")
                 ai_used = bool(priorities)
@@ -215,6 +248,37 @@ class StudyPlanBuilder:
                 scores[topic_id] = scores.get(topic_id, 0.0) + delta * 1.2
 
         return {tid: score for tid, score in scores.items() if score > 0}
+
+    def _filtra_suggerimenti(self, grezzi: list) -> list[str]:
+        """Tiene solo le lacune che il catalogo davvero non copre, al massimo tre.
+
+        Senza filtro il modello ne trova sempre una: generata la scheda su
+        Kubernetes, al piano successivo propone "Helm", poi "operator pattern",
+        e non se ne esce più. Il controllo è deterministico e sta qui, non nel
+        prompt: una volta che la scheda esiste, quella lacuna non può
+        ripresentarsi, qualunque cosa risponda il modello.
+        """
+        fuori: list[str] = []
+        visti: set[str] = set()
+        for grezzo in grezzi:
+            testo = str(grezzo)[:300].strip()
+            if not testo:
+                continue
+            termine = term_from_suggestion(testo)
+            chiave = normalize(termine)
+            if not chiave or chiave in visti:
+                continue
+            _score, _topic_id, dedicato = self.kb.coverage(termine)
+            if dedicato:
+                # C'è già una scheda su questo tema: non è una lacuna, e
+                # riproporla manderebbe l'utente a generare un duplicato.
+                logger.info("Suggerimento scartato, già coperto dal catalogo: %s", termine)
+                continue
+            visti.add(chiave)
+            fuori.append(testo)
+            if len(fuori) >= MAX_SUGGESTIONS:
+                break
+        return fuori
 
     @staticmethod
     def _to_priority(score: float, best: float) -> int:
@@ -376,12 +440,7 @@ class StudyPlanBuilder:
                 continue
 
             kind = KIND_BY_CATEGORY.get(topic.category, "study")
-            # Il binario lo dichiara l'argomento. Prima veniva forzato a
-            # "knowledge" per tutto tranne il system design, quindi gli argomenti
-            # tecnici senza esercizi collegati - async, prestazioni web, Spring
-            # Web - comparivano nel piano come conoscitivi, e l'alternanza fra i
-            # due binari lavorava su dati sbagliati.
-            track = topic.track
+            track = TRACK_BY_KIND[kind]
             items.append(
                 PlanItem(
                     track=track,
@@ -395,7 +454,7 @@ class StudyPlanBuilder:
                 )
             )
 
-            # Ogni argomento importante si verifica con un quiz: e' la parte tecnica
+            # Ogni argomento importante si verifica con un quiz: e' la pratica
             # che l'utente ha chiesto esplicitamente.
             if priority >= 3 and self.kb.questions_by_topic.get(topic_id):
                 items.append(
@@ -448,7 +507,10 @@ class StudyPlanBuilder:
                 continue
             selected.append(item)
             used += item.estimated_minutes
-            if item.track == "knowledge" and item.topic_id:
+            # Conta l'attività, non il binario: finché la chiave era
+            # `track == "knowledge"`, un argomento tecnico entrato nel piano non
+            # finiva qui dentro e il suo quiz veniva scartato sempre.
+            if item.kind != "quiz" and item.topic_id:
                 studied.add(item.topic_id)
         return selected + final_review
 
@@ -594,9 +656,83 @@ class StudyPlanBuilder:
             f"{' in ' + posting.company_name if posting.company_name else ''}. "
             "Gli argomenti sono ordinati per priorità: i primi giorni coprono ciò che "
             "l'annuncio rende più probabile in sede di colloquio, l'ultimo giorno è "
-            "dedicato al ripasso. La parte conoscitiva serve a saper raccontare gli "
-            "argomenti, quella tecnica a dimostrarli con quiz e codice."
+            "dedicato al ripasso. La teoria serve a saper raccontare gli argomenti, "
+            "la pratica a dimostrarli con quiz e codice."
         )
+
+
+def add_topic_to_plan(plan: StudyPlan, topic: Topic, has_questions: bool) -> list[PlanItem]:
+    """Aggiunge al piano un argomento entrato nel catalogo dopo la sua creazione.
+
+    Il piano e' una fotografia scattata al momento della generazione: una scheda
+    creata dopo restava fuori e l'utente la cercava invano nel calendario. Qui si
+    innesta nel piano esistente invece di ricostruirlo, cosi' le attivita' gia'
+    segnate come fatte non si perdono. La priorita' e' 5 perche' l'argomento nasce
+    da una lacuna che l'AI ha dichiarato rilevante per questo annuncio.
+    """
+    if any(item.topic_id == topic.id for item in plan.items):
+        return []
+
+    kind = KIND_BY_CATEGORY.get(topic.category, "study")
+    nuovi = [
+        PlanItem(
+            track=TRACK_BY_KIND[kind],
+            kind=kind,  # type: ignore[arg-type]
+            title=f"{TITLE_PREFIX[kind]}: {topic.title}",
+            topic_id=topic.id,
+            rationale="Competenza richiesta dall'annuncio e assente dal catalogo: "
+            "la scheda e' stata scritta apposta.",
+            estimated_minutes=topic.estimated_minutes,
+            priority=5,
+            resources=[Resource(**r.model_dump()) for r in topic.resources],
+            day=_first_day_with_room(plan, topic.estimated_minutes),
+        )
+    ]
+    if has_questions:
+        nuovi.append(
+            PlanItem(
+                track="technical",
+                kind="quiz",
+                title=f"Quiz: {topic.title}",
+                topic_id=topic.id,
+                rationale="Verifica di aver capito, non solo di aver letto.",
+                estimated_minutes=10,
+                priority=5,
+                day=nuovi[0].day,
+            )
+        )
+    plan.items.extend(nuovi)
+    return nuovi
+
+
+def _first_day_with_room(plan: StudyPlan, minutes: int) -> int:
+    """Il primo giorno che regge ancora questa attivita'.
+
+    L'ultimo giorno resta al ripasso finale: una scheda nuova ci starebbe larga
+    ma e' il giorno in cui serve meno. Se nessun giorno ha spazio si parte dal
+    primo: l'argomento nasce da una lacuna, e sforare un giorno e' meglio che
+    rimandarlo in fondo.
+    """
+    ultimo = max(1, plan.days)
+    usato: dict[int, int] = {}
+    for item in plan.items:
+        usato[item.day] = usato.get(item.day, 0) + item.estimated_minutes
+    for giorno in range(1, max(ultimo, 2)):
+        if usato.get(giorno, 0) + minutes <= plan.daily_minutes:
+            return giorno
+    return 1
+
+
+def drop_suggestion(plan: StudyPlan, suggestion: str) -> None:
+    """Toglie dal piano un suggerimento diventato scheda.
+
+    Finche' restava in `suggested_topics`, al ricaricamento della pagina il
+    pulsante "Genera la scheda" ricompariva e l'utente rigenerava la stessa
+    scheda all'infinito.
+    """
+    plan.suggested_topics = [s for s in plan.suggested_topics if s != suggestion]
+    riga = f"Non coperto dal catalogo: {suggestion}"
+    plan.gap_analysis = [g for g in plan.gap_analysis if g != riga]
 
 
 def plan_progress_by_track(plan: StudyPlan) -> dict[str, dict]:

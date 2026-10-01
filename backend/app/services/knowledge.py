@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from ..domain.models import CodingProblem, KnowledgePack, QuizQuestion, Topic
+from ..domain.models import CodingProblem, KnowledgePack, QuizQuestion, Topic, Track
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,22 @@ STOPWORDS = {
     "the", "a", "an", "of", "to", "and", "or", "for", "with", "on", "is", "are",
     "we", "you", "our", "your", "at", "as", "by", "be", "it", "this", "that", "from",
 }
+
+# Le uniche categorie che non sono materia tecnica: qui il colloquio verifica
+# come racconti, non cosa sai far funzionare.
+KNOWLEDGE_CATEGORIES = {"company", "behavioral"}
+
+
+def track_for_category(category: str) -> Track:
+    """Il binario di un argomento lo decide la materia, non chi scrive lo YAML.
+
+    Il campo era libero e meta' del catalogo - database, caching, affidabilita',
+    pattern - si dichiarava "knowledge" pur essendo materia tecnica a tutti gli
+    effetti, quindi nel catalogo compariva con l'etichetta sbagliata. La regola
+    ora e' una sola e vale anche per gli argomenti generati dall'AI.
+    """
+    return "knowledge" if category in KNOWLEDGE_CATEGORIES else "technical"
+
 
 # Ponte fra il gergo degli annunci di lavoro e gli argomenti del catalogo.
 # Serve a "circoscrivere" i contenuti: da una parola dell'annuncio ai temi da studiare.
@@ -264,6 +280,38 @@ def tokenize(text: str) -> list[str]:
     return [t for t in cleaned if t and t not in STOPWORDS]
 
 
+def term_from_suggestion(suggestion: str) -> str:
+    """Ricava un'etichetta breve dalla frase di un suggerimento.
+
+    I suggerimenti arrivano come "Studiare X specific: a, b e c" oppure
+    "Approfondire Y pratiche: ...". Serve un nome corto e stabile, perché
+    da lì nasce l'id dell'argomento e il termine con cui gli annunci futuri
+    lo aggancieranno. Si tagliano il verbo iniziale e tutto quello che
+    segue i due punti, che è l'elenco dei dettagli.
+    """
+    testo = suggestion.strip()
+    # Via i prefissi che il modello mette quasi sempre, uno dopo l'altro: la
+    # riga del piano ne somma due ("Non coperto dal catalogo: Studiare X").
+    prefissi = ("Non coperto dal catalogo:", "Studiare", "Approfondire",
+                "Studio mirato di", "Pratica su", "Ripasso pratico di",
+                "Esercizi pratici:", "Pratica")
+    tagliato = True
+    while tagliato:
+        tagliato = False
+        for prefisso in prefissi:
+            if testo.lower().startswith(prefisso.lower()):
+                testo = testo[len(prefisso):].lstrip(" :")
+                tagliato = True
+                break
+    # I due punti separano il tema dall'elenco dei dettagli: tieni il tema.
+    testo = testo.split(":", 1)[0]
+    # E la virgola o la parentesi separano il primo concetto dagli altri.
+    for separatore in (" (", ",", " e ", " — ", " - "):
+        testo = testo.split(separatore, 1)[0]
+    testo = testo.strip(" .;")
+    return (testo[:80] or suggestion[:80]).strip()
+
+
 class KnowledgeBase:
     """Indice in memoria di argomenti, domande e problemi."""
 
@@ -299,6 +347,7 @@ class KnowledgeBase:
             topic = Topic(**row)
             if topic.id in self.topics:
                 raise ValueError(f"Argomento duplicato: {topic.id}")
+            topic.track = track_for_category(topic.category)
             self.topics[topic.id] = topic
 
         for row in self._read_all("questions_*.yaml"):
@@ -416,6 +465,7 @@ class KnowledgeBase:
         dopo averne creato uno nuovo: da quel momento piano, quiz e ricerca lo
         vedono come qualunque altro argomento.
         """
+        topic.track = track_for_category(topic.category)
         self.topics[topic.id] = topic
         self.questions_by_topic.setdefault(topic.id, [])
         for question in questions:
